@@ -205,8 +205,13 @@
                                 @csrf
                                 <button class="btn-xs btn btn-primary">Generate DO & Send to outlet</button>
                             </form>
-                            <hr>
                         @endif
+                        @if($pickingList->status == 'in_progress')
+                        <a href="{{ route('picking-lists.pick', $pickingList->id) }}" class="btn-xs btn btn-warning">
+                            Continue Picking Product
+                        </a>
+                        @endif
+                            <hr>
                         <a href="{{ route('request-orders.index') }}" class="btn btn-default">Kembali</a>
                     </div>
                 </div>

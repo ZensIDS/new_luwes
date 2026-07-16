@@ -306,7 +306,7 @@ class StockController extends Controller
             ->pluck('lokasi');
 
         $supplierOptions = \App\Models\Supplier::orderBy('name')
-            ->whereHas('pembelians.stocks', fn($q) => $q->where('qty', '>', 0)->whereNotNull('sku'))
+            ->whereHas('pembelians.stocks', fn($q) => $q->where('qty', '>=', 0)->whereNotNull('sku'))
             ->get(['id', 'name']);
 
         return view('stocks.opname', [
@@ -318,7 +318,7 @@ class StockController extends Controller
     public function getOpnameData(Request $request)
     {
         $query = Stock::with('product', 'pembelian.supplier')
-            ->where('qty', '>', 0)
+            ->where('qty', '>=', 0)
             ->whereNotNull('sku')
             ->orderBy('product_id')
             ->orderBy('sku');
