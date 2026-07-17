@@ -60,7 +60,7 @@ class PembelianController extends Controller
 
         if (request()->filled('supplier_id')) {
             $supplierId = request()->integer('supplier_id');
-            $products->whereHas('suppliers', fn ($query) => $query->where('suppliers.id', $supplierId));
+            $products->whereHas('suppliers', fn($query) => $query->where('suppliers.id', $supplierId));
         }
 
         $products = $products->get()
@@ -90,7 +90,7 @@ class PembelianController extends Controller
     {
         $lastPembelian = Pembelian::latest('id')->first();
         $nextNumber = $lastPembelian ? ((int) substr($lastPembelian->code, 4) + 1) : 1;
-        $code = 'PO'.str_pad($nextNumber, 5, '0', STR_PAD_LEFT);
+        $code = 'PO' . str_pad($nextNumber, 5, '0', STR_PAD_LEFT);
 
         return view('pembelians.create', [
             'suppliers' => Supplier::get(),
@@ -105,7 +105,7 @@ class PembelianController extends Controller
             abort(403);
         }
         $request->validated();
-    
+
         $pembelian = Pembelian::create([
             'code' => $this->generatePoCode($request->supplier_id),
             'supplier_id' => $request->supplier_id,
@@ -122,7 +122,7 @@ class PembelianController extends Controller
             'pembelian_id' => $pembelian->id,
             'payment_date' => null,
             'payment_method' => 'bank_transfer',
-            'payment_reference' => $supplier->bank_no_rek.'-'.$supplier->bank_nama ?? 'TRX-'.now(),
+            'payment_reference' => $supplier->bank_no_rek . '-' . $supplier->bank_nama ?? 'TRX-' . now(),
             'amount' => 0,
             'status' => 'unpaid',
             'notes' => null,
@@ -142,7 +142,7 @@ class PembelianController extends Controller
     {
         $pdf = PDF::loadView('pembelians.pembelian_pdf', ['pembelian' => $pembelian]);
 
-        return $pdf->download('pembelian_'.$pembelian->id.'.pdf');
+        return $pdf->download('pembelian_' . $pembelian->id . '.pdf');
     }
 
     public function edit(Pembelian $pembelian)
@@ -203,26 +203,28 @@ class PembelianController extends Controller
     public function penerimaan(Pembelian $pembelian)
     {
         $pembelian->load(['pembelianProducts.product', 'stocks.product', 'supplier']);
-    
+
         // Generate SKU untuk setiap pembelianProduct yang belum punya stock
         $skuMap = [];
         $offset = Stock::where('pembelian_id', $pembelian->id)->count();
         $supplierAbbr = $this->generateSupplierAbbr($pembelian->supplier->name ?? 'SUP');
         $today = now()->format('Ymd');
-    
+
         // Hitung base count dari DB (seluruh supplier hari ini)
-        $baseCount = Stock::whereHas('pembelian', fn($q) =>
-                $q->where('supplier_id', $pembelian->supplier_id)
-            )
+        $baseCount = Stock::whereHas(
+            'pembelian',
+            fn($q) =>
+            $q->where('supplier_id', $pembelian->supplier_id)
+        )
             ->whereDate('created_at', now()->toDateString())
             ->count();
-    
+
         $counter = max($baseCount, $offset);
-    
+
         foreach ($pembelian->pembelianProducts as $pp) {
             // Cek apakah sudah ada stock untuk product ini di pembelian ini
             $existingStock = $pembelian->stocks->firstWhere('product_id', $pp->product_id);
-    
+
             if ($existingStock) {
                 // Sudah ada stock → pakai SKU yang sudah ada, jangan generate baru
                 $skuMap[$pp->product_id] = $existingStock->sku;
@@ -233,47 +235,49 @@ class PembelianController extends Controller
                 $skuMap[$pp->product_id] = "{$supplierAbbr}_{$today}_{$noUrut}";
             }
         }
-    
+
         return view('pembelians.penerimaan', compact('pembelian', 'skuMap'));
     }
-    
+
     private function generateSupplierAbbr(string $name): string
     {
         // Bersihkan kata-kata umum yang tidak perlu disingkat
         $skipWords = ['pt', 'cv', 'ud', 'tb', 'toko', 'dan', 'and', 'the'];
-        
+
         $words = preg_split('/\s+/', strtoupper(trim($name)));
         $abbr  = '';
-    
+
         foreach ($words as $word) {
             $clean = preg_replace('/[^A-Z0-9]/', '', $word);
             if ($clean && !in_array(strtolower($clean), $skipWords)) {
                 $abbr .= $clean[0]; // ambil huruf pertama tiap kata
             }
         }
-    
+
         return $abbr ?: 'SUP'; // fallback kalau kosong
     }
-    
+
     private function generateSku(Pembelian $pembelian): string
     {
         $supplierAbbr = $this->generateSupplierAbbr($pembelian->supplier->name ?? 'SUP');
         $today        = now()->format('Ymd');
-    
+
         // Hitung SKU yang sudah ada hari ini untuk supplier ini
         // (dari semua pembelian supplier yang sama)
-        $countToday = Stock::whereHas('pembelian', fn($q) =>
-                $q->where('supplier_id', $pembelian->supplier_id)
-            )
+        $countToday = Stock::whereHas(
+            'pembelian',
+            fn($q) =>
+            $q->where('supplier_id', $pembelian->supplier_id)
+        )
             ->whereDate('created_at', now()->toDateString())
             ->count();
-    
+
         // Tambah juga SKU yang sudah ada di pembelian ini (yang belum tersimpan sebagai stock)
         // biar nomor urut tidak bentrok dalam 1 sesi penerimaan
         $countExisting = Stock::where('pembelian_id', $pembelian->id)->count();
-    
+
         $noUrut = str_pad(max($countToday, $countExisting) + 1, 4, '0', STR_PAD_LEFT);
-    
+
         return "{$supplierAbbr}_{$today}_{$noUrut}";
     }
 
@@ -341,7 +345,9 @@ class PembelianController extends Controller
                     'qty_diterima' => $qtyDiterima,
                 ]);
 
-                if (! $pembelianProduct) { continue; }
+                if (! $pembelianProduct) {
+                    continue;
+                }
 
                 // Check if updating existing stock or creating new
                 if (! empty($itemData['stock_id'])) {
@@ -483,6 +489,140 @@ class PembelianController extends Controller
             DB::rollBack();
 
             return back()->with('toast_error', $e->getMessage())->withInput();
+        }
+    }
+
+    public function savePenerimaanItem(Request $request, Pembelian $pembelian)
+    {
+        $validated = $request->validate([
+            'stock_id'      => 'nullable|exists:stocks,id',
+            'product_id'    => 'required|exists:products,id',
+            'sku'           => 'required|string',
+            'qty_diterima'  => 'required|integer',
+            'expired_at'    => 'nullable|date',
+        ], [
+            'product_id.required' => 'Produk harus dipilih.',
+            'sku.required'        => 'SKU harus diisi.',
+            'qty_diterima.required' => 'Jumlah diterima harus diisi.',
+            'qty_diterima.integer'  => 'Jumlah diterima harus berupa angka.',
+        ]);
+
+        DB::beginTransaction();
+        try {
+            $qtyDiterima = (int) $validated['qty_diterima'];
+            $sku         = trim($validated['sku']);
+            $expiredAt   = !empty($validated['expired_at']) ? $validated['expired_at'] : null;
+
+            $product = Product::findOrFail($validated['product_id']);
+
+            $pembelianProduct = $pembelian->pembelianProducts()
+                ->where('product_id', $validated['product_id'])
+                ->first();
+
+            if (!$pembelianProduct) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Produk ini tidak terdaftar pada pembelian ini.',
+                ], 422);
+            }
+
+            $pembelianProduct->update([
+                'qty_diterima' => $qtyDiterima,
+            ]);
+
+            if (!empty($validated['stock_id'])) {
+                // UPDATE existing stock
+                $stock = Stock::find($validated['stock_id']);
+
+                if (!$stock || $stock->pembelian_id != $pembelian->id) {
+                    DB::rollBack();
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Stock tidak ditemukan atau tidak sesuai pembelian ini.',
+                    ], 404);
+                }
+
+                $oldQty = $stock->qty;
+
+                $stock->update([
+                    'sku'         => $sku,
+                    'qty'         => $qtyDiterima,
+                    'harga_beli'  => $pembelianProduct->harga_beli,
+                    'subtotal'    => $qtyDiterima * $pembelianProduct->harga_beli,
+                    'expired_at'  => $expiredAt,
+                ]);
+
+                if ($oldQty != $qtyDiterima) {
+                    $diff = $qtyDiterima - $oldQty;
+                    StockMovement::create([
+                        'product_id'      => $validated['product_id'],
+                        'user_id'         => auth()->id(),
+                        'type'            => $diff > 0 ? 'in' : 'adjustment',
+                        'reference_type'  => Pembelian::class,
+                        'reference_id'    => $pembelian->id,
+                        'qty_in'          => $diff > 0 ? $diff : 0,
+                        'qty_out'         => $diff < 0 ? abs($diff) : 0,
+                        'balance'         => $product->stocks()->sum('qty'),
+                        'notes'           => "Stock update (autosave) - SKU: {$sku}, Old Qty: {$oldQty}, New Qty: {$qtyDiterima}",
+                    ]);
+                }
+            } else {
+                // CREATE new stock
+                $stock = Stock::create([
+                    'pembelian_id' => $pembelian->id,
+                    'product_id'   => $validated['product_id'],
+                    'sku'          => $sku,
+                    'harga_beli'   => $pembelianProduct->harga_beli,
+                    'qty'          => $qtyDiterima,
+                    'subtotal'     => $qtyDiterima * $pembelianProduct->harga_beli,
+                    'expired_at'   => $expiredAt,
+                    'condition'    => 'new',
+                    'status'       => 'available',
+                ]);
+
+                // Decrease StockPembelian
+                $stockPembelian = StockPembelian::where([
+                    'pembelian_id' => $pembelian->id,
+                    'product_id'   => $validated['product_id'],
+                ])->first();
+
+                if ($stockPembelian) {
+                    $stockPembelian->decrement('qty', $qtyDiterima);
+                    if ($stockPembelian->qty <= 0) {
+                        $stockPembelian->delete();
+                    }
+                }
+
+                StockMovement::create([
+                    'product_id'     => $validated['product_id'],
+                    'user_id'        => auth()->id(),
+                    'type'           => 'in',
+                    'reference_type' => Pembelian::class,
+                    'reference_id'   => $pembelian->id,
+                    'qty_in'         => $qtyDiterima,
+                    'balance'        => $product->stocks()->sum('qty'),
+                    'notes'          => "Goods receipt (autosave) from {$pembelian->supplier->name} - SKU: {$sku}",
+                ]);
+            }
+
+            // Update product HPP
+            $newHPP = $product->calculateHPP($qtyDiterima, $pembelianProduct->harga_beli);
+            $product->update(['harga_beli' => (int) $newHPP]);
+            $product->updateStockValue();
+
+            DB::commit();
+
+            return response()->json([
+                'success'  => true,
+                'stock_id' => $stock->id,
+                'message'  => 'Item berhasil disimpan.',
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal menyimpan: ' . $e->getMessage(),
+            ], 500);
         }
     }
 
@@ -667,7 +807,7 @@ class PembelianController extends Controller
             'payment_date'      => 'required|date',
             'payment_method'    => 'required|in:cash,bank_transfer,giro_cek,lainnya',
             'payment_reference' => 'nullable|string',
-            'amount'            => 'required|numeric|min:0|max:'.$maxAmount,
+            'amount'            => 'required|numeric|min:0|max:' . $maxAmount,
             'notes'             => 'nullable|string',
             'status'            => 'required|in:unpaid,paid,partial',
             'bukti_transfer'    => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:2048',
@@ -698,7 +838,7 @@ class PembelianController extends Controller
             $buktiPath = null;
             if ($request->hasFile('bukti_transfer')) {
                 $file = $request->file('bukti_transfer');
-                $filename = 'bukti_'.time().'_'.$pembelian->id.'.'.$file->getClientOriginalExtension();
+                $filename = 'bukti_' . time() . '_' . $pembelian->id . '.' . $file->getClientOriginalExtension();
                 $buktiPath = $file->storeAs('bukti_transfer', $filename, 'public');
             }
 
@@ -773,7 +913,7 @@ class PembelianController extends Controller
 
             return response()->json([
                 'success' => false,
-                'message' => 'Terjadi kesalahan: '.$e->getMessage()
+                'message' => 'Terjadi kesalahan: ' . $e->getMessage()
             ], 500);
         }
     }
@@ -818,21 +958,21 @@ class PembelianController extends Controller
 
         return redirect()->back()->with('toast_success', 'PO ditolak owner dan dikembalikan ke draft revisi.');
     }
-    
+
     private function generatePoCode(int $supplierId): string
     {
         return DB::transaction(function () use ($supplierId) {
             $supplier = Supplier::find($supplierId);
             $supplierName = preg_replace('/[^A-Za-z0-9]/', '', $supplier->name ?? 'SUPPLIER');
             $today = now()->format('Ymd');
-    
+
             $countToday = Pembelian::where('supplier_id', $supplierId)
                 ->whereDate('created_at', now()->toDateString())
                 ->lockForUpdate()
                 ->count();
-    
+
             $noUrut = str_pad($countToday + 1, 3, '0', STR_PAD_LEFT);
-    
+
             return "{$supplierName}_{$today}_{$noUrut}";
         });
     }

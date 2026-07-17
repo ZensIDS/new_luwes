@@ -84,26 +84,30 @@
                                             }
                                         @endphp
                                         @foreach ($existingStocks as $stockIndex => $stock)
-                                            <tr>
+                                            <tr data-row-index="{{ $loop->parent?->index }}_{{ $stockIndex }}" data-product-code="{{ $item->product->code }}">
                                                 <td class="text-center text-muted">
                                                     <div class="d-flex align-items-center justify-content-center gap-2">
-                                                        <input type="checkbox" class="form-check-input m-0">
+                                                        <input type="checkbox"
+                                                            class="form-check-input m-0 chk-autosave"
+                                                            data-row-index="{{ $loop->parent?->index }}_{{ $stockIndex }}"
+                                                            data-product-id="{{ $item->product_id }}"
+                                                            data-stock-id="{{ $stock->id ?? '' }}"
+                                                            {{ $stock ? 'checked' : '' }}>
                                                         <small>{{ $loop->parent?->iteration }}.{{ $loop->iteration }}</small>
                                                     </div>
                                                 </td>
                                                 <td>
                                                     <strong>{{ $item->product->name }}</strong>
-                                                    <br><small class="text-muted"><strong>{{ $item->product->code }}</strong></small>
+                                                    <br><p style="font-size:14px;"><strong>{{ $item->product->code }}</strong></p>
 
                                                     @if(!$isLocked)
                                                         <input type="hidden"
                                                             name="items[{{ $loop->parent?->index }}_{{ $stockIndex }}][product_id]"
                                                             value="{{ $item->product_id }}">
-                                                        @if($stock)
-                                                            <input type="hidden"
-                                                                name="items[{{ $loop->parent?->index }}_{{ $stockIndex }}][stock_id]"
-                                                                value="{{ $stock->id }}">
-                                                        @endif
+                                                        <input type="hidden"
+                                                            id="stock-id-{{ $loop->parent?->index }}_{{ $stockIndex }}"
+                                                            name="items[{{ $loop->parent?->index }}_{{ $stockIndex }}][stock_id]"
+                                                            value="{{ $stock->id ?? '' }}">
                                                     @endif
                                                 </td>
                                                 <td>{{ $item->product->satuan ?? '-' }}</td>
@@ -112,13 +116,10 @@
                                                     @if($isLocked)
                                                         <span class="text-success"><strong>{{ $stock->sku ?? '-' }}</strong></span>
                                                     @else
-                                                        @php
-                                                            $skuValue = $stock->sku ?? $skuMap[$item->product_id] ?? '';
-                                                        @endphp
-                                                        
+                                                        @php $skuValue = $stock->sku ?? $skuMap[$item->product_id] ?? ''; @endphp
                                                         <input type="text"
                                                             name="items[{{ $loop->parent?->index }}_{{ $stockIndex }}][sku]"
-                                                            class="form-control input-sm"
+                                                            class="form-control input-sm input-sku"
                                                             placeholder="SKU"
                                                             value="{{ old('items.' . $loop->parent?->index . '_' . $stockIndex . '.sku', $skuValue) }}"
                                                             readonly
@@ -131,19 +132,22 @@
                                                     @else
                                                         <input type="date"
                                                             name="items[{{ $loop->parent?->index }}_{{ $stockIndex }}][expired_at]"
-                                                            class="form-control input-sm"
-                                                            value="{{ old('items.' . $loop->parent?->index . '_' . $stockIndex . '.expired_at', $stock?->expired_at?->format('Y-m-d')) }}">
+                                                            class="form-control input-sm input-expired"
+                                                            value="{{ old('items.' . $loop->parent?->index . '_' . $stockIndex . '.expired_at', $stock?->expired_at?->format('Y-m-d')) }}"
+                                                            {{ $stock ? 'readonly' : '' }}>
                                                     @endif
                                                 </td>
                                                 <td>
                                                     @if($isLocked)
-                                                    <span class="label label-success">{{ $stock->qty ?? 0 }}</span> <span class="label label-info">{{ $item->product?->konversiDisplay($stock->qty ?? 0) }}
+                                                        <span class="label label-success">{{ $stock->qty ?? 0 }}</span>
+                                                        <span class="label label-info">{{ $item->product?->konversiDisplay($stock->qty ?? 0) }}</span>
                                                     @else
                                                         <input type="number"
                                                             name="items[{{ $loop->parent?->index }}_{{ $stockIndex }}][qty_diterima]"
-                                                            class="form-control input-sm text-center"
+                                                            class="form-control input-sm text-center input-qty"
                                                             min="0" max="{{ $item->qty }}"
                                                             value="{{ old('items.' . $loop->parent?->index . '_' . $stockIndex . '.qty_diterima', $stock->qty ?? $item->qty) }}"
+                                                            {{ $stock ? 'readonly' : '' }}
                                                             required>
                                                     @endif
                                                 </td>
@@ -277,6 +281,74 @@
 
 @section('page-script')
 <script>
+    $(document).on('change', '.chk-autosave', function() {
+        let $checkbox = $(this);
+        let $row = $checkbox.closest('tr');
+
+        if (!$checkbox.is(':checked')) {
+            return; // hanya trigger saat dicentang, bukan saat di-uncheck
+        }
+
+        let productId  = $checkbox.data('product-id');
+        let stockId    = $checkbox.data('stock-id');
+        let sku        = $row.find('.input-sku').val();
+        let expiredAt  = $row.find('.input-expired').val();
+        let qty        = $row.find('.input-qty').val();
+
+        if (!sku || qty === '' || qty === null) {
+            alert('SKU dan Qty Diterima wajib diisi sebelum menyimpan.');
+            $checkbox.prop('checked', false);
+            return;
+        }
+
+        $checkbox.prop('disabled', true);
+        $row.css('opacity', '0.6');
+
+        $.ajax({
+            url: "{{ route('pembelian.penerimaan.save-item', $pembelian->id) }}",
+            method: 'POST',
+            data: {
+                _token: '{{ csrf_token() }}',
+                product_id: productId,
+                stock_id: stockId,
+                sku: sku,
+                expired_at: expiredAt,
+                qty_diterima: qty,
+            },
+            dataType: 'json',
+            success: function(response) {
+                $row.css('opacity', '1');
+                $checkbox.prop('disabled', false);
+
+                if (response.success) {
+                    $checkbox.data('stock-id', response.stock_id);
+
+                    // PENTING: update hidden input stock_id supaya submit form utama tahu ini UPDATE bukan CREATE
+                    let rowIndex = $checkbox.data('row-index');
+                    $(`#stock-id-${rowIndex}`).val(response.stock_id);
+
+                    $row.addClass('bg-light-green');
+                    $row.find('.input-sku, .input-expired, .input-qty').prop('readonly', true);
+                } else {
+                    alert(response.message);
+                    $checkbox.prop('checked', false);
+                }
+            },
+            error: function(xhr) {
+                $row.css('opacity', '1');
+                $checkbox.prop('disabled', false);
+                $checkbox.prop('checked', false);
+
+                let msg = 'Gagal menyimpan item.';
+                if (xhr.responseJSON && xhr.responseJSON.message) {
+                    msg = xhr.responseJSON.message;
+                }
+                alert(msg);
+            }
+        });
+    });
+</script>
+<script>
     var $lastHighlighted = null;
 
     function clearHighlight() {
@@ -290,13 +362,13 @@
     }
 
     function processHighlightScan(barcode) {
-        barcode = barcode.trim();
+        barcode = barcode.trim().toLowerCase();
         if (!barcode) return;
 
         clearHighlight();
 
         var $matched = $('table tbody tr').filter(function() {
-            var productCode = $(this).find('td:nth-child(2) small strong').text().trim();
+            var productCode = ($(this).data('product-code') || '').toString().trim().toLowerCase();
             return productCode === barcode;
         });
 
@@ -385,15 +457,15 @@
         clearHighlight();
         $('#scan-highlight-input').focus();
     });
-    
+
     // Auto focus ke scan input saat halaman load
     $(document).ready(function() {
         $('#scan-highlight-input').focus();
     });
-    
+
     // Auto focus kembali setelah scan selesai (setelah timeout not found)
     // sudah ter-handle karena input tidak di-clear otomatis
-    
+
     // Kalau user klik area kosong (bukan input/button lain), kembalikan focus ke scan
     $(document).on('click', function(e) {
         var $target = $(e.target);

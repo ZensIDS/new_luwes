@@ -81,6 +81,8 @@ Route::middleware(['role:admin-gudang|staff-outlet|owner|superadmin'])->group(fu
     Route::get('/pembelian/{pembelian}/penerimaan', [PembelianController::class, 'penerimaan'])->name('pembelian.penerimaan');
     Route::post('/pembelian/{pembelian}/penerimaan', [PembelianController::class, 'storePenerimaan'])->name('pembelian.store-penerimaan');
     Route::post('/pembelian/{pembelian}/update-penerimaan', [PembelianController::class, 'updatePenerimaan'])->name('pembelian.update-penerimaan');
+    Route::post('/pembelian/{pembelian}/penerimaan/save-item', [PembelianController::class, 'savePenerimaanItem'])
+        ->name('pembelian.penerimaan.save-item');
 
     Route::get('/pembelian/{pembelian}/print', [PembelianController::class, 'print'])->name('pembelian.print');
     Route::get('/pembelian/{id}/destroy', [PembelianController::class, 'stockDestroy'])->name('pembelian.stock.destroy');

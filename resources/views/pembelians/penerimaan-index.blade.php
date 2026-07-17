@@ -70,7 +70,7 @@
                                                     </li>
                                                 @endforeach
                                             </ul>
-                                        
+
                                             @if($totalItems > 3)
                                                 <a href="javascript:void(0)"
                                                    class="btn-toggle-pembelian-items"
@@ -133,7 +133,7 @@
         var state = $(this).data('state');
         var $extra = $('.extra-item-pembelian-' + id);
         var $badge = $(this).find('.label');
-    
+
         if (state === 'closed') {
             $extra.show();
             $badge.text('Tutup');
