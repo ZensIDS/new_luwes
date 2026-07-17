@@ -94,7 +94,7 @@
                                 <td class="text-center text-muted">{{ $index + 1 }}</td>
                                 <td>
                                     <strong>{{ $item->product->name }}</strong>
-                                    <br><small class="text-muted">{{ $item->product->code }}</small>
+                                    <br><p style="font-size: 14px;"><b>{{ $item->product->code }}</b></p>
                                 </td>
                                 <td>{{ $item->qty_to_pick }}</td>
 
@@ -138,6 +138,15 @@
 @endsection
 
 @section('page-script')
+<style>
+    @keyframes blinkHighlight {
+        0%, 49%   { background-color: #ffeb3b !important; outline: 2px solid #f39c12; }
+        50%, 100% { background-color: transparent; outline: 2px solid transparent; }
+    }
+    .blink-target > td {
+        animation: blinkHighlight 0.35s steps(1, end) 6;
+    }
+</style>
 <script>
 $(document).ready(function() {
     const scanUrl = "{{ route('request-orders.scan-pick', $requestOrder->id) }}";
@@ -203,7 +212,7 @@ $(document).ready(function() {
 
                 if (response.already) {
                     showFeedback('warning', response.message);
-                    highlightRow(response.item_id);
+                    scrollAndBlink(response.item_id);
                 }
                 else if (response.success) {
                     showFeedback('success', response.message);
@@ -302,6 +311,11 @@ $(document).ready(function() {
                     });
 
                     updatePickedBadge();
+
+                    let targetId = response.items.length > 0 ? response.items[response.items.length - 1].id : null;
+                    if (targetId) {
+                        scrollAndBlink(targetId);
+                    }
                 }
             },
             error: function(xhr) {
@@ -338,6 +352,24 @@ $(document).ready(function() {
         setTimeout(() => {
             $row.css('background-color', originalBg);
         }, 1200);
+    }
+
+    function scrollAndBlink(itemId) {
+        let $row = $(`#item-row-${itemId}`);
+        if ($row.length === 0) return;
+
+        $row.get(0).scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        setTimeout(function() {
+            // Reset dulu supaya animasi restart walau class masih nempel dari scan sebelumnya
+            $row.removeClass('blink-target');
+            void $row.get(0).offsetWidth; // force reflow, trik supaya browser "lupa" state animasi lama
+            $row.addClass('blink-target');
+
+            setTimeout(function() {
+                $row.removeClass('blink-target');
+            }, 2300);
+        }, 200);
     }
 
     function updatePickedBadge() {

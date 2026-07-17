@@ -503,7 +503,7 @@ class RequestOrderController extends Controller
                 return response()->json([
                     'success' => false,
                     'already' => true,
-                    'message' => "Produk '{$alreadyPicked()->product->name}' sudah selesai di-pick semuanya.",
+                    'message' => "Produk '{$alreadyPicked->product->name}' sudah selesai di-pick semuanya.",
                     'item_id' => $alreadyPicked->id,
                 ], 200);
             }
