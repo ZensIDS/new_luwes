@@ -610,35 +610,40 @@ class RequestOrderController extends Controller
             return response()->json(['success' => false, 'message' => 'Sesi proses kirim tidak valid.'], 422);
         }
 
-        // Cek apakah ada item yang belum di-scan (is_picked masih bernilai 0)
-        $unpicked = $pickingList->items()->where('is_picked', 0)->count();
-        if ($unpicked > 0) {
-            return response()->json([
-                'success' => false,
-                'message' => "Proses gagal. Masih ada {$unpicked} item yang belum Anda scan."
-            ], 422);
-        }
+        // Hitung jumlah item yang belum sempat di-scan (hanya untuk info di pesan akhir)
+        $unpickedCount = $pickingList->items()->where('is_picked', 0)->count();
 
         DB::beginTransaction();
         try {
-            // 1. Jalankan pemotongan stok riil untuk masing-masing item yang sudah di-pick
+            // 1. Proses SEMUA item picking list, tapi potong stok HANYA yang sudah di-pick
             foreach ($pickingList->items as $item) {
-                $stock = Stock::find($item->stock_id);
-                if ($stock) {
-                    $stock->allocate($item->qty_picked); // Potong kuantitas fisik di gudang
-                }
 
-                // Sinkronisasi balik ke data request_order_items sebagai riwayat final
-                $requestOrder->items()
-                    ->where('product_id', $item->product_id)
-                    ->update([
-                        'stock_id'     => $item->stock_id,
-                        'qty_approved' => $item->qty_picked,
-                        'item_status'  => 'picked'
-                    ]);
+                if ($item->is_picked == 1) {
+                    // Item sudah discan → potong stok riil seperti biasa
+                    $stock = Stock::find($item->stock_id);
+                    if ($stock) {
+                        $stock->allocate($item->qty_picked);
+                    }
+
+                    $requestOrder->items()
+                        ->where('product_id', $item->product_id)
+                        ->update([
+                            'stock_id'     => $item->stock_id,
+                            'qty_approved' => $item->qty_picked,
+                            'item_status'  => 'picked',
+                        ]);
+                } else {
+                    // Item belum discan → anggap tidak ready, JANGAN potong stok
+                    $requestOrder->items()
+                        ->where('product_id', $item->product_id)
+                        ->update([
+                            'qty_approved' => 0,
+                            'item_status'  => 'rejected',
+                        ]);
+                }
             }
 
-            // 2. Selesaikan status Picking List menjadi 'completed' sesuai ENUM database
+            // 2. Selesaikan status Picking List menjadi 'completed'
             $pickingList->update([
                 'status'       => 'completed',
                 'completed_at' => now(),
@@ -653,9 +658,13 @@ class RequestOrderController extends Controller
 
             DB::commit();
 
+            $message = $unpickedCount > 0
+                ? "Proses selesai. {$unpickedCount} item tidak ready dan tidak diproses, sisanya berhasil dipotong stoknya."
+                : 'Seluruh item berhasil diverifikasi dan stok telah resmi dipotong!';
+
             return response()->json([
-                'success' => true,
-                'message' => 'Seluruh item berhasil diverifikasi dan stok telah resmi dipotong!',
+                'success'  => true,
+                'message'  => $message,
                 'redirect' => route('picking-lists.show', $pickingList->id),
             ]);
         } catch (\Exception $e) {
