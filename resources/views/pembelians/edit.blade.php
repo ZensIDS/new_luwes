@@ -465,8 +465,32 @@
                 const $statusBadge = $('<span>').addClass('label')
                     .addClass(isUnder ? 'label-danger' : 'label-success')
                     .text(isUnder ? 'OUT OF STOCK' : 'Normal');
-                const $qtyInput = $('<input>').attr({ type: 'number', class: 'form-control input-sm cek-qty', min: 0 })
-                    .css('width', '70px').val(0);
+                const $qtyInput = $('<input>')
+                    .attr({
+                        type: 'text',
+                        class: 'form-control input-sm cek-qty'
+                    })
+                    .css('width', '70px')
+                    .val(0) // Nilai awal kembali ke 0
+                    .on('input', function() {
+                        // 1. Hapus semua karakter yang bukan angka (termasuk tanda minus '-')
+                        let value = $(this).val().replace(/[^0-9]/g, '');
+
+                        // 2. Jika ada angka 0 di depan diikuti angka lain (misal: '02'), ubah jadi '2'
+                        // Tapi jika hanya '0' saja, biarkan tetap '0'
+                        if (value.length > 1 && value.startsWith('0')) {
+                            value = parseInt(value, 10).toString();
+                        }
+
+                        $(this).val(value);
+                    })
+                    .on('blur', function() {
+                        // 3. Saat pengguna meninggalkan input, jika kolom kosong, paksa jadi 0
+                        let value = $(this).val();
+                        if (value === '') {
+                            $(this).val(0);
+                        }
+                    });
 
                 $tr.append(
                     $checkTd,
@@ -500,7 +524,7 @@
                     zeroRecords: "Tidak ada produk ditemukan"
                 }
             });
-            
+
             $(document).off('input', '.cek-qty').on('input', '.cek-qty', function() {
                 var qty = parseInt($(this).val()) || 0;
                 var $check = $(this).closest('tr').find('.cek-product-check');
@@ -523,12 +547,12 @@
 
         $('#btnTambahkanPO').on('click', function () {
             const selected = [];
-        
+
             if (!cekBarangTable) {
                 alert('Tabel produk belum siap.');
                 return;
             }
-        
+
             cekBarangTable.rows().nodes().each(function (node) {
                 const $check = $(node).find('.cek-product-check:checked');
                 const qty = parseInt($(node).find('.cek-qty').val()) || 0;
@@ -542,34 +566,34 @@
                     });
                 }
             });
-        
+
             if (selected.length === 0) {
                 alert('Pilih minimal satu produk.');
                 return;
             }
-        
+
             const $firstRow = $('#product-repeater tr:first');
             if ($firstRow.find('.product').val() === null || $firstRow.find('.product').val() === '') {
                 $firstRow.remove();
             }
-        
+
             selected.forEach(function (item) {
                 addBahanBaku();
-        
+
                 const $newRow = $('#product-repeater tr:last');
                 const $productSelect = $newRow.find('.product');
                 const $hargaInput = $newRow.find('.harga_beli');
                 const $qtyInput = $newRow.find('.qty');
-        
+
                 $productSelect.val(item.product_id).trigger('change.select2');
                 $hargaInput.val(item.harga).trigger('input');
                 $qtyInput.val(item.qty);
-        
+
                 updateSubtotalAndTotal();
             });
-        
+
             $('#modalCekBarang').modal('hide');
-        
+
             // Reset semua checkbox setelah tambahkan
             cekBarangTable.rows().nodes().each(function (node) {
                 $(node).find('.cek-product-check').prop('checked', false);
