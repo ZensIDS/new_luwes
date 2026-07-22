@@ -121,11 +121,10 @@ Route::middleware(['role:admin-gudang|staff-outlet|owner|superadmin'])->group(fu
     Route::get('request-orders/{requestOrder}/verify', [App\Http\Controllers\RequestOrderController::class, 'verify'])->name('request-orders.verify');
     Route::post('request-orders/{requestOrder}/verify', [App\Http\Controllers\RequestOrderController::class, 'processVerification'])->name('request-orders.process-verification');
 
-    // ── BARU: Proses & Kirim (1 halaman, tanpa verify & generate PL terpisah) ──
     Route::get('request-orders/{requestOrder}/process', [App\Http\Controllers\RequestOrderController::class, 'processView'])->name('request-orders.process');
     Route::post('request-orders/{requestOrder}/scan-pick', [App\Http\Controllers\RequestOrderController::class, 'scanPick'])->name('request-orders.scan-pick');
     Route::post('request-orders/{requestOrder}/complete-ship', [App\Http\Controllers\RequestOrderController::class, 'completeAndShip'])->name('request-orders.complete-ship');
-    // ── END BARU ──
+    Route::post('request-orders/{requestOrder}/update-qty', [App\Http\Controllers\RequestOrderController::class, 'updateQtyToPick'])->name('request-orders.update-qty');
 
     // Picking Lists
     Route::resource('picking-lists', App\Http\Controllers\PickingListController::class);

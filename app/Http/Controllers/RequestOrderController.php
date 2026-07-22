@@ -501,10 +501,11 @@ class RequestOrderController extends Controller
 
             if ($alreadyPicked) {
                 return response()->json([
-                    'success' => false,
-                    'already' => true,
-                    'message' => "Produk '{$alreadyPicked->product->name}' sudah selesai di-pick semuanya.",
-                    'item_id' => $alreadyPicked->id,
+                    'success'      => false,
+                    'already'      => true,
+                    'message'      => "Produk '{$alreadyPicked->product->name}' sudah selesai di-pick semuanya.",
+                    'item_id'      => $alreadyPicked->id,
+                    'product_code' => $barcode,
                 ], 200);
             }
 
@@ -553,11 +554,14 @@ class RequestOrderController extends Controller
                         'is_picked'  => 1
                     ]);
                     $updatedItemsData[] = [
-                        'id' => $item->id,
-                        'sku' => $stock->sku,
-                        'qty' => $take,
-                        'expired_at' => $stock->expired_at ? \Carbon\Carbon::parse($stock->expired_at)->format('d/m/Y') : '-',
-                        'is_child' => false
+                        'id'           => $item->id,
+                        'sku'          => $stock->sku,
+                        'qty'          => $take,
+                        'expired_at'   => $stock->expired_at ? \Carbon\Carbon::parse($stock->expired_at)->format('d/m/Y') : '-',
+                        'is_child'     => false,
+                        'product_id'   => $item->product_id,
+                        'product_code' => $item->product->code,
+                        'product_name' => $item->product->name,
                     ];
                 } else {
                     // JIKA BUTUH SKU TAMBAHAN (SPLIT ROW): Buat baris baru di picking_list_items
@@ -572,11 +576,12 @@ class RequestOrderController extends Controller
                         'is_picked'       => 1
                     ]);
                     $updatedItemsData[] = [
-                        'id' => $newItem->id,
-                        'sku' => $stock->sku,
-                        'qty' => $take,
-                        'expired_at' => $stock->expired_at ? \Carbon\Carbon::parse($stock->expired_at)->format('d/m/Y') : '-',
-                        'is_child' => true,
+                        'id'           => $newItem->id,
+                        'sku'          => $stock->sku,
+                        'qty'          => $take,
+                        'expired_at'   => $stock->expired_at ? \Carbon\Carbon::parse($stock->expired_at)->format('d/m/Y') : '-',
+                        'is_child'     => true,
+                        'product_id'   => $item->product_id,
                         'product_name' => $item->product->name,
                         'product_code' => $item->product->code
                     ];
@@ -596,6 +601,186 @@ class RequestOrderController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json(['success' => false, 'message' => 'Gagal memproses split SKU: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Update Qty Diminta (qty_to_pick) untuk sebuah produk di picking list.
+     * Selalu bisa diedit selama RO masih 'pending'; terkunci otomatis setelah completeAndShip
+     * karena halaman proses hanya bisa diakses selagi status masih pending.
+     *
+     * Kalau produk BELUM pernah di-scan, cukup update angka qty_to_pick di baris tsb.
+     * Kalau produk SUDAH pernah di-scan (punya alokasi SKU/stock_id), semua baris split
+     * lama untuk produk itu dihapus & dialokasikan ULANG dari awal mengikuti aturan
+     * FEFO/FIFO yang sama seperti scanPick, supaya "Stok Terpilih" selalu sinkron dengan
+     * qty yang baru diinput.
+     */
+    public function updateQtyToPick(Request $request, RequestOrder $requestOrder)
+    {
+        // Guard utama: qty diminta hanya boleh diubah selagi RO masih pending / belum di-complete & ship.
+        if ($requestOrder->status !== 'pending') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Request Order ini sudah tidak bisa diubah (sudah diproses/selesai).',
+            ], 422);
+        }
+
+        $pickingList = PickingList::where('request_order_id', $requestOrder->id)
+            ->where('status', 'in_progress')
+            ->first();
+
+        if (!$pickingList) {
+            return response()->json(['success' => false, 'message' => 'Sesi picking tidak ditemukan.'], 404);
+        }
+
+        $validated = $request->validate([
+            'item_id'     => 'required|integer|exists:picking_list_items,id',
+            'qty_to_pick' => 'required|integer|min:0',
+        ], [
+            'qty_to_pick.required' => 'Qty diminta harus diisi.',
+            'qty_to_pick.integer'  => 'Qty diminta harus berupa angka.',
+            'qty_to_pick.min'      => 'Qty diminta tidak boleh kurang dari 0.',
+        ]);
+
+        $item = PickingListItem::where('id', $validated['item_id'])
+            ->where('picking_list_id', $pickingList->id)
+            ->first();
+
+        if (!$item) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Item tidak ditemukan pada sesi picking ini.',
+            ], 404);
+        }
+
+        $newTotalQty = (int) $validated['qty_to_pick'];
+
+        DB::beginTransaction();
+        try {
+            // Ambil semua baris (termasuk hasil split SKU) untuk produk ini
+            $siblingItems = PickingListItem::where('picking_list_id', $pickingList->id)
+                ->where('product_id', $item->product_id)
+                ->get();
+
+            $wasPicked = $siblingItems->contains(fn($i) => $i->is_picked == 1);
+
+            if (!$wasPicked) {
+                // Belum pernah di-scan -> tinggal update angka qty_to_pick, tidak ada alokasi SKU untuk disesuaikan
+                $item->update(['qty_to_pick' => $newTotalQty]);
+
+                DB::commit();
+
+                return response()->json([
+                    'success'           => true,
+                    'qty_to_pick_total' => $newTotalQty,
+                    'is_picked'         => false,
+                    'stock_items'       => [],
+                    'message'           => 'Qty diminta berhasil diperbarui.',
+                ]);
+            }
+
+            // Sudah pernah di-scan -> reset alokasi lama, lalu jalankan ulang FEFO/FIFO untuk qty baru
+            // (aman: qty_available baru dikurangi saat completeAndShip, jadi stok yang tadinya
+            // teralokasi otomatis "tersedia" lagi begitu baris-baris lama dihapus/direset)
+            $location = $item->location;
+
+            $siblingItems->where('id', '!=', $item->id)->each(fn($i) => $i->delete());
+
+            $item->update([
+                'qty_to_pick' => 0,
+                'qty_picked'  => 0,
+                'stock_id'    => null,
+                'sku'         => null,
+                'is_picked'   => 0,
+            ]);
+
+            if ($newTotalQty <= 0) {
+                DB::commit();
+
+                return response()->json([
+                    'success'           => true,
+                    'qty_to_pick_total' => 0,
+                    'is_picked'         => false,
+                    'stock_items'       => [],
+                    'message'           => 'Qty diminta diubah menjadi 0, alokasi SKU sebelumnya dibatalkan.',
+                ]);
+            }
+
+            $availableStocks = Stock::where('product_id', $item->product_id)
+                ->where('qty_available', '>', 0)
+                ->where('status', 'available')
+                ->orderByRaw('expired_at IS NULL ASC')
+                ->orderBy('expired_at', 'asc')
+                ->orderBy('id', 'asc')
+                ->get();
+
+            $totalAvailable = $availableStocks->sum('qty_available');
+
+            if ($totalAvailable < $newTotalQty) {
+                DB::rollBack();
+
+                return response()->json([
+                    'success' => false,
+                    'message' => "Total stok gudang dari seluruh SKU ({$totalAvailable} pcs) tidak mencukupi kebutuhan baru ({$newTotalQty} pcs).",
+                ], 422);
+            }
+
+            $remaining = $newTotalQty;
+            $stockItemsData = [];
+            $isFirst = true;
+
+            foreach ($availableStocks as $stock) {
+                if ($remaining <= 0) break;
+
+                $take = min($stock->qty_available, $remaining);
+
+                if ($isFirst) {
+                    $item->update([
+                        'stock_id'    => $stock->id,
+                        'sku'         => $stock->sku,
+                        'qty_to_pick' => $take,
+                        'qty_picked'  => $take,
+                        'is_picked'   => 1,
+                    ]);
+                    $isFirst = false;
+                } else {
+                    PickingListItem::create([
+                        'picking_list_id' => $pickingList->id,
+                        'product_id'      => $item->product_id,
+                        'stock_id'        => $stock->id,
+                        'sku'             => $stock->sku,
+                        'qty_to_pick'     => $take,
+                        'qty_picked'      => $take,
+                        'location'        => $location,
+                        'is_picked'       => 1,
+                    ]);
+                }
+
+                $stockItemsData[] = [
+                    'sku'        => $stock->sku,
+                    'qty'        => $take,
+                    'expired_at' => $stock->expired_at ? \Carbon\Carbon::parse($stock->expired_at)->format('d/m/Y') : '-',
+                ];
+
+                $remaining -= $take;
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success'           => true,
+                'qty_to_pick_total' => $newTotalQty,
+                'is_picked'         => true,
+                'stock_items'       => $stockItemsData,
+                'message'           => 'Qty diminta berhasil diperbarui & alokasi SKU disesuaikan ulang (FEFO/FIFO).',
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal update qty: ' . $e->getMessage(),
+            ], 500);
         }
     }
 

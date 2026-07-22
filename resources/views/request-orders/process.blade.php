@@ -1,6 +1,10 @@
 @extends('layouts.master')
 @section('title', 'Proses Request Order')
 @section('container')
+@php
+    $groupedItems = $pickingList->items->groupBy('product_id');
+    $totalProducts = $groupedItems->count();
+@endphp
 <section class="content-header">
     <h1>Proses & Kirim <small>{{ $requestOrder->code }}</small></h1>
     <ol class="breadcrumb">
@@ -24,7 +28,7 @@
                             <strong>Status:</strong>
                             <span class="label label-warning">{{ strtoupper($requestOrder->status) }}</span>
                         </div>
-                        <div><strong>Total Item:</strong> {{ $pickingList->items->count() }} produk</div>
+                        <div><strong>Total Item:</strong> {{ $totalProducts }} produk</div>
                     </div>
                 </div>
                 <hr>
@@ -68,7 +72,7 @@
                     <h3 class="box-title"><i class="fa fa-list"></i> Daftar Item</h3>
                     <div class="box-tools pull-right">
                         <span class="badge" id="picked-count-badge" style="background:#00a65a; font-size:13px; padding:5px 10px;">
-                            0 / {{ $pickingList->items->count() }} Picked
+                            0 / {{ $totalProducts }} Picked
                         </span>
                     </div>
                 </div>
@@ -84,42 +88,71 @@
                             </tr>
                         </thead>
                         <tbody>
-                            {{-- PERBAIKAN UTAMA: Looping data dari draf pickingList items --}}
-                            @foreach ($pickingList->items as $index => $item)
-                            <tr id="item-row-{{ $item->id }}"
-                                data-item-id="{{ $item->id }}"
-                                data-product-code="{{ $item->product->code }}"
-                                class="{{ $item->is_picked == 1 ? 'success' : '' }}">
+                            {{-- Grouping per produk: baris split-SKU (FEFO/FIFO) digabung jadi 1 baris,
+                                 detail SKU-nya ditaruh di kolom Stok Terpilih. --}}
+                            @foreach ($groupedItems as $productId => $group)
+                                @php
+                                    $primary = $group->first();
+                                    $product = $primary->product;
+                                    $totalQty = $group->sum('qty_to_pick');
+                                    $isPicked = $group->every(fn($i) => $i->is_picked == 1);
+                                @endphp
+                                <tr id="item-row-{{ $productId }}"
+                                    data-item-id="{{ $primary->id }}"
+                                    data-product-id="{{ $productId }}"
+                                    data-product-code="{{ $product->code }}"
+                                    class="{{ $isPicked ? 'success' : '' }}">
 
-                                <td class="text-center text-muted">{{ $index + 1 }}</td>
-                                <td>
-                                    <strong>{{ $item->product->name }}</strong>
-                                    <br><p style="font-size: 14px;"><b>{{ $item->product->code }}</b></p>
-                                </td>
-                                <td>{{ $item->qty_to_pick }}</td>
+                                    <td class="text-center text-muted">{{ $loop->iteration }}</td>
+                                    <td>
+                                        <strong>{{ $product->name }}</strong>
+                                        <br><p style="font-size: 14px;"><b>{{ $product->code }}</b></p>
+                                    </td>
+                                    <td class="qty-diminta-cell">
+                                        <div class="input-group input-group-md" style="min-width:150px">
+                                            <input type="text"
+                                                inputmode="numeric"
+                                                pattern="[0-9]*"
+                                                autocomplete="off"
+                                                class="form-control input-md input-qty-diminta"
+                                                value="{{ $totalQty }}">
+                                            <span class="input-group-btn">
+                                                <button type="button"
+                                                    class="btn btn-warning btn-sm btn-update-qty"
+                                                    data-item-id="{{ $primary->id }}"
+                                                    title="Update qty diminta">
+                                                    <i class="fa fa-check"></i>
+                                                </button>
+                                            </span>
+                                        </div>
+                                    </td>
 
-                                {{-- Menggunakan kondisi is_picked (0 atau 1) --}}
-                                <td class="status-cell">
-                                    @if($item->is_picked == 1)
-                                        <span class="label label-success"><i class="fa fa-check"></i> PICKED</span>
-                                    @else
-                                        <span class="label label-warning">PENDING</span>
-                                    @endif
-                                </td>
+                                    <td class="status-cell">
+                                        @if($isPicked)
+                                            <span class="label label-success"><i class="fa fa-check"></i> PICKED</span>
+                                        @else
+                                            <span class="label label-warning">PENDING</span>
+                                        @endif
+                                    </td>
 
-                                <td class="stock-info-cell">
-                                    @if($item->is_picked == 1 && $item->stock)
-                                        <small class="text-muted">
-                                            {{ $item->stock->sku ?? '-' }}
-                                            @if($item->stock->expired_at)
-                                                | Exp: {{ \Carbon\Carbon::parse($item->stock->expired_at)->format('d/m/Y') }}
-                                            @endif
-                                        </small>
-                                    @else
-                                        <small class="text-muted">-</small>
-                                    @endif
-                                </td>
-                            </tr>
+                                    <td class="stock-info-cell">
+                                        @if($isPicked && $group->count())
+                                            <ul style="margin:0; padding-left:16px; font-size:12px;">
+                                                @foreach($group as $g)
+                                                    <li><strong>
+                                                        {{ $g->sku ?? '-' }} — {{ $g->qty_picked }} pcs
+                                                        @if($g->stock && $g->stock->expired_at)
+                                                            | Exp: {{ \Carbon\Carbon::parse($g->stock->expired_at)->format('d/m/Y') }}
+                                                        @endif
+                                                    </strong>
+                                                    </li>
+                                                @endforeach
+                                            </ul>
+                                        @else
+                                            <small class="text-muted">-</small>
+                                        @endif
+                                    </td>
+                                </tr>
                             @endforeach
                         </tbody>
                     </table>
@@ -151,6 +184,7 @@
 $(document).ready(function() {
     const scanUrl = "{{ route('request-orders.scan-pick', $requestOrder->id) }}";
     const completeUrl = "{{ route('request-orders.complete-ship', $requestOrder->id) }}";
+    const updateQtyUrl = "{{ route('request-orders.update-qty', $requestOrder->id) }}";
 
     const $scanInput = $('#global-scan-input');
     const $feedback = $('#scan-feedback');
@@ -212,110 +246,29 @@ $(document).ready(function() {
 
                 if (response.already) {
                     showFeedback('warning', response.message);
-                    scrollAndBlink(response.item_id);
+                    scrollAndBlink(response.product_code || barcode);
                 }
                 else if (response.success) {
                     showFeedback('success', response.message);
 
-                    // 1. UPDATE BARIS INDUK UTAMA
+                    // Semua SKU hasil split (FEFO/FIFO) digabung jadi 1 baris per produk.
+                    // Qty Diminta TIDAK diubah di sini (nilainya tidak berubah oleh proses split),
+                    // hanya Status & daftar Stok Terpilih yang diperbarui.
+                    let $row = $(`tr[data-product-code="${barcode}"]`);
+
+                    let stockListHtml = '<ul style="margin:0; padding-left:16px; font-size:12px;" class="text-muted">';
                     response.items.forEach(function(subItem) {
-                        if (!subItem.is_child) {
-                            let expires = subItem.expired_at !== '-' ? ` | Exp: ${subItem.expired_at}` : '';
-                            let $row = $(`#item-row-${subItem.id}`);
-
-                            $row.addClass('success');
-                            $row.find('td:nth-child(3)').text(subItem.qty); // Update qty baris induk ke porsi SKU pertama
-                            $row.find('.status-cell').html('<span class="label label-success"><i class="fa fa-check"></i> PICKED</span>');
-                            $row.find('.stock-info-cell').html(`<small class="text-muted">${subItem.sku ?? '-'} ${expires}</small>`);
-
-                            // Tambahkan data-attribute pendukung untuk memudahkan pengelompokan subtotal nanti
-                            $row.attr('data-group-code', subItem.product_code);
-                            $row.attr('data-pure-qty', subItem.qty);
-                        }
+                        let expires = subItem.expired_at && subItem.expired_at !== '-' ? ` | Exp: ${subItem.expired_at}` : '';
+                        stockListHtml += `<li>${subItem.sku ?? '-'} — ${subItem.qty} pcs${expires}</li>`;
                     });
+                    stockListHtml += '</ul>';
 
-                    // 2. MENYISIPKAN BARIS SPLIT (CHILD) TEPAT DI BAWAH INDUKNYA
-                    response.items.forEach(function(subItem) {
-                        if (subItem.is_child) {
-                            let expires = subItem.expired_at !== '-' ? ` | Exp: ${subItem.expired_at}` : '';
-
-                            // Hapus baris child dengan ID yang sama jika sebelumnya sudah pernah dirender (mencegah duplikasi)
-                            $(`#item-row-${subItem.id}`).remove();
-
-                            // Cari baris terakhir dari kelompok produk yang sama agar split SKU berurutan ke bawah
-                            let $targetRow = $(`tr[data-group-code="${subItem.product_code}"]`).last();
-
-                            if ($targetRow.length === 0) {
-                                $targetRow = $(`tr:contains("${subItem.product_code}")`).first();
-                            }
-
-                            let newRowHtml = `
-                                <tr id="item-row-${subItem.id}" data-item-id="${subItem.id}" data-group-code="${subItem.product_code}" data-pure-qty="${subItem.qty}" class="success" style="background-color: #fafafa;">
-                                    <td class="text-center text-muted">-</td>
-                                    <td style="padding-left: 25px;">
-                                        <i class="fa fa-level-up fa-rotate-90 text-muted" style="margin-right: 5px;"></i>
-                                        <strong>${subItem.product_name}</strong>
-                                        <br><small class="text-muted">${subItem.product_code} (Split SKU)</small>
-                                    </td>
-                                    <td>${subItem.qty}</td>
-                                    <td class="status-cell">
-                                        <span class="label label-success"><i class="fa fa-check"></i> PICKED</span>
-                                    </td>
-                                    <td class="stock-info-cell">
-                                        <small class="text-muted">${subItem.sku ?? '-'} ${expires}</small>
-                                    </td>
-                                </tr>
-                            `;
-
-                            if ($targetRow.length > 0) {
-                                $targetRow.after(newRowHtml);
-                            } else {
-                                $('tbody').append(newRowHtml);
-                            }
-                        }
-                    });
-
-                    // 3. KALKULASI DINAMIS UNTUK BARIS TOTAL SUM PER PRODUK
-                    // Ambil semua kode produk unik yang ada di dalam response kali ini
-                    let uniqueProductCodes = [...new Set(response.items.map(item => item.product_code))];
-
-                    uniqueProductCodes.forEach(function(prodCode) {
-                        // Hapus baris total summary lama untuk produk ini jika sudah ada sebelumnya
-                        $(`tr.summary-row[data-summary-code="${prodCode}"]`).remove();
-
-                        let totalQtyPicked = 0;
-                        let productName = '';
-
-                        // Hitung total akumulasi qty dari baris induk dan semua baris split-nya
-                        $(`tr[data-group-code="${prodCode}"]`).each(function() {
-                            let qty = parseInt($(this).attr('data-pure-qty')) || 0;
-                            totalQtyPicked += qty;
-                            if (!productName) {
-                                productName = $(this).find('strong').first().text();
-                            }
-                        });
-
-                        // Buat baris Summary Total baru dengan style warna abu-abu tipis pembeda
-                        let summaryRowHtml = `
-                            <tr class="summary-row" data-summary-code="${prodCode}" style="background-color: #f4f4f4; font-weight: bold; border-top: 2px solid #ddd;">
-                                <td class="text-center"><i class="fa fa-calculator text-muted"></i></td>
-                                <td>TOTAL ${productName.toUpperCase()}</td>
-                                <td style="font-size: 15px; color: #00a65a;">${totalQtyPicked} pcs</td>
-                                <td class="text-center"><span class="label label-success">READY</span></td>
-                                <td class="text-muted" style="font-size: 11px; font-weight: normal; vertical-align: middle;">Gabungan Semua SKU</td>
-                            </tr>
-                        `;
-
-                        // Letakkan baris total summary tepat di bawah baris terakhir dari kelompok produk tersebut
-                        $(`tr[data-group-code="${prodCode}"]`).last().after(summaryRowHtml);
-                    });
+                    $row.addClass('success');
+                    $row.find('.status-cell').html('<span class="label label-success"><i class="fa fa-check"></i> PICKED</span>');
+                    $row.find('.stock-info-cell').html(stockListHtml);
 
                     updatePickedBadge();
-
-                    let targetId = response.items.length > 0 ? response.items[response.items.length - 1].id : null;
-                    if (targetId) {
-                        scrollAndBlink(targetId);
-                    }
+                    scrollAndBlink(barcode);
                 }
             },
             error: function(xhr) {
@@ -345,8 +298,8 @@ $(document).ready(function() {
         }
     }
 
-    function highlightRow(itemId) {
-        let $row = $(`#item-row-${itemId}`);
+    function highlightRow(productCode) {
+        let $row = $(`tr[data-product-code="${productCode}"]`);
         let originalBg = $row.css('background-color');
         $row.css('background-color', '#f39c12');
         setTimeout(() => {
@@ -354,8 +307,8 @@ $(document).ready(function() {
         }, 1200);
     }
 
-    function scrollAndBlink(itemId) {
-        let $row = $(`#item-row-${itemId}`);
+    function scrollAndBlink(productCode) {
+        let $row = $(`tr[data-product-code="${productCode}"]`);
         if ($row.length === 0) return;
 
         $row.get(0).scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -379,6 +332,87 @@ $(document).ready(function() {
     }
 
     updatePickedBadge();
+
+    // Batasi input Qty Diminta hanya menerima digit angka (input teks, bukan number, biar aman dari scroll)
+    $(document).on('input', '.input-qty-diminta', function() {
+        let $input = $(this);
+        let cleaned = $input.val().replace(/[^0-9]/g, '');
+        if (cleaned !== $input.val()) {
+            $input.val(cleaned);
+        }
+    });
+
+    $(document).on('click', '.btn-update-qty', function() {
+        let $btn = $(this);
+        let $row = $btn.closest('tr');
+        let $input = $row.find('.input-qty-diminta');
+        let itemId = $btn.data('item-id');
+        let newQty = $input.val().trim();
+
+        if (newQty === '' || !/^[0-9]+$/.test(newQty)) {
+            alert('Qty diminta harus berupa angka.');
+            return;
+        }
+
+        let $icon = $btn.find('i');
+        $btn.prop('disabled', true);
+        $icon.removeClass('fa-check').addClass('fa-spinner fa-spin');
+
+        $.ajax({
+            url: updateQtyUrl,
+            method: 'POST',
+            data: {
+                _token: '{{ csrf_token() }}',
+                item_id: itemId,
+                qty_to_pick: newQty,
+            },
+            dataType: 'json',
+            success: function(response) {
+                $btn.prop('disabled', false);
+                $icon.removeClass('fa-spinner fa-spin').addClass('fa-check');
+
+                if (response.success) {
+                    $input.val(response.qty_to_pick_total);
+                    $input.css('background-color', '#dff0d8');
+                    setTimeout(function() {
+                        $input.css('background-color', '');
+                    }, 1000);
+
+                    // Sinkronkan ulang Status & Stok Terpilih sesuai alokasi FEFO/FIFO yang baru
+                    if (response.is_picked) {
+                        $row.addClass('success');
+                        $row.find('.status-cell').html('<span class="label label-success"><i class="fa fa-check"></i> PICKED</span>');
+
+                        let stockListHtml = '<ul style="margin:0; padding-left:16px; font-size:12px;" class="text-muted">';
+                        (response.stock_items || []).forEach(function(s) {
+                            let expires = s.expired_at && s.expired_at !== '-' ? ` | Exp: ${s.expired_at}` : '';
+                            stockListHtml += `<li>${s.sku ?? '-'} — ${s.qty} pcs${expires}</li>`;
+                        });
+                        stockListHtml += '</ul>';
+                        $row.find('.stock-info-cell').html(stockListHtml);
+                    } else {
+                        $row.removeClass('success');
+                        $row.find('.status-cell').html('<span class="label label-warning">PENDING</span>');
+                        $row.find('.stock-info-cell').html('<small class="text-muted">-</small>');
+                    }
+
+                    updatePickedBadge();
+                } else {
+                    alert(response.message);
+                }
+            },
+            error: function(xhr) {
+                $btn.prop('disabled', false);
+                $icon.removeClass('fa-spinner fa-spin').addClass('fa-check');
+
+                let msg = 'Gagal update qty diminta.';
+                if (xhr.responseJSON && xhr.responseJSON.message) {
+                    msg = xhr.responseJSON.message;
+                }
+                alert(msg);
+            }
+        });
+    });
 
     $btnComplete.on('click', function(e) {
         e.preventDefault();
