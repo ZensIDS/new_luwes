@@ -140,7 +140,7 @@
         <!-- Main Footer -->
         <footer class="main-footer">
             <strong>
-                Copyright &copy; {{ date('Y') }} LUWES | Developed by <a href="#">PT. Decaaindo. Surya
+                Copyright &copy; {{ date('Y') }} LUWES | Developed by <a href="#">PT. Decaaindo Surya
                     Persada</a>.
             </strong>
             <!-- Default to the left -->
