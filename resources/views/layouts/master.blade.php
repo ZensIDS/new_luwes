@@ -58,9 +58,9 @@
             <!-- Logo -->
             <a href="/" class="logo">
                 <!-- mini logo for sidebar mini 50x50 pixels -->
-                <span class="logo-mini"><b>POS</b></span>
+                <span class="logo-mini"><b>LUWES</b></span>
                 <!-- logo for regular state and mobile devices -->
-                <span class="logo-lg"><b>POS</b></span>
+                <span class="logo-lg"><b>LUWES</b></span>
             </a>
 
             <!-- Header Navbar -->
@@ -140,7 +140,7 @@
         <!-- Main Footer -->
         <footer class="main-footer">
             <strong>
-                Copyright &copy; {{ date('Y') }} POS | Developed by <a href="#">PT. Decaaindo. Surya
+                Copyright &copy; {{ date('Y') }} LUWES | Developed by <a href="#">PT. Decaaindo. Surya
                     Persada</a>.
             </strong>
             <!-- Default to the left -->
