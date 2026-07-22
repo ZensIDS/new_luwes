@@ -17,6 +17,10 @@ use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use Maatwebsite\Excel\Concerns\WithCustomValueBinder;
+use PhpOffice\PhpSpreadsheet\Cell\DefaultValueBinder;
+use PhpOffice\PhpSpreadsheet\Cell\Cell;
 
 class PenerimaanExport implements FromCollection, WithHeadings, WithMapping, WithStyles, WithDrawings, WithCustomStartCell, WithProperties
 {
@@ -52,13 +56,14 @@ class PenerimaanExport implements FromCollection, WithHeadings, WithMapping, Wit
 
         return [
             $no,
-            $item->product->code ?? '',
+            // Tambahkan '\'' di depan kode barang
+            '\'' . ($item->product->code ?? ''),
             $item->product->name ?? '',
             $item->product->satuan ?? 'PCS',
-            $item->qty.($k && $k !== '-' ? " ({$k})" : ''),
-            ($item->qty_diterima ?? 0).($kd && $kd !== '-' ? " ({$kd})" : ''),
-            'Rp '.number_format($item->harga_beli, 0, ',', '.'),
-            'Rp '.number_format($item->subtotal, 0, ',', '.'),
+            $item->qty . ($k && $k !== '-' ? " ({$k})" : ''),
+            ($item->qty_diterima ?? 0) . ($kd && $kd !== '-' ? " ({$kd})" : ''),
+            'Rp ' . number_format($item->harga_beli, 0, ',', '.'),
+            'Rp ' . number_format($item->subtotal, 0, ',', '.'),
         ];
     }
 
@@ -151,7 +156,7 @@ class PenerimaanExport implements FromCollection, WithHeadings, WithMapping, Wit
 
         $highestRow = $sheet->getHighestRow();
         if ($highestRow > 16) {
-            $sheet->getStyle('B17:J'.$highestRow)
+            $sheet->getStyle('B17:J' . $highestRow)
                 ->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
         }
 
@@ -174,45 +179,45 @@ class PenerimaanExport implements FromCollection, WithHeadings, WithMapping, Wit
 
         // CATATAN
         $notesRow = $highestRow + 2;
-        $sheet->setCellValue('B'.$notesRow, 'Catatan :');
+        $sheet->setCellValue('B' . $notesRow, 'Catatan :');
 
         // SIGNATURE
         $row = $notesRow + 3;
-        $sheet->mergeCells('B'.$row.':D'.$row);
-        $sheet->mergeCells('F'.$row.':G'.$row);
-        $sheet->mergeCells('I'.$row.':J'.$row);
-        $sheet->setCellValue('B'.$row, 'Diterima Oleh');
-        $sheet->setCellValue('F'.$row, 'Diperiksa');
-        $sheet->setCellValue('I'.$row, 'Disetujui');
-        $sheet->getStyle('B'.$row.':J'.$row)->applyFromArray([
+        $sheet->mergeCells('B' . $row . ':D' . $row);
+        $sheet->mergeCells('F' . $row . ':G' . $row);
+        $sheet->mergeCells('I' . $row . ':J' . $row);
+        $sheet->setCellValue('B' . $row, 'Diterima Oleh');
+        $sheet->setCellValue('F' . $row, 'Diperiksa');
+        $sheet->setCellValue('I' . $row, 'Disetujui');
+        $sheet->getStyle('B' . $row . ':J' . $row)->applyFromArray([
             'font' => ['bold' => true],
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
         ]);
 
         $row++;
-        $sheet->mergeCells('B'.$row.':D'.$row);
-        $sheet->mergeCells('F'.$row.':G'.$row);
-        $sheet->mergeCells('I'.$row.':J'.$row);
-        $sheet->setCellValue('B'.$row, 'Staff Gudang');
-        $sheet->setCellValue('F'.$row, 'Supervisor Gudang');
-        $sheet->setCellValue('I'.$row, 'Manager');
-        $sheet->getStyle('B'.$row.':J'.$row)->applyFromArray([
+        $sheet->mergeCells('B' . $row . ':D' . $row);
+        $sheet->mergeCells('F' . $row . ':G' . $row);
+        $sheet->mergeCells('I' . $row . ':J' . $row);
+        $sheet->setCellValue('B' . $row, 'Staff Gudang');
+        $sheet->setCellValue('F' . $row, 'Supervisor Gudang');
+        $sheet->setCellValue('I' . $row, 'Manager');
+        $sheet->getStyle('B' . $row . ':J' . $row)->applyFromArray([
             'font' => ['bold' => true],
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
         ]);
 
         $row += 5;
-        $sheet->mergeCells('B'.$row.':D'.$row);
-        $sheet->mergeCells('F'.$row.':G'.$row);
-        $sheet->mergeCells('I'.$row.':J'.$row);
-        $sheet->setCellValue('B'.$row, 'Nama');
-        $sheet->setCellValue('F'.$row, 'Nama');
-        $sheet->setCellValue('I'.$row, 'Nama');
-        $sheet->getStyle('B'.$row.':J'.$row)->applyFromArray([
+        $sheet->mergeCells('B' . $row . ':D' . $row);
+        $sheet->mergeCells('F' . $row . ':G' . $row);
+        $sheet->mergeCells('I' . $row . ':J' . $row);
+        $sheet->setCellValue('B' . $row, 'Nama');
+        $sheet->setCellValue('F' . $row, 'Nama');
+        $sheet->setCellValue('I' . $row, 'Nama');
+        $sheet->getStyle('B' . $row . ':J' . $row)->applyFromArray([
             'font' => ['bold' => true],
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
         ]);
-        $sheet->getStyle('B'.($row - 1).':J'.($row - 1))
+        $sheet->getStyle('B' . ($row - 1) . ':J' . ($row - 1))
             ->getBorders()->getBottom()->setBorderStyle(Border::BORDER_THIN);
     }
 

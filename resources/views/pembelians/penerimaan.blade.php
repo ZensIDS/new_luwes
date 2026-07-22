@@ -130,11 +130,21 @@
                                                     @if($isLocked)
                                                         <span class="text-muted">{{ $stock?->expired_at?->format('d/m/Y') ?? '-' }}</span>
                                                     @else
-                                                        <input type="date"
-                                                            name="items[{{ $loop->parent?->index }}_{{ $stockIndex }}][expired_at]"
-                                                            class="form-control input-sm input-expired"
-                                                            value="{{ old('items.' . $loop->parent?->index . '_' . $stockIndex . '.expired_at', $stock?->expired_at?->format('Y-m-d')) }}"
-                                                            {{ $stock ? 'readonly' : '' }}>
+                                                        <div class="input-group input-group-sm" style="min-width:170px">
+                                                            <input type="date"
+                                                                name="items[{{ $loop->parent?->index }}_{{ $stockIndex }}][expired_at]"
+                                                                class="form-control input-sm input-expired"
+                                                                value="{{ old('items.' . $loop->parent?->index . '_' . $stockIndex . '.expired_at', $stock?->expired_at?->format('Y-m-d')) }}">
+                                                            <span class="input-group-btn">
+                                                                <button type="button"
+                                                                    class="btn btn-success btn-sm btn-update-expired"
+                                                                    data-stock-id="{{ $stock->id ?? '' }}"
+                                                                    title="Update tanggal expired"
+                                                                    {{ !$stock ? 'disabled' : '' }}>
+                                                                    <i class="fa fa-check"></i>
+                                                                </button>
+                                                            </span>
+                                                        </div>
                                                     @endif
                                                 </td>
                                                 <td>
@@ -328,7 +338,11 @@
                     $(`#stock-id-${rowIndex}`).val(response.stock_id);
 
                     $row.addClass('bg-light-green');
-                    $row.find('.input-sku, .input-expired, .input-qty').prop('readonly', true);
+                    // SKU & Qty dikunci setelah tersimpan, tapi Expired tetap bisa diedit lewat tombol terpisah
+                    $row.find('.input-sku, .input-qty').prop('readonly', true);
+                    $row.find('.btn-update-expired')
+                        .prop('disabled', false)
+                        .data('stock-id', response.stock_id);
                 } else {
                     alert(response.message);
                     $checkbox.prop('checked', false);
@@ -340,6 +354,56 @@
                 $checkbox.prop('checked', false);
 
                 let msg = 'Gagal menyimpan item.';
+                if (xhr.responseJSON && xhr.responseJSON.message) {
+                    msg = xhr.responseJSON.message;
+                }
+                alert(msg);
+            }
+        });
+    });
+
+    $(document).on('click', '.btn-update-expired', function() {
+        let $btn      = $(this);
+        let $row      = $btn.closest('tr');
+        let stockId   = $btn.data('stock-id');
+        let expiredAt = $row.find('.input-expired').val();
+
+        if (!stockId) {
+            alert('Item ini belum tersimpan. Centang checkbox terlebih dahulu sebelum update expired.');
+            return;
+        }
+
+        let $icon = $btn.find('i');
+        $btn.prop('disabled', true);
+        $icon.removeClass('fa-check').addClass('fa-spinner fa-spin');
+
+        $.ajax({
+            url: "{{ route('pembelian.penerimaan.update-expired', $pembelian->id) }}",
+            method: 'POST',
+            data: {
+                _token: '{{ csrf_token() }}',
+                stock_id: stockId,
+                expired_at: expiredAt,
+            },
+            dataType: 'json',
+            success: function(response) {
+                $btn.prop('disabled', false);
+                $icon.removeClass('fa-spinner fa-spin').addClass('fa-check');
+
+                if (response.success) {
+                    $row.find('.input-expired').css('background-color', '#dff0d8');
+                    setTimeout(function() {
+                        $row.find('.input-expired').css('background-color', '');
+                    }, 1000);
+                } else {
+                    alert(response.message);
+                }
+            },
+            error: function(xhr) {
+                $btn.prop('disabled', false);
+                $icon.removeClass('fa-spinner fa-spin').addClass('fa-calendar');
+
+                let msg = 'Gagal update expired.';
                 if (xhr.responseJSON && xhr.responseJSON.message) {
                     msg = xhr.responseJSON.message;
                 }

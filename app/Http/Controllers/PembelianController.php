@@ -626,6 +626,36 @@ class PembelianController extends Controller
         }
     }
 
+    public function updatePenerimaanExpired(Request $request, Pembelian $pembelian)
+    {
+        $validated = $request->validate([
+            'stock_id'   => 'required|exists:stocks,id',
+            'expired_at' => 'nullable|date',
+        ], [
+            'stock_id.required' => 'Item ini belum tersimpan, centang checkbox terlebih dahulu.',
+            'stock_id.exists'   => 'Stock tidak ditemukan.',
+        ]);
+
+        $stock = Stock::find($validated['stock_id']);
+
+        if (!$stock || $stock->pembelian_id != $pembelian->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Stock tidak ditemukan atau tidak sesuai pembelian ini.',
+            ], 404);
+        }
+
+        $stock->update([
+            'expired_at' => !empty($validated['expired_at']) ? $validated['expired_at'] : null,
+        ]);
+
+        return response()->json([
+            'success'    => true,
+            'expired_at' => $stock->expired_at?->format('Y-m-d'),
+            'message'    => 'Tanggal expired berhasil diperbarui.',
+        ]);
+    }
+
     private function updateStock($request, $pembelian)
     {
         if ($pembelian->is_published) {
