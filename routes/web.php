@@ -126,6 +126,16 @@ Route::middleware(['role:admin-gudang|staff-outlet|owner|superadmin'])->group(fu
     Route::post('request-orders/{requestOrder}/complete-ship', [App\Http\Controllers\RequestOrderController::class, 'completeAndShip'])->name('request-orders.complete-ship');
     Route::post('request-orders/{requestOrder}/update-qty', [App\Http\Controllers\RequestOrderController::class, 'updateQtyToPick'])->name('request-orders.update-qty');
 
+
+    Route::prefix('request-orders/{requestOrder}')->group(function () {
+        Route::post('autosave-header', [App\Http\Controllers\RequestOrderController::class, 'autosaveHeader'])->name('request-orders.autosave-header');
+        Route::post('items', [App\Http\Controllers\RequestOrderController::class, 'autosaveItem'])->name('request-orders.autosave-item');
+        Route::delete('items/{item}', [App\Http\Controllers\RequestOrderController::class, 'destroyItem'])->name('request-orders.destroy-item');
+        Route::post('notes', [App\Http\Controllers\RequestOrderController::class, 'autosaveNote'])->name('request-orders.autosave-note');
+        Route::delete('notes/{note}', [App\Http\Controllers\RequestOrderController::class, 'destroyNote'])->name('request-orders.destroy-note');
+        Route::post('finish', [App\Http\Controllers\RequestOrderController::class, 'finish'])->name('request-orders.finish');
+    });
+
     // Picking Lists
     Route::resource('picking-lists', App\Http\Controllers\PickingListController::class);
     Route::post('request-orders/{requestOrder}/generate-picking', [App\Http\Controllers\PickingListController::class, 'generate'])->name('picking-lists.generate');

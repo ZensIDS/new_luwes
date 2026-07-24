@@ -34,21 +34,155 @@ class RequestOrderController extends Controller
 
     public function create()
     {
-        return view('request-orders.create', [
-            'outlets'    => Outlet::get(),
-            'categories' => Category::orderBy('name')->get(),
-            'products' => Product::with(['stocks' => function ($q) {
-                $q->where('qty_available', '>=', 0)
-                    ->where('status', 'available');
-            }])->whereHas('stocks', function ($q) {
-                $q->where('qty_available', '>=', 0)
-                    ->where('status', 'available');
-            })
-                // ->where('is_serialized', false)
+        // Langsung insert ke DB, status pending, kode digenerate sekarang juga
+        $lastRequest = RequestOrder::withTrashed()->latest('id')->first();
+        $nextNumber  = $lastRequest ? ((int) substr($lastRequest->code, 3) + 1) : 1;
+        $code        = 'REQ' . str_pad($nextNumber, 5, '0', STR_PAD_LEFT);
+
+        $requestOrder = RequestOrder::create([
+            'code'         => $code,
+            'owner_id'     => null,
+            'requested_by' => auth()->id(),
+            'request_date' => now(),
+            'notes'        => null,
+            'status'       => 'pending',
+        ]);
+
+        // Langsung redirect ke halaman edit — create.blade tidak dipakai lagi sebagai form kosong,
+        // create dan edit jadi satu alur yang sama
+        return redirect()->route('request-orders.edit', $requestOrder);
+    }
+
+    public function autosaveHeader(Request $request, RequestOrder $requestOrder)
+    {
+        abort_unless($requestOrder->requested_by === auth()->id(), 403);
+
+        $data = $request->validate([
+            'owner_id'     => 'nullable|exists:outlets,id',
+            'request_date' => 'nullable|date',
+            'notes'        => 'nullable|string',
+        ]);
+
+        $requestOrder->update($data);
+
+        return response()->json(['status' => 'ok', 'saved_at' => now()->toDateTimeString()]);
+    }
+
+    public function autosaveItem(Request $request, RequestOrder $requestOrder)
+    {
+        $data = $request->validate([
+            'id'            => 'nullable|integer|exists:request_order_items,id',
+            'product_id'    => 'required|exists:products,id',
+            'qty_requested' => 'required|numeric|min:0',
+            'notes'         => 'nullable|string',
+        ]);
+
+        $duplicate = $requestOrder->items()
+            ->where('product_id', $data['product_id'])
+            ->when(!empty($data['id']), fn($q) => $q->where('id', '!=', $data['id']))
+            ->exists();
+
+        if ($duplicate) {
+            return response()->json(['status' => 'error', 'message' => 'Produk sudah ada di list.'], 422);
+        }
+
+        $item = RequestOrderItem::updateOrCreate(
+            ['id' => $data['id'] ?? null, 'request_order_id' => $requestOrder->id],
+            [
+                'product_id'    => $data['product_id'],
+                'stock_id'      => null,
+                'qty_requested' => $data['qty_requested'],
+                'notes'         => $data['notes'] ?? null,
+            ]
+        );
+
+        return response()->json(['status' => 'ok', 'item_id' => $item->id]);
+    }
+
+    public function destroyItem(RequestOrder $requestOrder, RequestOrderItem $item)
+    {
+        abort_unless($item->request_order_id === $requestOrder->id, 404);
+        $item->delete();
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    public function autosaveNote(Request $request, RequestOrder $requestOrder)
+    {
+        $data = $request->validate([
+            'id'       => 'nullable|integer|exists:request_order_notes,id',
+            'kategori' => 'required|string|max:255',
+            'qty'      => 'required|numeric|min:0',
+            'nama_pj'  => 'nullable|string|max:255',
+        ]);
+
+        $note = RequestOrderNote::updateOrCreate(
+            ['id' => $data['id'] ?? null, 'request_order_id' => $requestOrder->id],
+            [
+                'kategori' => $data['kategori'],
+                'qty'      => (int) $data['qty'],
+                'nama_pj'  => $data['nama_pj'] ?? null,
+            ]
+        );
+
+        return response()->json(['status' => 'ok', 'note_id' => $note->id]);
+    }
+
+    public function destroyNote(RequestOrder $requestOrder, RequestOrderNote $note)
+    {
+        abort_unless($note->request_order_id === $requestOrder->id, 404);
+        $note->delete();
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    public function finish(Request $request, RequestOrder $requestOrder)
+    {
+        $request->validate([
+            'owner_id'     => 'required|exists:outlets,id',
+            'request_date' => 'required|date',
+        ]);
+
+        if ($requestOrder->items()->count() === 0) {
+            return back()->with('toast_error', 'Minimal harus ada 1 item produk.');
+        }
+
+        // tambahan: pastikan tidak ada item dengan qty 0 yang lolos ke final
+        if ($requestOrder->items()->where('qty_requested', '<=', 0)->exists()) {
+            return back()->with('toast_error', 'Ada item dengan qty 0, mohon lengkapi terlebih dahulu.');
+        }
+
+        $requestOrder->update([
+            'owner_id'     => $request->owner_id,
+            'request_date' => $request->request_date,
+            'notes'        => $request->notes,
+        ]);
+
+        return redirect()->route('request-orders.index')
+            ->with('toast_success', 'Request berhasil dibuat.');
+    }
+
+    public function edit(RequestOrder $requestOrder)
+    {
+        // opsional: kalau request sudah bukan pending lagi (misal sudah diverifikasi),
+        // jangan biarkan diedit lewat halaman ini
+        // abort_if($requestOrder->status !== 'pending', 403, 'Request ini sudah tidak bisa diedit.');
+
+        $requestOrder->load(['items.product', 'additionalNotes']);
+
+        return view('request-orders.edit', [
+            'requestOrder' => $requestOrder,
+            'outlets'      => Outlet::get(),
+            'categories'   => Category::orderBy('name')->get(),
+            'products'     => Product::with(['stocks' => function ($q) {
+                $q->where('qty_available', '>=', 0)->where('status', 'available');
+            }])
+                ->whereHas('stocks', function ($q) {
+                    $q->where('qty_available', '>=', 0)->where('status', 'available');
+                })
                 ->get()
                 ->map(function ($product) {
                     $product->total_available = (int) $product->stocks->sum('qty_available');
-
                     return $product;
                 }),
         ]);
@@ -858,6 +992,29 @@ class RequestOrderController extends Controller
                 'success' => false,
                 'message' => 'Terjadi kesalahan eksekusi data: ' . $e->getMessage()
             ], 500);
+        }
+    }
+
+    public function destroy(RequestOrder $requestOrder)
+    {
+        abort_unless($requestOrder->status === 'pending', 403, 'Request ini sudah tidak bisa dihapus.');
+
+        // opsional: hanya pemilik request yang boleh hapus
+        // abort_unless($requestOrder->requested_by === auth()->id(), 403);
+
+        DB::beginTransaction();
+        try {
+            $requestOrder->items()->delete();
+            $requestOrder->additionalNotes()->delete();
+            $requestOrder->delete();
+
+            DB::commit();
+
+            return back()->with('toast_success', 'Request berhasil dihapus.');
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return back()->with('toast_error', $e->getMessage());
         }
     }
 }
