@@ -398,8 +398,9 @@
             if (itemId) {
                 $.ajax({
                     url: routes.destroyItem(itemId),
-                    method: 'DELETE',
+                    method: 'POST',
                     headers: { 'X-CSRF-TOKEN': csrfToken },
+                    data: { _method: 'DELETE' },
                     success: function() {
                         $row.remove();
                         updateRowNumbers();
@@ -483,8 +484,9 @@
             if (noteId) {
                 $.ajax({
                     url: routes.destroyNote(noteId),
-                    method: 'DELETE',
+                    method: 'POST',
                     headers: { 'X-CSRF-TOKEN': csrfToken },
+                    data: { _method: 'DELETE' },
                     success: function() {
                         $row.remove();
                         showIndicator('Sample dihapus ✓');
