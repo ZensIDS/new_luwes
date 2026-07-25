@@ -139,7 +139,11 @@
                                                 <a class="btn-xs btn btn-primary" href="{{ route('request-orders.edit', $value->id) }}">
                                                     <i class="fa fa-edit"></i> Edit
                                                 </a>
+                                                @if(!isset($value->owner_id))
+                                                <a class="btn-xs btn btn-danger" href="#"> Outlet Belum Ditentukan</a>
+                                                @else
                                                 <a class="btn-xs btn btn-default" href="{{ route('request-orders.process', $value->id) }}"><i class="fa fa-eye"></i> Detail</a>
+                                                @endif
                                                 <form action="{{ route('request-orders.destroy', $value->id) }}" method="POST" style="display:inline-block;"
                                                     onsubmit="return confirm('Yakin hapus request ini?')">
                                                     @csrf
