@@ -65,11 +65,15 @@ class LaporanController extends Controller
 
         if ($id) {
             $pembelian = Pembelian::with(['supplier', 'pembelianProducts.product'])->findOrFail($id);
+
+            // Sort collection pembelianProducts berdasarkan nama product
+            $pembelian->pembelianProducts = $pembelian->pembelianProducts->sortBy(function ($item) {
+                return $item->product->name ?? '';
+            })->values();
+
             $safeCode = preg_replace('/[^A-Za-z0-9\-]/', '_', $pembelian->code);
 
-            return Excel::download(new PembelianSingleExport($pembelian, $settings), 'Dokumen_PO-'.$safeCode.'.xlsx');
-
-            // return Excel::download(new PembelianSingleExport($pembelian, $settings), 'Dokumen_PO-'.$pembelian->code.'.xlsx');
+            return Excel::download(new PembelianSingleExport($pembelian, $settings), 'Dokumen_PO-' . $safeCode . '.xlsx');
         }
 
         return Excel::download(new PembelianExport($request, $settings), 'laporan-pembelian.xlsx');
@@ -83,7 +87,7 @@ class LaporanController extends Controller
             $pickinglist = PickingList::with(['requestOrder', 'items.product'])->findOrFail($id);
             $lokasi = $request->query('lokasi') ?: null;
 
-            return Excel::download(new PickingListSingleExport($pickinglist, $settings, $lokasi), 'Dokumen_Picking_list-'.$pickinglist->code.'.xlsx');
+            return Excel::download(new PickingListSingleExport($pickinglist, $settings, $lokasi), 'Dokumen_Picking_list-' . $pickinglist->code . '.xlsx');
         }
 
         return abort(404);
@@ -96,7 +100,7 @@ class LaporanController extends Controller
         if ($id) {
             $requestOrder = RequestOrder::with(['owner', 'requestedBy', 'items.product', 'additionalNotes'])->findOrFail($id);
 
-            return Excel::download(new RequestOrderSingleExport($requestOrder, $settings), 'Dokumen_Surat_Permintaan_Barang_(SPB)-'.$requestOrder->code.'.xlsx');
+            return Excel::download(new RequestOrderSingleExport($requestOrder, $settings), 'Dokumen_Surat_Permintaan_Barang_(SPB)-' . $requestOrder->code . '.xlsx');
         }
 
         return abort(404);
@@ -109,7 +113,7 @@ class LaporanController extends Controller
         if ($id) {
             $deliveryOrder = DeliveryOrder::with(['owner', 'requestOrder', 'items.product'])->findOrFail($id);
 
-            return Excel::download(new DeliveryOrderSingleExport($deliveryOrder, $settings), 'Dokumen_Surat_Jalan-'.$deliveryOrder->code.'.xlsx');
+            return Excel::download(new DeliveryOrderSingleExport($deliveryOrder, $settings), 'Dokumen_Surat_Jalan-' . $deliveryOrder->code . '.xlsx');
         }
 
         return abort(404);
@@ -135,7 +139,7 @@ class LaporanController extends Controller
             ->orderBy('created_at', 'asc')
             ->get();
 
-        return Excel::download(new KartuStokExport($stock, $movements, $settings), 'Kartu_Stok-'.$stock->sku.'.xlsx');
+        return Excel::download(new KartuStokExport($stock, $movements, $settings), 'Kartu_Stok-' . $stock->sku . '.xlsx');
     }
 
     public function exportStockOpname(Request $request)
@@ -147,7 +151,7 @@ class LaporanController extends Controller
         $selesai = $request->input('tanggal_selesai', $mulai) ?: $mulai;
         $lokasi  = $request->input('lokasi');
 
-        $lokasiFilter = $lokasi ? fn ($q) => $q->where('lokasi', $lokasi) : null;
+        $lokasiFilter = $lokasi ? fn($q) => $q->where('lokasi', $lokasi) : null;
 
         $query = StockAdjustment::with(['product', 'stock'])
             ->whereDate('adjustment_date', '>=', $mulai)
@@ -170,7 +174,7 @@ class LaporanController extends Controller
             $adjustments = $fallback->get();
         }
 
-        return Excel::download(new StockOpnameExport($adjustments, $mulai, $settings), 'Stock_Opname-'.$mulai.'.xlsx');
+        return Excel::download(new StockOpnameExport($adjustments, $mulai, $settings), 'Stock_Opname-' . $mulai . '.xlsx');
     }
 
     public function exportPenerimaan(Request $request, Pembelian $pembelian, $type = 'po')
@@ -181,7 +185,7 @@ class LaporanController extends Controller
 
         return Excel::download(
             new PenerimaanExport($pembelian, $type, $settings),
-            'Penerimaan-'.$type.' '.$pembelian->code.'.xlsx'
+            'Penerimaan-' . $type . ' ' . $pembelian->code . '.xlsx'
         );
     }
 
@@ -249,7 +253,7 @@ class LaporanController extends Controller
 
         return Excel::download(
             new ReturPembelianSingleExport($refundPembelian, $settings),
-            'Dokumen_Retur_Pembelian-'.$refundPembelian->code.'.xlsx'
+            'Dokumen_Retur_Pembelian-' . $refundPembelian->code . '.xlsx'
         );
     }
 
@@ -260,7 +264,7 @@ class LaporanController extends Controller
 
         return Excel::download(
             new ReturOutletSingleExport($refundPembelian, $settings),
-            'Dokumen_Retur_Outlet-'.$refundPembelian->code.'.xlsx'
+            'Dokumen_Retur_Outlet-' . $refundPembelian->code . '.xlsx'
         );
     }
 
@@ -271,7 +275,7 @@ class LaporanController extends Controller
 
         return Pdf::loadView('exports.pdf.retur-pembelian-single', compact('retur', 'settings'))
             ->setPaper('a4', 'landscape')
-            ->stream('Dokumen_Retur_Pembelian-'.$retur->code.'.pdf');
+            ->stream('Dokumen_Retur_Pembelian-' . $retur->code . '.pdf');
     }
 
     public function pdfReturOutletSingle(RefundPembelian $refundPembelian)
@@ -281,7 +285,7 @@ class LaporanController extends Controller
 
         return Pdf::loadView('exports.pdf.retur-outlet-single', compact('retur', 'settings'))
             ->setPaper('a4', 'landscape')
-            ->stream('Dokumen_Retur_Outlet-'.$retur->code.'.pdf');
+            ->stream('Dokumen_Retur_Outlet-' . $retur->code . '.pdf');
     }
 
     public function pdfReturSupplier(Request $request)
@@ -299,7 +303,7 @@ class LaporanController extends Controller
             ->whereDate('tanggal', '<=', $selesai)
             ->orderBy('tanggal')
             ->get()
-            ->flatMap(fn ($retur) => $retur->refundPembelianItems->each(fn ($item) => $item->retur = $retur));
+            ->flatMap(fn($retur) => $retur->refundPembelianItems->each(fn($item) => $item->retur = $retur));
 
         return Pdf::loadView('exports.pdf.laporan-retur-supplier', compact('rows', 'settings', 'mulai', 'selesai'))
             ->setPaper('a4', 'landscape')
@@ -322,7 +326,7 @@ class LaporanController extends Controller
             ->whereDate('tanggal', '<=', $selesai)
             ->orderBy('tanggal')
             ->get()
-            ->flatMap(fn ($retur) => $retur->refundPembelianItems->each(fn ($item) => $item->retur = $retur));
+            ->flatMap(fn($retur) => $retur->refundPembelianItems->each(fn($item) => $item->retur = $retur));
 
         return Pdf::loadView('exports.pdf.laporan-retur-outlet', compact('rows', 'settings', 'mulai', 'selesai'))
             ->setPaper('a4', 'landscape')
@@ -368,10 +372,10 @@ class LaporanController extends Controller
                     'supplier' => $p->supplier?->name ?? '-',
                     'kode_barang' => $pp->product?->code ?? '-',
                     'nama_barang' => $pp->product?->name ?? '-',
-                    'qty' => $pp->qty.($kQty && $kQty !== '-' ? " ({$kQty})" : ''),
+                    'qty' => $pp->qty . ($kQty && $kQty !== '-' ? " ({$kQty})" : ''),
                     'satuan' => $pp->product?->satuan ?? 'PCS',
                     'harga_total' => $pp->subtotal,
-                    'qty_diterima' => $qtyRcv.($kRcv && $kRcv !== '-' ? " ({$kRcv})" : ''),
+                    'qty_diterima' => $qtyRcv . ($kRcv && $kRcv !== '-' ? " ({$kRcv})" : ''),
                     'status' => ucfirst($p->status ?? '-'),
                     'keterangan' => '',
                 ];
@@ -403,7 +407,7 @@ class LaporanController extends Controller
                     'outlet' => $ro->owner?->name ?? '-',
                     'kode_barang' => $item->product?->code ?? '-',
                     'nama_barang' => $item->product?->name ?? '-',
-                    'qty' => $item->qty_requested.($k && $k !== '-' ? " ({$k})" : ''),
+                    'qty' => $item->qty_requested . ($k && $k !== '-' ? " ({$k})" : ''),
                     'satuan' => $item->product?->satuan ?? 'PCS',
                     'status' => ucfirst($ro->status ?? '-'),
                     'kode_po' => '-',
@@ -431,7 +435,9 @@ class LaporanController extends Controller
                 if ($m->reference_type && $m->reference_id) {
                     $ref = $m->reference_type::find($m->reference_id);
                     $docCode = $ref?->code ?? '-';
-                    if ($m->reference_type === 'App\Models\Pembelian') { $supplier = $ref?->supplier?->name ?? '-'; }
+                    if ($m->reference_type === 'App\Models\Pembelian') {
+                        $supplier = $ref?->supplier?->name ?? '-';
+                    }
                 }
                 preg_match('/SKU:\s*(\S+)/', $m->notes ?? '', $matches);
                 $m->doc_code = $docCode;
@@ -528,7 +534,7 @@ class LaporanController extends Controller
 
         return Pdf::loadView('exports.pdf.kartu-stok', compact('stock', 'transactions', 'settings'))
             ->setPaper('a4', 'portrait')
-            ->stream('Kartu_Stok-'.$stock->sku.'.pdf');
+            ->stream('Kartu_Stok-' . $stock->sku . '.pdf');
     }
 
     public function pdfPenerimaanBarang(Request $request)
@@ -557,7 +563,7 @@ class LaporanController extends Controller
 
         return Pdf::loadView('exports.pdf.laporan-penerimaan-single', compact('pembelian', 'settings'))
             ->setPaper('a4', 'portrait')
-            ->stream('Penerimaan_Barang-'.($pembelian->code_gr ?? $pembelian->code).'.pdf');
+            ->stream('Penerimaan_Barang-' . ($pembelian->code_gr ?? $pembelian->code) . '.pdf');
     }
 
     public function pdfPengiriman(Request $request)
@@ -583,7 +589,7 @@ class LaporanController extends Controller
                     'kode_barang' => $item->product?->code ?? '-',
                     'nama_barang' => $item->product?->name ?? '-',
                     'batch' => $item->sku ?? '-',
-                    'qty_kirim' => $item->qty.($k && $k !== '-' ? " ({$k})" : ''),
+                    'qty_kirim' => $item->qty . ($k && $k !== '-' ? " ({$k})" : ''),
                     'satuan' => $item->product?->satuan ?? 'PCS',
                     'status' => ucfirst($do->status ?? '-'),
                     'keterangan' => '',
@@ -619,9 +625,9 @@ class LaporanController extends Controller
                     'kode_barang' => $item->product?->code ?? '-',
                     'nama_barang' => $item->product?->name ?? '-',
                     'lokasi' => $item->location ?? '-',
-                    'qty_order' => $item->qty_to_pick.($kOrd && $kOrd !== '-' ? " ({$kOrd})" : ''),
-                    'qty_pick'  => $item->qty_picked.($kPick && $kPick !== '-' ? " ({$kPick})" : ''),
-                    'qty_pack'  => $item->qty_picked.($kPick && $kPick !== '-' ? " ({$kPick})" : ''),
+                    'qty_order' => $item->qty_to_pick . ($kOrd && $kOrd !== '-' ? " ({$kOrd})" : ''),
+                    'qty_pick'  => $item->qty_picked . ($kPick && $kPick !== '-' ? " ({$kPick})" : ''),
+                    'qty_pack'  => $item->qty_picked . ($kPick && $kPick !== '-' ? " ({$kPick})" : ''),
                     'status' => ucfirst($pk->status ?? '-'),
                     'picker' => $pk->picker?->name ?? '-',
                     'packer' => '-',
@@ -683,7 +689,7 @@ class LaporanController extends Controller
                     'supplier' => $p->supplier?->name ?? '-',
                     'kode_barang' => $pp->product?->code ?? '-',
                     'nama_barang' => $pp->product?->name ?? '-',
-                    'qty' => $pp->qty.($k && $k !== '-' ? " ({$k})" : ''),
+                    'qty' => $pp->qty . ($k && $k !== '-' ? " ({$k})" : ''),
                     'satuan' => $pp->product?->satuan ?? 'PCS',
                     'harga_satuan' => $pp->harga_beli,
                     'total_harga' => $pp->subtotal,
@@ -711,7 +717,7 @@ class LaporanController extends Controller
 
         return Pdf::loadView('exports.pdf.faktur-pembelian', compact('pembelian', 'paymentHistory', 'settings'))
             ->setPaper('a4', 'portrait')
-            ->stream('Faktur_Pembelian-'.$pembelian->code.'.pdf');
+            ->stream('Faktur_Pembelian-' . $pembelian->code . '.pdf');
     }
 
     public function pdfOpname(Request $request)
@@ -760,14 +766,14 @@ class LaporanController extends Controller
             return [
                 'kode_barang'   => $s->product?->code ?? '-',
                 'nama_barang'   => $s->product?->name ?? '-',
-                'stok'          => $qty.($kStok && $kStok !== '-' ? " ({$kStok})" : ''),
+                'stok'          => $qty . ($kStok && $kStok !== '-' ? " ({$kStok})" : ''),
                 'avg_keluar'    => $avgKeluar,
                 'hari_tanpa'    => $hariTanpa,
                 'kategori'      => $avgKeluar >= 10 ? 'Fast Moving' : ($avgKeluar >= 3 ? 'Medium Moving' : 'Slow Moving'),
                 'status_stok'   => $qty > $minStok ? 'Aman' : ($qty > 0 ? 'Kritis' : 'Habis'),
                 'min_stok'      => $minStok,
                 'saran_reorder' => $qty <= $minStok ? 'Ya' : 'Tidak',
-                'qty_reorder'   => $qty <= $minStok ? ($qtyReorder.($kReorder && $kReorder !== '-' ? " ({$kReorder})" : '')) : 0,
+                'qty_reorder'   => $qty <= $minStok ? ($qtyReorder . ($kReorder && $kReorder !== '-' ? " ({$kReorder})" : '')) : 0,
                 'keterangan'    => '',
             ];
         })->values()->all();
