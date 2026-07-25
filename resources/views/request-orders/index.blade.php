@@ -136,14 +136,17 @@
                                             @if ($value->status == 'approved' || $value->status == 'partial')
                                                 <a class="btn-xs btn btn-default" href="{{ route('request-orders.show', $value->id) }}"><i class="fa fa-eye"></i> Detail</a>
                                             @else
-                                                <a class="btn-xs btn btn-primary" href="{{ route('request-orders.edit', $value->id) }}">
-                                                    <i class="fa fa-edit"></i> Edit
-                                                </a>
+                                                @if (auth()->user()->role != 'admin-gudang')
+                                                    <a class="btn-xs btn btn-primary" href="{{ route('request-orders.edit', $value->id) }}">
+                                                        <i class="fa fa-edit"></i> Edit
+                                                    </a>
+                                                @endif
                                                 @if(!isset($value->owner_id))
                                                 <a class="btn-xs btn btn-danger" href="#"> Outlet Belum Ditentukan</a>
                                                 @else
                                                 <a class="btn-xs btn btn-default" href="{{ route('request-orders.process', $value->id) }}"><i class="fa fa-eye"></i> Detail</a>
                                                 @endif
+                                                @if (auth()->user()->role != 'admin-gudang')
                                                 <form action="{{ route('request-orders.destroy', $value->id) }}" method="POST" style="display:inline-block;"
                                                     onsubmit="return confirm('Yakin hapus request ini?')">
                                                     @csrf
@@ -152,6 +155,7 @@
                                                         <i class="fa fa-trash"></i> Hapus
                                                     </button>
                                                 </form>
+                                                @endif
                                             @endif
                                         @endif
                                         <a class=" btn-xs btn btn-success" href="{{ route('laporan.request-order', $value->id) }}"><i class="fa fa-file-excel-o"></i> Export</a>
