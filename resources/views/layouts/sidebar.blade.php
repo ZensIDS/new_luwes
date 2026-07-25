@@ -19,6 +19,11 @@
         <li class="{{ request()->is('dashboard*') ? 'active' : '' }}">
             <a href="/dashboard"><i class="fa fa-tachometer"></i><span>Dashboard</span></a>
         </li>
+        @if ($role === 'staff-outlet')
+            <li class="{{ request()->routeIs('stock.index') ? 'active' : '' }}">
+                <a href="/stock"><i class="fa fa-cubes"></i><span>Stok</span></a>
+            </li>
+        @endif
 
         {{-- Setting (superadmin only) --}}
         @if ($role === 'superadmin')

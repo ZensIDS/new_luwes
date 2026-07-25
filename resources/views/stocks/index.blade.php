@@ -23,7 +23,7 @@
                             <thead>
                                 <tr>
                                     <td>No</td>
-                                    <td>SKU</td>
+                                    <td style="display: none;">SKU</td>
                                     <td>Code</td>
                                     <td>Product</td>
                                     <td>Konversi</td>
@@ -43,7 +43,7 @@
                                 @foreach ($stocks as $stock)
                                     <tr>
                                         <td>{{ $loop->iteration }}</td>
-                                        <td>{{ $stock->sku }}</td>
+                                        <td style="display: none;">{{ $stock->sku }}</td>
                                         <td>{{ $stock->serial_number ?? $stock->product->code }}</td>
                                         <td>{{ $stock->product->name }}</td>
                                         <td>{{ $stock->product->konversi_string }}</td>
