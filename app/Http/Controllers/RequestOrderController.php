@@ -101,7 +101,7 @@ class RequestOrderController extends Controller
 
     public function destroyItem(RequestOrder $requestOrder, RequestOrderItem $item)
     {
-        abort_unless($item->request_order_id === $requestOrder->id, 404);
+        abort_unless($item->request_order_id == $requestOrder->id, 404);
         $item->delete();
 
         return response()->json(['status' => 'ok']);
@@ -130,7 +130,7 @@ class RequestOrderController extends Controller
 
     public function destroyNote(RequestOrder $requestOrder, RequestOrderNote $note)
     {
-        abort_unless($note->request_order_id === $requestOrder->id, 404);
+        abort_unless($note->request_order_id == $requestOrder->id, 404);
         $note->delete();
 
         return response()->json(['status' => 'ok']);
@@ -997,7 +997,7 @@ class RequestOrderController extends Controller
 
     public function destroy(RequestOrder $requestOrder)
     {
-        abort_unless($requestOrder->status === 'pending', 403, 'Request ini sudah tidak bisa dihapus.');
+        abort_unless($requestOrder->status == 'pending', 403, 'Request ini sudah tidak bisa dihapus.');
 
         // opsional: hanya pemilik request yang boleh hapus
         // abort_unless($requestOrder->requested_by === auth()->id(), 403);
