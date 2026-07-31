@@ -776,7 +776,8 @@ class RequestOrderController extends Controller
             'qty_to_pick.min'      => 'Qty diminta tidak boleh kurang dari 0.',
         ]);
 
-        $item = PickingListItem::where('id', $validated['item_id'])
+        $item = PickingListItem::with('product')
+            ->where('id', $validated['item_id'])
             ->where('picking_list_id', $pickingList->id)
             ->first();
 
@@ -787,7 +788,16 @@ class RequestOrderController extends Controller
             ], 404);
         }
 
+        $product     = $item->product;
         $newTotalQty = (int) $validated['qty_to_pick'];
+
+        // Helper lokal: hitung tampilan konversi sesuai qty, null kalau produk tidak punya konversi
+        $conversionDisplay = function (int $qty) use ($product) {
+            if ($product && $product->konversi_qty && $product->satuan_besar) {
+                return $product->konversiDisplay($qty);
+            }
+            return null;
+        };
 
         DB::beginTransaction();
         try {
@@ -805,17 +815,16 @@ class RequestOrderController extends Controller
                 DB::commit();
 
                 return response()->json([
-                    'success'           => true,
-                    'qty_to_pick_total' => $newTotalQty,
-                    'is_picked'         => false,
-                    'stock_items'       => [],
-                    'message'           => 'Qty diminta berhasil diperbarui.',
+                    'success'                => true,
+                    'qty_to_pick_total'      => $newTotalQty,
+                    'qty_conversion_display' => $conversionDisplay($newTotalQty),
+                    'is_picked'              => false,
+                    'stock_items'            => [],
+                    'message'                => 'Qty diminta berhasil diperbarui.',
                 ]);
             }
 
             // Sudah pernah di-scan -> reset alokasi lama, lalu jalankan ulang FEFO/FIFO untuk qty baru
-            // (aman: qty_available baru dikurangi saat completeAndShip, jadi stok yang tadinya
-            // teralokasi otomatis "tersedia" lagi begitu baris-baris lama dihapus/direset)
             $location = $item->location;
 
             $siblingItems->where('id', '!=', $item->id)->each(fn($i) => $i->delete());
@@ -832,11 +841,12 @@ class RequestOrderController extends Controller
                 DB::commit();
 
                 return response()->json([
-                    'success'           => true,
-                    'qty_to_pick_total' => 0,
-                    'is_picked'         => false,
-                    'stock_items'       => [],
-                    'message'           => 'Qty diminta diubah menjadi 0, alokasi SKU sebelumnya dibatalkan.',
+                    'success'                => true,
+                    'qty_to_pick_total'      => 0,
+                    'qty_conversion_display' => null,
+                    'is_picked'              => false,
+                    'stock_items'            => [],
+                    'message'                => 'Qty diminta diubah menjadi 0, alokasi SKU sebelumnya dibatalkan.',
                 ]);
             }
 
@@ -902,11 +912,12 @@ class RequestOrderController extends Controller
             DB::commit();
 
             return response()->json([
-                'success'           => true,
-                'qty_to_pick_total' => $newTotalQty,
-                'is_picked'         => true,
-                'stock_items'       => $stockItemsData,
-                'message'           => 'Qty diminta berhasil diperbarui & alokasi SKU disesuaikan ulang (FEFO/FIFO).',
+                'success'                => true,
+                'qty_to_pick_total'      => $newTotalQty,
+                'qty_conversion_display' => $conversionDisplay($newTotalQty),
+                'is_picked'              => true,
+                'stock_items'            => $stockItemsData,
+                'message'                => 'Qty diminta berhasil diperbarui & alokasi SKU disesuaikan ulang (FEFO/FIFO).',
             ]);
         } catch (\Exception $e) {
             DB::rollBack();

@@ -125,6 +125,13 @@
                                                 </button>
                                             </span>
                                         </div>
+                                        <div class="saved-qty-display" style="margin-top:6px;">
+                                            <strong class="saved-qty-value">{{ $totalQty }}</strong>
+                                            <br>
+                                            <strong class="saved-qty-konversi" style="{{ ($product->konversi_qty && $product->satuan_besar) ? '' : 'display:none;' }}">
+                                                {{ $product->konversiDisplay($totalQty) }}
+                                            </strong>
+                                        </div>
                                     </td>
 
                                     <td class="status-cell">
@@ -178,6 +185,11 @@
     }
     .blink-target > td {
         animation: blinkHighlight 0.35s steps(1, end) 6;
+    }
+    .input-qty-diminta.qty-unsaved {
+        border-color: #f39c12 !important;
+        background-color: #fff8e1 !important;
+        box-shadow: 0 0 0 1px #f39c12 inset;
     }
 </style>
 <script>
@@ -314,9 +326,8 @@ $(document).ready(function() {
         $row.get(0).scrollIntoView({ behavior: 'smooth', block: 'center' });
 
         setTimeout(function() {
-            // Reset dulu supaya animasi restart walau class masih nempel dari scan sebelumnya
             $row.removeClass('blink-target');
-            void $row.get(0).offsetWidth; // force reflow, trik supaya browser "lupa" state animasi lama
+            void $row.get(0).offsetWidth;
             $row.addClass('blink-target');
 
             setTimeout(function() {
@@ -339,6 +350,16 @@ $(document).ready(function() {
         let cleaned = $input.val().replace(/[^0-9]/g, '');
         if (cleaned !== $input.val()) {
             $input.val(cleaned);
+        }
+
+        // Tandai visual kalau nilai input berbeda dari nilai yang sudah fix tersimpan
+        let $row = $input.closest('tr');
+        let savedQty = $row.find('.saved-qty-value').text().trim();
+
+        if ($input.val() !== savedQty) {
+            $input.addClass('qty-unsaved');
+        } else {
+            $input.removeClass('qty-unsaved');
         }
     });
 
@@ -373,6 +394,18 @@ $(document).ready(function() {
 
                 if (response.success) {
                     $input.val(response.qty_to_pick_total);
+                    $input.removeClass('qty-unsaved');
+
+                    // Update nilai "fix" dan info konversi sesuai hasil dari server
+                    $row.find('.saved-qty-value').text(response.qty_to_pick_total);
+
+                    let $konversi = $row.find('.saved-qty-konversi');
+                    if (response.qty_conversion_display) {
+                        $konversi.text(response.qty_conversion_display).show();
+                    } else {
+                        $konversi.hide();
+                    }
+
                     $input.css('background-color', '#dff0d8');
                     setTimeout(function() {
                         $input.css('background-color', '');

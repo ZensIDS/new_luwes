@@ -8,8 +8,8 @@
 <!-- - QTY dibagian JOG
   bisa diisi manual setelah di barcode -> https://luwespacitan.com/request-orders/605/process (Penyesuaian QTY Setelah Scan Barcode) -->
 
-- Surat jalan untuk jog
-  tidak dialokasi harga tidak ikut muncul di print out atau ada keterangannya -> https://luwespacitan.com/request-orders (Dirapikan Print outnya)
+<!-- - Surat jalan untuk jog
+  tidak dialokasi harga tidak ikut muncul di print out atau ada keterangannya -> https://luwespacitan.com/request-orders (Dirapikan Print outnya) -->
 
 - Menu Outlet Minta gudang (ketika di klik detail) JOG, dikasih keterangan sekian pcs ini berapa karton kondisi barang ada yang dibedah tidak satu karton utuh -> (Ditampilkan Konversi satuannya) (Misal Kartonnya)
 
