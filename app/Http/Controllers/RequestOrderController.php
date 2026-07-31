@@ -553,12 +553,26 @@ class RequestOrderController extends Controller
 
         DB::beginTransaction();
         try {
+            // Lock row RO ini supaya dobel klik / refresh cepat tidak bikin 2 proses jalan barengan
+            $requestOrder = RequestOrder::where('id', $requestOrder->id)->lockForUpdate()->first();
+
             // 1. Cek apakah draf Picking List untuk RO ini sudah ada
-            $pickingList = PickingList::where('request_order_id', $requestOrder->id)->first();
+            $pickingList = PickingList::where('request_order_id', $requestOrder->id)
+                ->lockForUpdate()
+                ->first();
 
             if (!$pickingList) {
+                $validItems = $requestOrder->items()->where('qty_requested', '>', 0)->get();
+
+                if ($validItems->isEmpty()) {
+                    DB::rollBack();
+
+                    return redirect()->route('request-orders.index')
+                        ->with('toast_error', 'Request Order ini belum punya item dengan qty valid (semua item qty 0 atau kosong).');
+                }
+
                 // Generate nomor urut kode picking baru (misal: PICK00001)
-                $lastPicking = PickingList::latest('id')->first();
+                $lastPicking = PickingList::lockForUpdate()->latest('id')->first();
                 $nextNumber  = $lastPicking ? ((int) substr($lastPicking->code, 4) + 1) : 1;
                 $code        = 'PICK' . str_pad($nextNumber, 5, '0', STR_PAD_LEFT);
 
@@ -566,33 +580,39 @@ class RequestOrderController extends Controller
                 $pickingList = PickingList::create([
                     'code'             => $code,
                     'request_order_id' => $requestOrder->id,
-                    'status'           => 'in_progress', // Sesuai ENUM db Anda
+                    'status'           => 'in_progress',
                     'picker_id'        => auth()->id(),
                     'picker_name'      => auth()->user()->name,
                     'started_at'       => now(),
                 ]);
 
-                // Salin semua item RO ke tabel draf picking_list_items
-                foreach ($requestOrder->items()->where('qty_requested', '>', 0)->get() as $item) {
-                    PickingListItem::create([
-                        'picking_list_id' => $pickingList->id,
-                        'product_id'      => $item->product_id,
-                        'stock_id'        => null, // Diisi nanti saat barcode di-scan
-                        'qty_to_pick'     => $item->qty_requested,
-                        'qty_picked'      => 0,
-                        'location'        => $item->product->lokasi ?? '-',
-                        'sku'             => null,
-                        'is_picked'       => 0, // Default 0 (belum di-pick)
-                    ]);
-                }
+                $this->generatePickingListItems($pickingList, $validItems);
 
                 // CATATAN: Kode pengubah status $requestOrder->update(['status' => 'processing']) SUDAH DIHAPUS TOTAL.
                 // Status RO Anda di database dijamin akan TETAP BENAR-BENAR 'pending'.
+            } elseif ($pickingList->items()->count() === 0) {
+                // Self-healing: header picking list sudah ada tapi items-nya kosong
+                // (nyangkut dari crash/deploy sebelumnya) -> lengkapi sekarang
+                $validItems = $requestOrder->items()->where('qty_requested', '>', 0)->get();
+
+                if ($validItems->isNotEmpty()) {
+                    $this->generatePickingListItems($pickingList, $validItems);
+
+                    \Log::info('Picking list items berhasil di-generate ulang (self-heal)', [
+                        'picking_list_id' => $pickingList->id,
+                    ]);
+                }
             }
 
             DB::commit();
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             DB::rollBack();
+
+            \Log::error('Gagal menginisialisasi sesi picking', [
+                'request_order_id' => $requestOrder->id,
+                'error' => $e->getMessage(),
+            ]);
+
             return redirect()->route('request-orders.index')
                 ->with('toast_error', 'Gagal menginisialisasi sesi picking: ' . $e->getMessage());
         }
@@ -601,6 +621,26 @@ class RequestOrderController extends Controller
         $pickingList->load(['items.product', 'items.stock']);
 
         return view('request-orders.process', compact('requestOrder', 'pickingList'));
+    }
+
+    /**
+     * Salin item RequestOrder ke PickingListItem.
+     * Dipakai baik saat pertama kali generate maupun sebagai self-healing.
+     */
+    protected function generatePickingListItems(PickingList $pickingList, $items): void
+    {
+        foreach ($items as $item) {
+            PickingListItem::create([
+                'picking_list_id' => $pickingList->id,
+                'product_id'      => $item->product_id,
+                'stock_id'        => null,
+                'qty_to_pick'     => $item->qty_requested,
+                'qty_picked'      => 0,
+                'location'        => $item->product->lokasi ?? '-',
+                'sku'             => null,
+                'is_picked'       => 0,
+            ]);
+        }
     }
 
     public function scanPick(Request $request, RequestOrder $requestOrder)
