@@ -1,12 +1,12 @@
 <!-- - Di urutkan per abjad waktu mencetak PO -> Done -->
 
-- Menu Kartu Stock
+<!-- - Menu Kartu Stock
   Hanya untuk melihat history keluar masuk barang?
   apakah tidak dapat menampilkan stok akhir?
-  Dicheck menu stock - kartu stock beda -> (Ditampilkan Stock All SKU)
+  Dicheck menu stock - kartu stock beda -> (Ditampilkan Stock All SKU) -->
 
-- QTY dibagian JOG
-  bisa diisi manual setelah di barcode -> https://luwespacitan.com/request-orders/605/process (Penyesuaian QTY Setelah Scan Barcode)
+<!-- - QTY dibagian JOG
+  bisa diisi manual setelah di barcode -> https://luwespacitan.com/request-orders/605/process (Penyesuaian QTY Setelah Scan Barcode) -->
 
 - Surat jalan untuk jog
   tidak dialokasi harga tidak ikut muncul di print out atau ada keterangannya -> https://luwespacitan.com/request-orders (Dirapikan Print outnya)
