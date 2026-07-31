@@ -89,12 +89,32 @@
                                     </tr>
                                 </tbody>
                                 <tfoot>
+                                    <tr id="rowTotalStokProduk" style="display:none;">
+                                        <th colspan="7" class="text-right">TOTAL STOK PRODUK (SEMUA SKU)</th>
+                                        <th id="totalStokProduk">0</th>
+                                        <th></th>
+                                    </tr>
                                     <tr>
                                         <th colspan="7" class="text-right">TOTAL NILAI PERSEDIAAN</th>
                                         <th id="totalPersediaan">0</th>
                                         <th></th>
                                     </tr>
                                 </tfoot>
+                            </table>
+                        </div>
+
+                        <!-- Rincian stok per SKU untuk produk yang sama -->
+                        <div id="productStockBreakdown" style="display:none;" class="mt-3">
+                            <h5>Rincian Stok per SKU (Produk: <span id="breakdownProductName">-</span>)</h5>
+                            <table class="table table-sm table-bordered" style="width: 60%">
+                                <thead>
+                                    <tr>
+                                        <th>SKU</th>
+                                        <th>Supplier</th>
+                                        <th class="text-right">Qty Tersedia</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="breakdownBody"></tbody>
                             </table>
                         </div>
                     </div>
@@ -150,14 +170,13 @@
                         currentData = response;
                         stockMeta = response.stock;
 
-                        // Update info
                         $('#displaySku').text(response.stock.sku);
                         $('#displayProduct').text(response.stock.product_name);
                         $('#displayCode').text(response.stock.product_code);
                         $('#displaySupplier').text(response.stock.supplier);
 
-                        // Render table
                         renderKartuTable(response.transactions, stockMeta);
+                        renderProductStockSummary(response.product_summary, response.stock, stockMeta);
 
                         $('#btnLoadKartu').prop('disabled', false).html(
                             '<i class="fa fa-search"></i> Tampilkan Kartu');
@@ -167,8 +186,8 @@
                             .css({'pointer-events': 'auto', 'opacity': '1'});
 
                         $('#btnExportPdfKartu')
-                        .attr('href', '{{ url('laporan/pdf/kartu-stok') }}/' + stockId)
-                        .css({'pointer-events': 'auto', 'opacity': '1'});
+                            .attr('href', '{{ url('laporan/pdf/kartu-stok') }}/' + stockId)
+                            .css({'pointer-events': 'auto', 'opacity': '1'});
                     },
                     error: function() {
                         alert('Gagal memuat data kartu stok');
@@ -179,48 +198,84 @@
             });
 
             function renderKartuTable(transactions, meta) {
-                meta = meta || {};
-                const tbody = $('#tableBody');
-                tbody.empty();
+                    meta = meta || {};
+                    const tbody = $('#tableBody');
+                    tbody.empty();
 
-                if (transactions.length === 0) {
-                    tbody.append(
-                        '<tr><td colspan="9" class="text-center">Tidak ada transaksi untuk SKU ini</td></tr>');
-                    $('#totalPersediaan').text('0');
+                    if (transactions.length === 0) {
+                        tbody.append(
+                            '<tr><td colspan="9" class="text-center">Tidak ada transaksi untuk SKU ini</td></tr>');
+                        $('#totalPersediaan').text('0');
+                        return;
+                    }
+
+                    //TODO fix, use the Product's konversiDisplay instead
+                    function fmtQty(qty) {
+                        var k = konversiDisplay(qty, meta.konversi_qty, meta.satuan_besar, meta.satuan);
+                        return qty + (k ? ' <span class="label label-info">' + k + '</span>' : '');
+                    }
+
+                    let latestNilai = 0;
+
+                    transactions.forEach((item, index) => {
+                        latestNilai = item.nilai;
+
+                        tbody.append(`
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td>${item.tanggal}</td>
+                        <td class="text-right">${fmtQty(item.stok_awal)}</td>
+                        <td class="text-right">${fmtQty(item.masuk)}</td>
+                        <td class="text-right">${fmtQty(item.keluar)}</td>
+                        <td class="text-right"><strong>${fmtQty(item.stok_akhir)}</strong></td>
+                        <td class="text-right">${formatRupiah(item.harga)}</td>
+                        <td class="text-right"><strong>${formatRupiah(item.nilai)}</strong></td>
+                        <td><small>${item.keterangan}</small></td>
+                    </tr>
+                `);
+                    });
+
+                    $('#totalPersediaan').text(formatRupiah(latestNilai));
+                }
+
+                function formatRupiah(amount) {
+                    return new Intl.NumberFormat('id-ID').format(amount);
+            }
+
+            function renderProductStockSummary(summary, stock, meta) {
+                if (!summary) {
+                    $('#rowTotalStokProduk').hide();
+                    $('#productStockBreakdown').hide();
                     return;
                 }
 
-                //TODO fix, use the Product's konversiDisplay instead
-                function fmtQty(qty) {
-                    var k = konversiDisplay(qty, meta.konversi_qty, meta.satuan_besar, meta.satuan);
-                    return qty + (k ? ' <span class="label label-info">' + k + '</span>' : '');
-                }
+                const totalDisplay = fmtQtyStandalone(summary.total_qty, meta);
+                $('#totalStokProduk').html(totalDisplay);
+                $('#rowTotalStokProduk').show();
 
-                let latestNilai = 0;
+                $('#breakdownProductName').text(stock.product_name);
+                const $body = $('#breakdownBody');
+                $body.empty();
 
-                transactions.forEach((item, index) => {
-                    latestNilai = item.nilai;
-
-                    tbody.append(`
-                <tr>
-                    <td>${index + 1}</td>
-                    <td>${item.tanggal}</td>
-                    <td class="text-right">${fmtQty(item.stok_awal)}</td>
-                    <td class="text-right">${fmtQty(item.masuk)}</td>
-                    <td class="text-right">${fmtQty(item.keluar)}</td>
-                    <td class="text-right"><strong>${fmtQty(item.stok_akhir)}</strong></td>
-                    <td class="text-right">${formatRupiah(item.harga)}</td>
-                    <td class="text-right"><strong>${formatRupiah(item.nilai)}</strong></td>
-                    <td><small>${item.keterangan}</small></td>
-                </tr>
-            `);
+                summary.breakdown.forEach(function (item) {
+                    const isCurrent = item.stock_id == $('#selectStock').val();
+                    $body.append(`
+                        <tr${isCurrent ? ' class="active"' : ''}>
+                            <td>${item.sku}${isCurrent ? ' <span class="label label-primary">SKU aktif</span>' : ''}</td>
+                            <td>${item.supplier}</td>
+                            <td class="text-right">${fmtQtyStandalone(item.qty_available, meta)}</td>
+                        </tr>
+                    `);
                 });
 
-                $('#totalPersediaan').text(formatRupiah(latestNilai));
+                $('#productStockBreakdown').show();
             }
 
-            function formatRupiah(amount) {
-                return new Intl.NumberFormat('id-ID').format(amount);
+            // Helper terpisah karena fmtQty di dalam renderKartuTable pakai closure atas `meta` lokal
+            function fmtQtyStandalone(qty, meta) {
+                meta = meta || {};
+                const k = konversiDisplay(qty, meta.konversi_qty, meta.satuan_besar, meta.satuan);
+                return qty + (k ? ' <span class="label label-info">' + k + '</span>' : '');
             }
         });
     </script>

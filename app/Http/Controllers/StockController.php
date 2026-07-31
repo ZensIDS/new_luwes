@@ -182,6 +182,24 @@ class StockController extends Controller
             return response()->json(['error' => 'Stock tidak ditemukan'], 404);
         }
 
+        // Ambil semua stok (semua SKU/batch) untuk produk yang sama
+        $productStocks = Stock::with('pembelian.supplier')
+            ->where('product_id', $stock->product_id)
+            ->whereNotNull('sku')
+            ->orderBy('sku')
+            ->get()
+            ->map(function ($s) {
+                return [
+                    'stock_id'      => $s->id,
+                    'sku'           => $s->sku,
+                    'qty_available' => (int) ($s->qty_available ?? 0),
+                    'status'        => $s->status,
+                    'supplier'      => $s->pembelian->supplier->name ?? '-',
+                ];
+            });
+
+        $totalProductStock = $productStocks->sum('qty_available');
+
         // Get all stock movements for this product with this SKU
         $movements = StockMovement::where('product_id', $stock->product_id)
             ->where(function ($q) use ($stock) {
@@ -234,7 +252,11 @@ class StockController extends Controller
                 'satuan_besar' => $stock->product->satuan_besar,
                 'satuan'       => $stock->product->satuan,
             ],
-            'transactions' => $result
+            'transactions' => $result,
+            'product_summary' => [
+                'total_qty' => $totalProductStock,
+                'breakdown' => $productStocks,
+            ],
         ]);
     }
 
