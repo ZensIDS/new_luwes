@@ -31,7 +31,41 @@ class DeliveryOrderController extends Controller
 
     public function show(DeliveryOrder $deliveryOrder)
     {
-        $deliveryOrder->load(['requestOrder', 'owner', 'preparedBy', 'receivedBy', 'items.product']);
+        $deliveryOrder->load(['requestOrder', 'owner', 'preparedBy', 'receivedBy', 'items.product', 'pickingList']);
+
+        // Self-healing: kalau ternyata DO ini item-nya kosong (dari bug lama / proses yang gagal sebagian),
+        // coba generate ulang sekarang, asalkan picking list sumbernya masih ada dan sudah completed.
+        if ($deliveryOrder->items->isEmpty() && $deliveryOrder->pickingList) {
+            DB::beginTransaction();
+            try {
+                $itemsCreated = $this->generateDeliveryOrderItems($deliveryOrder, $deliveryOrder->pickingList);
+
+                if ($itemsCreated > 0) {
+                    DB::commit();
+
+                    \Log::info('Delivery order items berhasil di-generate ulang (self-heal) dari show()', [
+                        'delivery_order_id' => $deliveryOrder->id,
+                    ]);
+
+                    $deliveryOrder->load('items.product');
+
+                    session()->flash('toast_success', 'Data item Delivery Order berhasil diperbaiki otomatis.');
+                } else {
+                    DB::rollBack();
+
+                    session()->flash('toast_error', 'Delivery Order ini tidak memiliki item, dan picking list sumbernya juga tidak ada item yang sudah di-pick. Silakan hubungi admin.');
+                }
+            } catch (\Throwable $e) {
+                DB::rollBack();
+
+                \Log::error('Gagal self-heal delivery order items dari show()', [
+                    'delivery_order_id' => $deliveryOrder->id,
+                    'error' => $e->getMessage(),
+                ]);
+
+                session()->flash('toast_error', 'Data item Delivery Order kosong dan gagal diperbaiki otomatis: ' . $e->getMessage());
+            }
+        }
 
         return view('delivery-orders.show', compact('deliveryOrder'));
     }
@@ -44,7 +78,19 @@ class DeliveryOrderController extends Controller
 
         DB::beginTransaction();
         try {
-            $lastDO = DeliveryOrder::latest('id')->first();
+            // Cegah double-generate kalau tombol diklik dua kali / race condition
+            $existingDO = DeliveryOrder::where('picking_list_id', $pickingList->id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($existingDO) {
+                DB::commit();
+
+                return redirect()->route('delivery-orders.show', $existingDO)
+                    ->with('toast_success', 'Delivery order sudah pernah dibuat sebelumnya.');
+            }
+
+            $lastDO = DeliveryOrder::lockForUpdate()->latest('id')->first();
             $nextNumber = $lastDO ? ((int) substr($lastDO->code, 2) + 1) : 1;
             $code = 'DO' . str_pad($nextNumber, 6, '0', STR_PAD_LEFT);
 
@@ -60,29 +106,69 @@ class DeliveryOrderController extends Controller
                 'status' => 'sent',
             ]);
 
-            foreach ($pickingList->items as $pickItem) {
-                if ($pickItem->qty_picked > 0) {
-                    DeliveryOrderItem::create([
-                        'delivery_order_id' => $deliveryOrder->id,
-                        'product_id' => $pickItem->product_id,
-                        'stock_id' => $pickItem->stock_id,
-                        'qty' => $pickItem->qty_picked,
-                        'sku' => $pickItem->stock->sku,
-                        'expired_at' => $pickItem->stock->expired_at,
-                        'harga_beli' => $pickItem->stock->harga_beli,
-                    ]);
-                }
+            $itemsCreated = $this->generateDeliveryOrderItems($deliveryOrder, $pickingList);
+
+            if ($itemsCreated === 0) {
+                DB::rollBack();
+
+                \Log::warning('Delivery order gagal generate: tidak ada item dengan qty_picked > 0', [
+                    'picking_list_id' => $pickingList->id,
+                ]);
+
+                return back()->with('toast_error', 'Gagal membuat Delivery Order: tidak ada item yang sudah di-pick (qty_picked > 0) pada picking list ini.');
             }
 
             DB::commit();
 
             return redirect()->route('delivery-orders.show', $deliveryOrder)
                 ->with('toast_success', 'Delivery order created');
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             DB::rollBack();
 
-            return back()->with('toast_error', $e->getMessage());
+            \Log::error('Gagal generate delivery order', [
+                'picking_list_id' => $pickingList->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return back()->with('toast_error', 'Gagal membuat Delivery Order: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Generate DeliveryOrderItem dari PickingListItem yang qty_picked > 0.
+     * Dipakai baik dari generate() maupun sebagai self-healing dari show().
+     * Return jumlah item yang berhasil dibuat.
+     */
+    protected function generateDeliveryOrderItems(DeliveryOrder $deliveryOrder, PickingList $pickingList): int
+    {
+        $count = 0;
+
+        foreach ($pickingList->items()->with('stock')->get() as $pickItem) {
+            if ($pickItem->qty_picked <= 0) {
+                continue;
+            }
+
+            if (!$pickItem->stock) {
+                \Log::warning('PickingListItem tanpa relasi stock, dilewati saat generate DO item', [
+                    'picking_list_item_id' => $pickItem->id,
+                ]);
+                continue;
+            }
+
+            DeliveryOrderItem::create([
+                'delivery_order_id' => $deliveryOrder->id,
+                'product_id' => $pickItem->product_id,
+                'stock_id' => $pickItem->stock_id,
+                'qty' => $pickItem->qty_picked,
+                'sku' => $pickItem->stock->sku,
+                'expired_at' => $pickItem->stock->expired_at,
+                'harga_beli' => $pickItem->stock->harga_beli,
+            ]);
+
+            $count++;
+        }
+
+        return $count;
     }
 
     public function send(Request $request, DeliveryOrder $deliveryOrder)
