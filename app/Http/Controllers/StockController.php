@@ -402,33 +402,35 @@ class StockController extends Controller
 
     public function getOpnameData(Request $request)
     {
+        $request->validate([
+            'supplier_id' => 'required|integer|exists:suppliers,id',
+        ]);
+
         $query = Stock::with('product', 'pembelian.supplier')
             ->where('qty', '>=', 0)
             ->whereNotNull('sku')
             ->orderBy('product_id')
             ->orderBy('sku');
 
+        $query->whereHas('pembelian', fn($q) => $q->where('supplier_id', $request->input('supplier_id')));
+
         if ($lokasi = $request->input('lokasi')) {
             $query->whereHas('product', fn($q) => $q->where('lokasi', $lokasi));
         }
 
-        if ($supplierId = $request->input('supplier_id')) {
-            $query->whereHas('pembelian', fn($q) => $q->where('supplier_id', $supplierId));
-        }
-
         $stocks = $query->get()->map(function ($stock) {
             return [
-                'id'           => $stock->id,
-                'product_id'   => $stock->product_id,
-                'product_name' => $stock->product->name,
-                'product_code' => $stock->product->code,
-                'sku'          => $stock->sku,
-                'satuan'       => $stock->product->satuan ?? 'pcs',
-                'qty'          => $stock->qty,
-                'qty_reserved' => $stock->qty_reserved,
+                'id'            => $stock->id,
+                'product_id'    => $stock->product_id,
+                'product_name'  => $stock->product->name,
+                'product_code'  => $stock->product->code,
+                'sku'           => $stock->sku,
+                'satuan'        => $stock->product->satuan ?? 'pcs',
+                'qty'           => $stock->qty,
+                'qty_reserved'  => $stock->qty_reserved,
                 'qty_available' => $stock->qty_available,
-                'keterangan'   => $stock->adjustment?->keterangan ?? '',
-                'supplier'     => $stock->pembelian?->supplier?->name ?? '-',
+                'keterangan'    => $stock->adjustment?->keterangan ?? '',
+                'supplier'      => $stock->pembelian?->supplier?->name ?? '-',
             ];
         });
 

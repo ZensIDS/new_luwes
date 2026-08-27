@@ -29,14 +29,15 @@
                                 </td>
                             </tr>
                             <tr>
-                                <td style="white-space:nowrap">Supplier</td>
+                                <td style="white-space:nowrap">Supplier <span class="text-red">*</span></td>
                                 <td colspan="3">
                                     <select id="filterSupplier" class="form-control select2">
-                                        <option value="">-- Semua Supplier --</option>
+                                        <option value="">-- Pilih Supplier --</option>
                                         @foreach($supplierOptions as $sup)
                                             <option value="{{ $sup->id }}">{{ $sup->name }}</option>
                                         @endforeach
                                     </select>
+                                    <small class="text-muted">Pilih supplier terlebih dahulu untuk memuat data stock.</small>
                                 </td>
                             </tr>
                         </table>
@@ -58,17 +59,17 @@
                                 </thead>
                                 <tbody id="tableBody">
                                     <tr>
-                                        <td colspan="8" class="text-center">Loading...</td>
+                                        <td colspan="9" class="text-center">Silakan pilih Supplier terlebih dahulu.</td>
                                     </tr>
                                 </tbody>
                             </table>
                         </div>
 
                         <div class="mt-3 d-flex justify-content-between">
-                            <button id="tambahBaris" class="btn btn-primary">
+                            <button id="tambahBaris" class="btn btn-primary" disabled>
                                 <i class="fa fa-plus-circle"></i> Tambah Baris
                             </button>
-                            <button class="btn btn-success" id="btnSaveOpname">
+                            <button class="btn btn-success" id="btnSaveOpname" disabled>
                                 <i class="fa fa-save"></i> Save Stock Opname
                             </button>
                             <a id="btnExportTemplate" href="{{ route('stock.opname.export-template') }}"
@@ -95,25 +96,64 @@
         let allStockData = [];
 
         $(document).ready(function() {
-            loadStockData();
+            const params = new URLSearchParams(window.location.search);
+            const initialSupplier = params.get('supplier_id') || '';
+            const initialLokasi   = params.get('lokasi') || '';
+
+            // Preselect dropdown sesuai URL
+            if (initialSupplier) $('#filterSupplier').val(initialSupplier).trigger('change.select2');
+            if (initialLokasi)   $('#filterLokasi').val(initialLokasi).trigger('change.select2');
+
+            updateExportTemplateUrl();
+            $('#exportLokasi').val(initialLokasi);
+
+            if (initialSupplier) {
+                loadStockData();
+            } else {
+                renderEmptyState('Silakan pilih Supplier terlebih dahulu.');
+            }
+
+            function renderEmptyState(message) {
+                $('#tableBody').html(`<tr><td colspan="9" class="text-center">${message}</td></tr>`);
+                $('#tambahBaris').prop('disabled', true);
+                $('#btnSaveOpname').prop('disabled', true);
+                allStockData = [];
+            }
 
             function loadStockData() {
-                const lokasi     = $('#filterLokasi').val();
                 const supplierId = $('#filterSupplier').val();
+
+                if (!supplierId) {
+                    renderEmptyState('Silakan pilih Supplier terlebih dahulu.');
+                    return;
+                }
+
+                const lokasi = $('#filterLokasi').val();
+
+                renderEmptyState('Memuat data...');
+
                 $.get('{{ route('stock.opname.data') }}', {
                     lokasi:      lokasi,
                     supplier_id: supplierId,
                 }, function(data) {
                     allStockData = data.stocks;
                     renderInitialRows();
+                    $('#tambahBaris').prop('disabled', false);
+                    $('#btnSaveOpname').prop('disabled', false);
                 }).fail(function() {
                     alert('Gagal memuat data stock');
+                    renderEmptyState('Gagal memuat data. Silakan coba lagi.');
                 });
             }
 
             function renderInitialRows() {
                 const tbody = $('#tableBody');
                 tbody.empty();
+
+                if (allStockData.length === 0) {
+                    tbody.html('<tr><td colspan="9" class="text-center">Tidak ada data stock untuk supplier ini.</td></tr>');
+                    return;
+                }
 
                 allStockData.forEach((item, index) => {
                     const newRow = `
@@ -156,31 +196,48 @@
                 const supplierId = $('#filterSupplier').val();
                 const base       = '{{ route('stock.opname.export-template') }}';
 
-                const params = new URLSearchParams();
-                if (lokasi)     params.append('lokasi', lokasi);
-                if (supplierId) params.append('supplier_id', supplierId);
+                const exportParams = new URLSearchParams();
+                if (lokasi)     exportParams.append('lokasi', lokasi);
+                if (supplierId) exportParams.append('supplier_id', supplierId);
 
-                const query = params.toString();
+                const query = exportParams.toString();
                 $('#btnExportTemplate').attr('href', query ? base + '?' + query : base);
+            }
+
+            function reloadWithParams() {
+                const supplierId = $('#filterSupplier').val();
+                const lokasi     = $('#filterLokasi').val();
+
+                const newParams = new URLSearchParams();
+                if (supplierId) newParams.append('supplier_id', supplierId);
+                if (lokasi)     newParams.append('lokasi', lokasi);
+
+                const query = newParams.toString();
+                window.location.href = window.location.pathname + (query ? '?' + query : '');
             }
 
             $('#tglStockOpname').on('change', function() {
                 $('#exportTanggal').val($(this).val());
             });
 
-            $('#filterLokasi').on('change', function() {
-                $('#exportLokasi').val($(this).val());
-                updateExportTemplateUrl();
-                loadStockData();
+            // Ganti Supplier -> reload halaman
+            $('#filterSupplier').on('change', function() {
+                reloadWithParams();
             });
 
-            $('#filterSupplier').on('change', function() {
-                updateExportTemplateUrl();
-                loadStockData();
+            // Ganti Lokasi -> reload halaman juga (biar konsisten sumbernya dari URL)
+            $('#filterLokasi').on('change', function() {
+                reloadWithParams();
             });
 
             $('#tambahBaris').on('click', function(e) {
                 e.preventDefault();
+
+                if (!$('#filterSupplier').val()) {
+                    alert('Pilih Supplier terlebih dahulu.');
+                    return;
+                }
+
                 const newRow = `
             <tr>
                 <td></td>
@@ -231,6 +288,11 @@
             });
 
             $('#btnSaveOpname').on('click', function() {
+                if (!$('#filterSupplier').val()) {
+                    alert('Pilih Supplier terlebih dahulu.');
+                    return;
+                }
+
                 const tglStockOpname = $('#tglStockOpname').val();
                 if (!tglStockOpname) {
                     alert('Tanggal Stock Opname harus diisi!');
