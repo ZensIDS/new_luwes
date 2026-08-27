@@ -11,13 +11,8 @@
 <!-- - Print Out Surat jalan dari gudang
   apakah bisa diberi keterangan misal sudah di print sebelumnya? -> (Belum Tau Bisa Atau Tidak) -->
 <!-- - Error Delivery Order (Kosong) -> (Delivery Order Items Failed Created) -->
-
-- Permintaan barang dari toko
+<!-- - Permintaan barang dari toko
   Tolong tidak bisa minta 1 barcode (barang yang sama) 2x
-  sekarang 1 surat bisa minta barang yang sama -> (Check Add Request Order)
-
-- Untuk permintaan dari toko
-  apa bisa dikerjakan 2 orang sekaligus?
-  untuk nomor req nya gimana ya? -> (Bisa tapi harus beda nomor req)
+  sekarang 1 surat bisa minta barang yang sama -> (Check Add Request Order) -->
 
 - Tambahkan Autosave di create PO

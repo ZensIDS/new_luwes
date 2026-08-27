@@ -15,16 +15,8 @@
                         <div class="row mb-3">
                             <div class="col-md-6">
                                 <label class="form-label">Pilih SKU</label>
-                                <select id="selectStock" class="form-control select2">
+                                <select id="selectStock" class="form-control" style="width: 100%">
                                     <option value="">-- Pilih SKU --</option>
-                                    @foreach ($stocks as $stock)
-                                        <option value="{{ $stock['id'] }}" data-sku="{{ $stock['sku'] }}"
-                                            data-product="{{ $stock['product_name'] }}"
-                                            data-supplier="{{ $stock['supplier'] }}">
-                                            SKU: {{ $stock['sku'] }} - {{ $stock['product_name'] }}
-                                            ({{ $stock['supplier'] }}) | {{ $stock['product_code'] }}
-                                        </option>
-                                    @endforeach
                                 </select>
                             </div>
                             <div class="col-md-2">
@@ -144,7 +136,37 @@
             // Initialize select2
             $('#selectStock').select2({
                 placeholder: '-- Pilih SKU --',
-                width: '100%'
+                width: '100%',
+                minimumInputLength: 2,
+                ajax: {
+                    url: '{{ route('stocks.search') }}',
+                    dataType: 'json',
+                    delay: 300,
+                    data: function (params) {
+                        return {
+                            q: params.term,
+                            page: params.page || 1
+                        };
+                    },
+                    processResults: function (data) {
+                        return {
+                            results: data.results,
+                            pagination: data.pagination
+                        };
+                    },
+                    cache: true
+                },
+                language: {
+                    inputTooShort: function () {
+                        return 'Ketik minimal 2 huruf untuk mencari SKU...';
+                    },
+                    searching: function () {
+                        return 'Mencari...';
+                    },
+                    noResults: function () {
+                        return 'SKU tidak ditemukan';
+                    }
+                }
             });
 
             // Enable button when stock selected

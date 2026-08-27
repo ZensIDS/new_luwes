@@ -146,24 +146,48 @@ class StockController extends Controller
     //kartu
     public function kartu(Request $request)
     {
-        $stocks = Stock::with('product', 'pembelian.supplier')
-            ->whereNotNull('sku')
+        return view('stocks.kartu');
+    }
+
+    public function searchStock(Request $request)
+    {
+        $search = trim((string) $request->get('q', ''));
+        $page = max((int) $request->get('page', 1), 1);
+        $perPage = 20;
+
+        $query = Stock::with('product', 'pembelian.supplier')
+            ->whereNotNull('sku');
+
+        if ($search !== '') {
+            $query->where(function ($q) use ($search) {
+                $q->where('sku', 'like', "{$search}%") // prefix match, masih bisa manfaatkan index kalau ada
+                    ->orWhereHas('product', function ($p) use ($search) {
+                        $p->where('name', 'like', "%{$search}%")
+                            ->orWhere('code', 'like', "{$search}%");
+                    });
+            });
+        }
+
+        $total = (clone $query)->count();
+
+        $stocks = $query
             ->orderBy('product_id')
             ->orderBy('sku')
+            ->skip(($page - 1) * $perPage)
+            ->take($perPage)
             ->get()
             ->map(function ($stock) {
                 return [
-                    'id' => $stock->id,
-                    'sku' => $stock->sku,
-                    'product_name' => $stock->product->name,
-                    'product_code' => $stock->product->code,
-                    'supplier' => $stock->pembelian->supplier->name ?? '-',
-                    'harga_beli' => $stock->harga_beli,
+                    'id'   => $stock->id,
+                    'text' => "SKU: {$stock->sku} - {$stock->product->name} (" . ($stock->pembelian->supplier->name ?? '-') . ") | {$stock->product->code}",
                 ];
             });
 
-        return view('stocks.kartu', [
-            'stocks' => $stocks,
+        return response()->json([
+            'results' => $stocks,
+            'pagination' => [
+                'more' => ($page * $perPage) < $total,
+            ],
         ]);
     }
 
@@ -212,6 +236,9 @@ class StockController extends Controller
             ->orderBy('created_at', 'asc')
             ->get();
 
+        // ==== PERBAIKAN UTAMA: batch-load semua reference sekaligus, hindari query per baris ====
+        $keteranganMap = $this->buildKeteranganMap($movements, $stock);
+
         // Build transactions with running balance
         $result = [];
         $runningStock = 0;
@@ -225,8 +252,6 @@ class StockController extends Controller
             $stokAkhir = $stokAwal + $masuk - $keluar;
             $nilai = $stokAkhir * $currentPrice;
 
-            $keterangan = $this->buildKartuKeterangan($movement, $stock);
-
             $result[] = [
                 'tanggal' => $date,
                 'stok_awal' => $stokAwal,
@@ -235,7 +260,7 @@ class StockController extends Controller
                 'stok_akhir' => $stokAkhir,
                 'harga' => $currentPrice,
                 'nilai' => $nilai,
-                'keterangan' => $keterangan,
+                'keterangan' => $keteranganMap[$movement->id] ?? '-',
             ];
 
             $runningStock = $stokAkhir;
@@ -260,37 +285,75 @@ class StockController extends Controller
         ]);
     }
 
-    protected function buildKartuKeterangan(StockMovement $movement, Stock $stock): string
+    /**
+     * Ganti buildKartuKeterangan() lama yang query per baris.
+     * Fungsi ini query StockAdjustment & RefundPembelianItem SEKALI SAJA
+     * (pakai whereIn), lalu hasilnya dipetakan per movement_id di memory.
+     */
+    protected function buildKeteranganMap($movements, Stock $stock): array
     {
-        $parts = [];
+        $map = [];
 
-        $this->appendKeteranganPart($parts, $movement->notes);
+        // Kelompokkan reference_id per tipe, supaya bisa 1x query per tipe (bukan per baris)
+        $adjustmentIds = $movements
+            ->where('reference_type', StockAdjustment::class)
+            ->pluck('reference_id')
+            ->unique()
+            ->values();
 
-        if ($movement->reference_type === StockAdjustment::class) {
-            $adjustment = StockAdjustment::find($movement->reference_id);
+        $refundMovementIds = $movements
+            ->where('reference_type', RefundPembelian::class)
+            ->pluck('reference_id')
+            ->unique()
+            ->values();
 
-            if ($adjustment && $adjustment->stock_id === $stock->id) {
-                $this->appendKeteranganPart($parts, $adjustment->keterangan);
-                $this->appendKeteranganPart($parts, $adjustment->reason);
+        // 1x query untuk semua StockAdjustment terkait
+        $adjustments = $adjustmentIds->isNotEmpty()
+            ? StockAdjustment::whereIn('id', $adjustmentIds)
+            ->where('stock_id', $stock->id)
+            ->get()
+            ->keyBy('id')
+            : collect();
+
+        // 1x query untuk semua RefundPembelianItem terkait
+        $refundItems = $refundMovementIds->isNotEmpty()
+            ? RefundPembelianItem::whereIn('refund_pembelian_id', $refundMovementIds)
+            ->where('product_id', $stock->product_id)
+            ->where(function ($query) use ($stock) {
+                $query->where('stock_id', $stock->id)
+                    ->orWhere('sku', $stock->sku);
+            })
+            ->orderByDesc('id')
+            ->get()
+            ->groupBy('refund_pembelian_id') // ambil yang 'latest' per refund_pembelian_id nanti
+            : collect();
+
+        foreach ($movements as $movement) {
+            $parts = [];
+
+            $this->appendKeteranganPart($parts, $movement->notes);
+
+            if ($movement->reference_type === StockAdjustment::class) {
+                $adjustment = $adjustments->get($movement->reference_id);
+
+                if ($adjustment) {
+                    $this->appendKeteranganPart($parts, $adjustment->keterangan);
+                    $this->appendKeteranganPart($parts, $adjustment->reason);
+                }
             }
+
+            if ($movement->reference_type === RefundPembelian::class) {
+                $refundItem = optional($refundItems->get($movement->reference_id))->first();
+
+                if ($refundItem && ! empty($refundItem->alasan)) {
+                    $this->appendKeteranganPart($parts, 'Alasan retur: ' . $refundItem->alasan);
+                }
+            }
+
+            $map[$movement->id] = ! empty($parts) ? implode(' | ', $parts) : '-';
         }
 
-        if ($movement->reference_type === RefundPembelian::class) {
-            $refundItem = RefundPembelianItem::where('refund_pembelian_id', $movement->reference_id)
-                ->where('product_id', $movement->product_id)
-                ->where(function ($query) use ($stock) {
-                    $query->where('stock_id', $stock->id)
-                        ->orWhere('sku', $stock->sku);
-                })
-                ->latest('id')
-                ->first();
-
-            if ($refundItem && ! empty($refundItem->alasan)) {
-                $this->appendKeteranganPart($parts, 'Alasan retur: ' . $refundItem->alasan);
-            }
-        }
-
-        return ! empty($parts) ? implode(' | ', $parts) : '-';
+        return $map;
     }
 
     protected function appendKeteranganPart(array &$parts, ?string $value): void

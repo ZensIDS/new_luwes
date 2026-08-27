@@ -161,6 +161,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|owner|superadmin'])->group(fu
 
     // Stock Kartu
     Route::get('/stock-kartu', [App\Http\Controllers\StockController::class, 'kartu'])->name('stock.kartu');
+    Route::get('/stocks/search', [StockController::class, 'searchStock'])->name('stocks.search');
     Route::get('/stock/kartu/data', [App\Http\Controllers\StockController::class, 'getKartuData'])->name('stock.kartu.data');
 
     // Stock Opname
