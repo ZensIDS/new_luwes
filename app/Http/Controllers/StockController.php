@@ -155,40 +155,32 @@ class StockController extends Controller
         $page = max((int) $request->get('page', 1), 1);
         $perPage = 20;
 
-        $query = Stock::with('product', 'pembelian.supplier')
-            ->whereNotNull('sku');
+        $query = Product::query()
+            ->whereHas('stocks', fn($q) => $q->whereNotNull('sku'));
 
         if ($search !== '') {
             $query->where(function ($q) use ($search) {
-                $q->where('sku', 'like', "{$search}%")
-                    ->orWhereHas('product', function ($p) use ($search) {
-                        $p->where('name', 'like', "%{$search}%")
-                            ->orWhere('code', 'like', "{$search}%");
-                    });
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('code', 'like', "{$search}%");
             });
         }
 
         $total = (clone $query)->count();
 
-        $stocks = $query
-            ->orderBy('product_id')
-            ->orderBy('sku')
+        $products = $query
+            ->orderBy('name')
             ->skip(($page - 1) * $perPage)
             ->take($perPage)
             ->get()
-            ->map(function ($stock) {
-                $productName = $stock->product?->name ?? '(Produk Dihapus)';
-                $productCode = $stock->product?->code ?? '-';
-                $supplierName = $stock->pembelian?->supplier?->name ?? '-';
-
+            ->map(function ($product) {
                 return [
-                    'id'   => $stock->id,
-                    'text' => "SKU: {$stock->sku} - {$productName} ({$supplierName}) | {$productCode}",
+                    'id'   => $product->id,
+                    'text' => "{$product->name} | {$product->code}",
                 ];
             });
 
         return response()->json([
-            'results' => $stocks,
+            'results' => $products,
             'pagination' => [
                 'more' => ($page * $perPage) < $total,
             ],
@@ -198,99 +190,111 @@ class StockController extends Controller
     public function getKartuData(Request $request)
     {
         $request->validate([
-            'stock_id' => 'required|exists:stocks,id'
+            'product_id' => 'required|exists:products,id'
         ], [
-            'stock_id.required' => 'Stok harus dipilih.',
-            'stock_id.exists' => 'Stok yang dipilih tidak ditemukan.',
+            'product_id.required' => 'Produk harus dipilih.',
+            'product_id.exists' => 'Produk yang dipilih tidak ditemukan.',
         ]);
 
-        $stock = Stock::with('product', 'pembelian.supplier')->find($request->stock_id);
+        $product = Product::find($request->product_id);
 
-        if (! $stock) {
-            return response()->json(['error' => 'Stock tidak ditemukan'], 404);
+        if (! $product) {
+            return response()->json(['error' => 'Produk tidak ditemukan'], 404);
         }
 
-        if (! $stock->product) {
-            return response()->json([
-                'error' => 'Produk untuk stok ini sudah dihapus, kartu stok tidak dapat ditampilkan.',
-            ], 422);
-        }
-
-        // Ambil semua stok (semua SKU/batch) untuk produk yang sama
-        $productStocks = Stock::with('pembelian.supplier')
-            ->where('product_id', $stock->product_id)
+        // Ambil semua stok (semua SKU/batch) untuk produk ini
+        $stocks = Stock::with('pembelian.supplier')
+            ->where('product_id', $product->id)
             ->whereNotNull('sku')
             ->orderBy('sku')
-            ->get()
-            ->map(function ($s) {
-                return [
-                    'stock_id'      => $s->id,
-                    'sku'           => $s->sku,
-                    'qty_available' => (int) ($s->qty_available ?? 0),
-                    'status'        => $s->status,
-                    'supplier'      => $s->pembelian?->supplier?->name ?? '-',
-                ];
-            });
+            ->get();
+
+        $productStocks = $stocks->map(function ($s) {
+            return [
+                'stock_id'      => $s->id,
+                'sku'           => $s->sku,
+                'qty_available' => (int) ($s->qty_available ?? 0),
+                'status'        => $s->status,
+                'supplier'      => $s->pembelian?->supplier?->name ?? '-',
+            ];
+        });
 
         $totalProductStock = $productStocks->sum('qty_available');
 
-        // Get all stock movements for this product with this SKU
-        $movements = StockMovement::where('product_id', $stock->product_id)
-            ->where(function ($q) use ($stock) {
-                $q->where('notes', 'like', "%SKU: {$stock->sku}%")
-                    ->orWhere(function ($q2) use ($stock) {
-                        $q2->where('reference_type', 'App\Models\Pembelian')
-                            ->where('reference_id', $stock->pembelian_id);
-                    });
-            })
-            ->orderBy('created_at', 'asc')
-            ->get();
+        $suppliersDisplay = $productStocks
+            ->pluck('supplier')
+            ->filter(fn($s) => $s && $s !== '-')
+            ->unique()
+            ->values()
+            ->implode(', ');
 
-        // ==== PERBAIKAN UTAMA: batch-load semua reference sekaligus, hindari query per baris ====
-        $keteranganMap = $this->buildKeteranganMap($movements, $stock);
+        // Gabungkan transaksi dari semua SKU/batch produk ini,
+        // running balance tetap dihitung per SKU (batch) secara independen
+        $allTransactions = collect();
 
-        // Build transactions with running balance
-        $result = [];
-        $runningStock = 0;
-        $currentPrice = $stock->harga_beli;
+        foreach ($stocks as $stock) {
+            $movements = StockMovement::where('product_id', $product->id)
+                ->where(function ($q) use ($stock) {
+                    $q->where('notes', 'like', "%SKU: {$stock->sku}%")
+                        ->orWhere(function ($q2) use ($stock) {
+                            $q2->where('reference_type', 'App\Models\Pembelian')
+                                ->where('reference_id', $stock->pembelian_id);
+                        });
+                })
+                ->orderBy('created_at', 'asc')
+                ->get();
 
-        foreach ($movements as $movement) {
-            $date = $movement->created_at->format('Y-m-d');
-            $stokAwal = $runningStock;
-            $masuk = $movement->qty_in ?? 0;
-            $keluar = $movement->qty_out ?? 0;
-            $stokAkhir = $stokAwal + $masuk - $keluar;
-            $nilai = $stokAkhir * $currentPrice;
+            $keteranganMap = $this->buildKeteranganMap($movements, $stock);
 
-            $result[] = [
-                'tanggal' => $date,
-                'stok_awal' => $stokAwal,
-                'masuk' => $masuk,
-                'keluar' => $keluar,
-                'stok_akhir' => $stokAkhir,
-                'harga' => $currentPrice,
-                'nilai' => $nilai,
-                'keterangan' => $keteranganMap[$movement->id] ?? '-',
-            ];
+            $runningStock = 0;
+            $currentPrice = $stock->harga_beli;
 
-            $runningStock = $stokAkhir;
+            foreach ($movements as $movement) {
+                $stokAwal = $runningStock;
+                $masuk = $movement->qty_in ?? 0;
+                $keluar = $movement->qty_out ?? 0;
+                $stokAkhir = $stokAwal + $masuk - $keluar;
+                $nilai = $stokAkhir * $currentPrice;
+
+                $allTransactions->push([
+                    'sort_key'   => $movement->created_at->format('Y-m-d H:i:s') . '-' . str_pad($movement->id, 10, '0', STR_PAD_LEFT),
+                    'tanggal'    => $movement->created_at->format('Y-m-d'),
+                    'sku'        => $stock->sku,
+                    'stok_awal'  => $stokAwal,
+                    'masuk'      => $masuk,
+                    'keluar'     => $keluar,
+                    'stok_akhir' => $stokAkhir,
+                    'harga'      => $currentPrice,
+                    'nilai'      => $nilai,
+                    'keterangan' => $keteranganMap[$movement->id] ?? '-',
+                ]);
+
+                $runningStock = $stokAkhir;
+            }
         }
 
+        $result = $allTransactions
+            ->sortBy('sort_key')
+            ->values()
+            ->map(function ($t) {
+                unset($t['sort_key']);
+                return $t;
+            });
+
         return response()->json([
-            'stock' => [
-                'id'           => $stock->id,
-                'sku'          => $stock->sku,
-                'product_name' => $stock->product?->name ?? '(Produk Dihapus)',
-                'product_code' => $stock->product?->code ?? '-',
-                'supplier'     => $stock->pembelian?->supplier?->name ?? '-',
-                'konversi_qty' => $stock->product?->konversi_qty,
-                'satuan_besar' => $stock->product?->satuan_besar,
-                'satuan'       => $stock->product?->satuan,
+            'product' => [
+                'id'           => $product->id,
+                'name'         => $product->name,
+                'code'         => $product->code,
+                'suppliers'    => $suppliersDisplay ?: '-',
+                'konversi_qty' => $product->konversi_qty,
+                'satuan_besar' => $product->satuan_besar,
+                'satuan'       => $product->satuan,
             ],
-            'transactions' => $result,
+            'transactions' => $result->values(),
             'product_summary' => [
                 'total_qty' => $totalProductStock,
-                'breakdown' => $productStocks,
+                'breakdown' => $productStocks->values(),
             ],
         ]);
     }
