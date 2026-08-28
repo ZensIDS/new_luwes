@@ -18,163 +18,18 @@ class RequestOrderController extends Controller
 {
     public function index()
     {
-        // Halaman awal cuma butuh daftar outlet untuk filter dropdown — data request tidak di-query di sini.
-        $outlets = Outlet::orderBy('name')->get();
-
-        return view('request-orders.index', compact('outlets'));
-    }
-
-    public function getIndexData(Request $request)
-    {
-        $draw        = (int) $request->input('draw');
-        $start       = max((int) $request->input('start', 0), 0);
-        $length      = (int) $request->input('length', 25);
-        $length      = $length > 0 ? min($length, 100) : 25;
-        $searchValue = trim((string) ($request->input('search.value', '')));
-        $outletId    = $request->input('outlet_id');
-
-        $orderColIndex = (int) $request->input('order.0.column', 4);
-        $orderDir      = strtolower($request->input('order.0.dir', 'desc')) === 'asc' ? 'asc' : 'desc';
-
-        $sortableColumns = [
-            1 => 'request_orders.code',
-            2 => 'outlets.name',
-            4 => 'request_orders.request_date',
-            5 => 'request_orders.status',
-        ];
-        $orderBy = $sortableColumns[$orderColIndex] ?? 'request_orders.created_at';
-
-        $user = auth()->user();
-
-        $base = RequestOrder::query()
-            ->leftJoin('outlets', 'outlets.id', '=', 'request_orders.owner_id');
+        $user  = auth()->user();
+        $query = RequestOrder::with(['owner', 'requestedBy'])
+            ->orderBy('created_at', 'desc');
 
         // if ($user->role === 'staff-outlet') {
-        //     $base->where('request_orders.owner_id', $user->outlet_id);
+        //     $query->where('owner_id', $user->outlet_id);
         // }
 
-        if ($outletId) {
-            $base->where('request_orders.owner_id', $outletId);
-        }
+        $requests = $query->get();
+        $outlets  = Outlet::orderBy('name')->get();
 
-        $recordsTotal = (clone $base)->count('request_orders.id');
-
-        if ($searchValue !== '') {
-            $base->where(function ($q) use ($searchValue) {
-                $q->where('request_orders.code', 'like', "%{$searchValue}%")
-                    ->orWhere('outlets.name', 'like', "%{$searchValue}%");
-            });
-        }
-
-        $recordsFiltered = (clone $base)->count('request_orders.id');
-
-        $pageIds = $base
-            ->orderBy($orderBy, $orderDir)
-            ->offset($start)
-            ->limit($length)
-            ->pluck('request_orders.id');
-
-        // Relasi berat cuma dimuat untuk baris di halaman ini.
-        // 'pickingList' ditambahkan di sini -- sebelumnya dipakai di Blade tanpa eager load (N+1 tersembunyi).
-        $requests = RequestOrder::with(['owner', 'requestedBy', 'items.product', 'pickingList'])
-            ->whereIn('id', $pageIds)
-            ->get()
-            ->sortBy(fn($r) => array_search($r->id, $pageIds->all()))
-            ->values();
-
-        $data = $requests->map(function ($value) use ($user) {
-            // ==== Kolom Status ====
-            $statusMap = [
-                'pending'  => ['label-warning', 'Pending'],
-                'approved' => ['label-success', 'Approved'],
-                'partial'  => ['label-info', 'Partial'],
-                'rejected' => ['label-danger', 'Rejected'],
-            ];
-            [$statusClass, $statusText] = $statusMap[$value->status] ?? ['label-default', $value->status];
-            $statusHtml = '<span class="label ' . $statusClass . '">' . e($statusText) . '</span>';
-
-            // ==== Kolom Items ====
-            $totalItems = $value->items->count();
-            $itemsHtml = '<ul class="list-unstyled" style="margin:0">';
-            foreach ($value->items as $index => $item) {
-                $extraClass = $index >= 3 ? ' extra-item-ro-' . $value->id : '';
-                $style = $index >= 3 ? ' style="display:none"' : '';
-                $k = $item->product?->konversiDisplay($item->qty_requested);
-                $kLabel = ($k && $k !== '-') ? ' <span class="label label-info">' . e($k) . '</span>' : '';
-                $notesLabel = ! empty($item->notes) ? ' <span class="text-muted">– ' . e($item->notes) . '</span>' : '';
-
-                $itemsHtml .= '<li class="item-ro-' . $value->id . $extraClass . '"' . $style . '>'
-                    . '<small>' . e($item->product->code ?? 'Code') . ' | ' . e($item->product->name ?? 'Produk') . ': ' . e($item->qty_requested) . $kLabel . $notesLabel . '</small>'
-                    . '</li>';
-            }
-            $itemsHtml .= '</ul>';
-
-            if ($totalItems > 3) {
-                $itemsHtml .= '<a href="javascript:void(0)" class="btn-toggle-ro-items" data-target="' . $value->id . '" data-state="closed" style="display:inline-block; margin-top:4px;">'
-                    . '<span class="label label-default">Selengkapnya (' . ($totalItems - 3) . ')</span></a>';
-            }
-
-            // ==== Kolom Aksi (persis logic Blade lama) ====
-            $aksiHtml = '';
-
-            if (($value->status === 'approved' || $value->status === 'partial') && ! isset($value->pickingList)) {
-                $aksiHtml .= '<form action="' . route('picking-lists.generate', $value->id) . '" method="post">'
-                    . csrf_field()
-                    . '<button class="btn btn-xs btn-primary"><i class="fa fa-list"></i> Generate Picking List</button></form> ';
-            }
-
-            if ($user->role === 'staff-outlet') {
-                if ($value->status === 'approved' || $value->status === 'partial') {
-                    $aksiHtml .= '<a class="btn-xs btn btn-default" href="' . route('request-orders.show', $value->id) . '"><i class="fa fa-eye"></i> Detail</a> ';
-                } else {
-                    $aksiHtml .= '<a class="btn-xs btn btn-primary" href="' . route('request-orders.edit', $value->id) . '"><i class="fa fa-edit"></i> Edit</a> ';
-                    $aksiHtml .= '<a class="btn-xs btn btn-default" href="' . route('request-orders.show', $value->id) . '"><i class="fa fa-eye"></i> Detail</a> ';
-                    $aksiHtml .= '<form action="' . route('request-orders.destroy', $value->id) . '" method="POST" style="display:inline-block;" onsubmit="return confirm(\'Yakin hapus request ini?\')">'
-                        . csrf_field() . method_field('DELETE')
-                        . '<button type="submit" class="btn-xs btn btn-danger"><i class="fa fa-trash"></i> Hapus</button></form> ';
-                }
-            } else {
-                if ($value->status === 'approved' || $value->status === 'partial') {
-                    $aksiHtml .= '<a class="btn-xs btn btn-default" href="' . route('request-orders.show', $value->id) . '"><i class="fa fa-eye"></i> Detail</a> ';
-                } else {
-                    if ($user->role !== 'admin-gudang') {
-                        $aksiHtml .= '<a class="btn-xs btn btn-primary" href="' . route('request-orders.edit', $value->id) . '"><i class="fa fa-edit"></i> Edit</a> ';
-                    }
-
-                    if (! isset($value->owner_id)) {
-                        $aksiHtml .= '<a class="btn-xs btn btn-danger" href="#"> Outlet Belum Ditentukan</a> ';
-                    } else {
-                        $aksiHtml .= '<a class="btn-xs btn btn-default" href="' . route('request-orders.process', $value->id) . '"><i class="fa fa-eye"></i> Detail</a> ';
-                    }
-
-                    if ($user->role !== 'admin-gudang') {
-                        $aksiHtml .= '<form action="' . route('request-orders.destroy', $value->id) . '" method="POST" style="display:inline-block;" onsubmit="return confirm(\'Yakin hapus request ini?\')">'
-                            . csrf_field() . method_field('DELETE')
-                            . '<button type="submit" class="btn-xs btn btn-danger"><i class="fa fa-trash"></i> Hapus</button></form> ';
-                    }
-                }
-            }
-
-            $aksiHtml .= '<a class="btn-xs btn btn-success" href="' . route('laporan.request-order', $value->id) . '"><i class="fa fa-file-excel-o"></i> Export</a>';
-
-            return [
-                'id'            => $value->id,
-                'code'          => $value->code,
-                'owner'         => $value->owner->name ?? '-',
-                'requested_by'  => $value->requestedBy->name ?? '-',
-                'request_date'  => $value->request_date->format('d-m-Y'),
-                'status_html'   => $statusHtml,
-                'items_html'    => $itemsHtml,
-                'aksi_html'     => $aksiHtml,
-            ];
-        });
-
-        return response()->json([
-            'draw'            => $draw,
-            'recordsTotal'    => $recordsTotal,
-            'recordsFiltered' => $recordsFiltered,
-            'data'            => $data->values(),
-        ]);
+        return view('request-orders.index', compact('requests', 'outlets'));
     }
 
     public function create()

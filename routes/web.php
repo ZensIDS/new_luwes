@@ -19,7 +19,6 @@ use App\Http\Controllers\ProductMinimumAdjustmentController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RefundController;
 use App\Http\Controllers\RefundPembelianController;
-use App\Http\Controllers\RequestOrderController;
 use App\Http\Controllers\ReviewController;
 use App\Http\Controllers\SalesmanController;
 use App\Http\Controllers\SliderController;
@@ -119,7 +118,6 @@ Route::middleware(['role:admin-gudang|staff-outlet|owner|superadmin'])->group(fu
     Route::get('/laporan/labarugi', [LaporanController::class, 'exportLabaRugi'])->name('laporan.labarugi');
 
     // Request Orders
-    Route::get('request-orders/data', [RequestOrderController::class, 'getIndexData'])->name('request-orders.index.data');
     Route::resource('request-orders', App\Http\Controllers\RequestOrderController::class);
     Route::post('request-orders/{requestOrder}/update-stocks', [App\Http\Controllers\RequestOrderController::class, 'updateStocks'])->name('request-orders.update-stocks');
     Route::get('request-orders/{requestOrder}/verify', [App\Http\Controllers\RequestOrderController::class, 'verify'])->name('request-orders.verify');
@@ -151,7 +149,6 @@ Route::middleware(['role:admin-gudang|staff-outlet|owner|superadmin'])->group(fu
     Route::patch('picking-lists/{pickingList}/picker-name', [App\Http\Controllers\PickingListController::class, 'updatePickerName'])->name('picking-lists.update-picker-name');
 
     // Delivery Orders
-    Route::get('delivery-orders/data', [App\Http\Controllers\DeliveryOrderController::class, 'getIndexData'])->name('delivery-orders.index.data');
     Route::resource('delivery-orders', App\Http\Controllers\DeliveryOrderController::class);
     Route::post('picking-lists/{pickingList}/generate-do', [App\Http\Controllers\DeliveryOrderController::class, 'generate'])->name('delivery-orders.generate');
     Route::post('delivery-orders/{deliveryOrder}/send', [App\Http\Controllers\DeliveryOrderController::class, 'send'])->name('delivery-orders.send');
