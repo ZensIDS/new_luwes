@@ -59,10 +59,49 @@ class RequestOrderController extends Controller
 
         $recordsTotal = (clone $base)->count('request_orders.id');
 
+        // ==== SEARCH: meniru "smart search" DataTables, tapi tetap ringan ====
+        // DataTables (client-side) memecah input jadi kata per kata dan mencari baris
+        // yang mengandung SEMUA kata itu di kolom manapun, tidak peduli urutan/kerapatan.
+        // Contoh: "wing surya" tetap match "Wings Surya" karena "wing" dan "surya"
+        // masing-masing ketemu sebagai substring, walau tidak nempel persis.
+        //
+        // LIKE '%wing surya%' (satu string utuh) TIDAK match "Wings Surya" karena
+        // butuh substring persis "wing surya" -> data terasa "hilang" di versi lama.
+        //
+        // Fix: pecah $searchValue jadi per kata, AND-kan syarat antar kata (tiap kata
+        // wajib match di salah satu kolom), OR-kan antar kolom untuk kata yang sama.
+        //
+        // Kolom yang di-cover juga diperluas: kode dasarnya cuma cek code request &
+        // nama outlet -- padahal Blade lama menampilkan "requested_by" (nama user)
+        // dan detail produk per item, yang kemungkinan besar dulu ikut ke-search
+        // lewat DataTables client-side. Ditambahkan di sini supaya tidak "hilang" lagi.
+        //
+        // Supaya tetap ringan untuk ratusan ribu baris:
+        //  - Query dasar tetap hanya join outlets, tidak eager-load items/produk di sini.
+        //  - Pencarian ke requestedBy & produk pakai whereHas (EXISTS subquery),
+        //    bukan JOIN penuh, supaya tidak menggandakan baris request order.
+        //  - Jumlah kata dibatasi (maks 5) supaya query tidak bisa dibuat sangat berat.
+        //  - Pastikan ada index di request_orders.code, outlets.name, users.name,
+        //    products.name, products.code, serta foreign key request_order_items
+        //    (request_order_id / product_id).
         if ($searchValue !== '') {
-            $base->where(function ($q) use ($searchValue) {
-                $q->where('request_orders.code', 'like', "%{$searchValue}%")
-                    ->orWhere('outlets.name', 'like', "%{$searchValue}%");
+            $searchWords = preg_split('/\s+/', $searchValue, -1, PREG_SPLIT_NO_EMPTY);
+            $searchWords = array_slice($searchWords, 0, 5); // batasi biar tidak disalahgunakan
+
+            $base->where(function ($q) use ($searchWords) {
+                foreach ($searchWords as $word) {
+                    $q->where(function ($qw) use ($word) {
+                        $qw->where('request_orders.code', 'like', "%{$word}%")
+                            ->orWhere('outlets.name', 'like', "%{$word}%")
+                            ->orWhereHas('requestedBy', function ($qu) use ($word) {
+                                $qu->where('name', 'like', "%{$word}%");
+                            })
+                            ->orWhereHas('items.product', function ($qp) use ($word) {
+                                $qp->where('name', 'like', "%{$word}%")
+                                    ->orWhere('code', 'like', "%{$word}%");
+                            });
+                    });
+                }
             });
         }
 
@@ -70,6 +109,12 @@ class RequestOrderController extends Controller
 
         $pageIds = $base
             ->orderBy($orderBy, $orderDir)
+            // Tie-breaker unik. Kolom seperti "status" hanya punya 4 nilai berbeda,
+            // jadi banyak baris kembar. Tanpa secondary order by kolom unik, urutan
+            // hasil untuk baris bernilai sama TIDAK dijamin konsisten antar query ->
+            // saat DataTables pindah halaman / re-query gara-gara search, ada baris
+            // yang bisa terlewat (tidak pernah muncul di offset manapun) atau dobel.
+            ->orderBy('request_orders.id', $orderDir)
             ->offset($start)
             ->limit($length)
             ->pluck('request_orders.id');

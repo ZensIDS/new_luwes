@@ -79,11 +79,17 @@ class StockController extends Controller
 
         // Join ke products, categories, dan stocks (baris representatif) langsung di SQL
         // supaya search/filter/sort semuanya jalan di database.
+        // leftJoin ke pembelians + suppliers ditambahkan supaya search bisa menjangkau
+        // nama supplier (kolom itu ditampilkan di tabel tapi dulu tidak ikut ter-search
+        // sama sekali). Tetap leftJoin (bukan inner) supaya stock tanpa pembelian_id
+        // (mis. stok opname manual) tidak ikut hilang dari listing.
         $base = DB::table(DB::raw("({$grouped->toSql()}) as g"))
             ->mergeBindings($grouped->getQuery())
             ->join('products', 'products.id', '=', 'g.product_id')
             ->leftJoin('categories', 'categories.id', '=', 'products.category_id')
-            ->join('stocks as s', 's.id', '=', 'g.last_stock_id');
+            ->join('stocks as s', 's.id', '=', 'g.last_stock_id')
+            ->leftJoin('pembelians', 'pembelians.id', '=', 's.pembelian_id')
+            ->leftJoin('suppliers', 'suppliers.id', '=', 'pembelians.supplier_id');
 
         if ($kategori) {
             $base->where('categories.name', $kategori);
@@ -93,12 +99,37 @@ class StockController extends Controller
             $base->where('products.lokasi', $lokasi);
         }
 
+        // ==== SEARCH: meniru "smart search" DataTables, tapi tetap ringan ====
+        // DataTables (client-side) memecah input jadi kata per kata dan mencari baris
+        // yang mengandung SEMUA kata itu di kolom manapun, tidak peduli urutan/kerapatan.
+        // Contoh: "wing surya" tetap match "Wings Surya" karena "wing" dan "surya"
+        // masing-masing ketemu sebagai substring, walau tidak nempel persis.
+        //
+        // LIKE '%wing surya%' (satu string utuh) TIDAK match "Wings Surya" karena
+        // butuh substring persis "wing surya" -> data terasa "hilang" di versi lama.
+        //
+        // Fix: pecah $searchValue jadi per kata, AND-kan syarat antar kata (tiap kata
+        // wajib match di salah satu kolom), OR-kan antar kolom untuk kata yang sama.
+        // Ditambahkan juga 'suppliers.name' karena kolom itu tampil di tabel tapi
+        // sebelumnya tidak ikut ter-cover oleh search sama sekali.
+        //
+        // Ini query builder (bukan Eloquent), jadi semua kolom sudah di-JOIN langsung
+        // di $base -- tidak perlu whereHas/subquery seperti di controller lain, dan
+        // tetap satu query flat yang ringan untuk ratusan ribu baris.
         if ($searchValue !== '') {
-            $base->where(function ($q) use ($searchValue) {
-                $q->where('products.name', 'like', "%{$searchValue}%")
-                    ->orWhere('products.code', 'like', "%{$searchValue}%")
-                    ->orWhere('s.sku', 'like', "%{$searchValue}%")
-                    ->orWhere('s.serial_number', 'like', "%{$searchValue}%");
+            $searchWords = preg_split('/\s+/', $searchValue, -1, PREG_SPLIT_NO_EMPTY);
+            $searchWords = array_slice($searchWords, 0, 5); // batasi biar tidak disalahgunakan
+
+            $base->where(function ($q) use ($searchWords) {
+                foreach ($searchWords as $word) {
+                    $q->where(function ($qw) use ($word) {
+                        $qw->where('products.name', 'like', "%{$word}%")
+                            ->orWhere('products.code', 'like', "%{$word}%")
+                            ->orWhere('s.sku', 'like', "%{$word}%")
+                            ->orWhere('s.serial_number', 'like', "%{$word}%")
+                            ->orWhere('suppliers.name', 'like', "%{$word}%");
+                    });
+                }
             });
         }
 
@@ -106,6 +137,13 @@ class StockController extends Controller
 
         $rows = $base
             ->orderBy($orderBy, $orderDir)
+            // Tie-breaker unik. g.product_id unik per baris (hasil groupBy per product),
+            // jadi dipakai sebagai secondary sort supaya urutan baris dengan nilai kolom
+            // utama yang sama (mis. banyak produk dengan status/harga sama) tetap
+            // konsisten antar query. Tanpa ini, saat DataTables pindah halaman atau
+            // re-query gara-gara search, ada baris yang bisa terlewat (tidak pernah
+            // muncul di offset manapun) atau malah dobel.
+            ->orderBy('g.product_id', $orderDir)
             ->offset($start)
             ->limit($length)
             ->get([
@@ -129,7 +167,7 @@ class StockController extends Controller
                 'products.lokasi',
             ]);
 
-        // Data yang belum ikut di-join di atas (ownerStock.owner, pembelian.supplier):
+        // Data yang belum ikut di-join di atas (ownerStock.owner):
         // ambil terpisah, tapi HANYA untuk baris di halaman ini (max 100 row), bukan semua data.
         $stockIds = $rows->pluck('stock_id')->all();
 
