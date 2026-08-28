@@ -160,7 +160,7 @@ class StockController extends Controller
 
         if ($search !== '') {
             $query->where(function ($q) use ($search) {
-                $q->where('sku', 'like', "{$search}%") // prefix match, masih bisa manfaatkan index kalau ada
+                $q->where('sku', 'like', "{$search}%")
                     ->orWhereHas('product', function ($p) use ($search) {
                         $p->where('name', 'like', "%{$search}%")
                             ->orWhere('code', 'like', "{$search}%");
@@ -177,9 +177,13 @@ class StockController extends Controller
             ->take($perPage)
             ->get()
             ->map(function ($stock) {
+                $productName = $stock->product?->name ?? '(Produk Dihapus)';
+                $productCode = $stock->product?->code ?? '-';
+                $supplierName = $stock->pembelian?->supplier?->name ?? '-';
+
                 return [
                     'id'   => $stock->id,
-                    'text' => "SKU: {$stock->sku} - {$stock->product->name} (" . ($stock->pembelian->supplier->name ?? '-') . ") | {$stock->product->code}",
+                    'text' => "SKU: {$stock->sku} - {$productName} ({$supplierName}) | {$productCode}",
                 ];
             });
 
@@ -206,6 +210,12 @@ class StockController extends Controller
             return response()->json(['error' => 'Stock tidak ditemukan'], 404);
         }
 
+        if (! $stock->product) {
+            return response()->json([
+                'error' => 'Produk untuk stok ini sudah dihapus, kartu stok tidak dapat ditampilkan.',
+            ], 422);
+        }
+
         // Ambil semua stok (semua SKU/batch) untuk produk yang sama
         $productStocks = Stock::with('pembelian.supplier')
             ->where('product_id', $stock->product_id)
@@ -218,7 +228,7 @@ class StockController extends Controller
                     'sku'           => $s->sku,
                     'qty_available' => (int) ($s->qty_available ?? 0),
                     'status'        => $s->status,
-                    'supplier'      => $s->pembelian->supplier->name ?? '-',
+                    'supplier'      => $s->pembelian?->supplier?->name ?? '-',
                 ];
             });
 
@@ -270,12 +280,12 @@ class StockController extends Controller
             'stock' => [
                 'id'           => $stock->id,
                 'sku'          => $stock->sku,
-                'product_name' => $stock->product->name,
-                'product_code' => $stock->product->code,
-                'supplier'     => $stock->pembelian->supplier->name ?? '-',
-                'konversi_qty' => $stock->product->konversi_qty,
-                'satuan_besar' => $stock->product->satuan_besar,
-                'satuan'       => $stock->product->satuan,
+                'product_name' => $stock->product?->name ?? '(Produk Dihapus)',
+                'product_code' => $stock->product?->code ?? '-',
+                'supplier'     => $stock->pembelian?->supplier?->name ?? '-',
+                'konversi_qty' => $stock->product?->konversi_qty,
+                'satuan_besar' => $stock->product?->satuan_besar,
+                'satuan'       => $stock->product?->satuan,
             ],
             'transactions' => $result,
             'product_summary' => [
@@ -418,21 +428,23 @@ class StockController extends Controller
             $query->whereHas('product', fn($q) => $q->where('lokasi', $lokasi));
         }
 
-        $stocks = $query->get()->map(function ($stock) {
-            return [
-                'id'            => $stock->id,
-                'product_id'    => $stock->product_id,
-                'product_name'  => $stock->product->name,
-                'product_code'  => $stock->product->code,
-                'sku'           => $stock->sku,
-                'satuan'        => $stock->product->satuan ?? 'pcs',
-                'qty'           => $stock->qty,
-                'qty_reserved'  => $stock->qty_reserved,
-                'qty_available' => $stock->qty_available,
-                'keterangan'    => $stock->adjustment?->keterangan ?? '',
-                'supplier'      => $stock->pembelian?->supplier?->name ?? '-',
-            ];
-        });
+        $stocks = $query->get()
+            ->filter(fn($stock) => $stock->product !== null) // produk sudah dihapus -> skip dari opname
+            ->map(function ($stock) {
+                return [
+                    'id'            => $stock->id,
+                    'product_id'    => $stock->product_id,
+                    'product_name'  => $stock->product->name,
+                    'product_code'  => $stock->product->code,
+                    'sku'           => $stock->sku,
+                    'satuan'        => $stock->product->satuan ?? 'pcs',
+                    'qty'           => $stock->qty,
+                    'qty_reserved'  => $stock->qty_reserved,
+                    'qty_available' => $stock->qty_available,
+                    'keterangan'    => $stock->adjustment?->keterangan ?? '',
+                    'supplier'      => $stock->pembelian?->supplier?->name ?? '-',
+                ];
+            });
 
         return response()->json(['stocks' => $stocks->values()]);
     }

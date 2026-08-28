@@ -13,6 +13,7 @@ use App\Models\Category;
 use App\Models\Outlet;
 use App\Models\Product;
 use App\Models\ProductImport;
+use App\Models\Stock;
 use App\Models\Supplier;
 use Illuminate\Bus\Batch;
 use Illuminate\Http\Request;
@@ -40,7 +41,7 @@ class ProductController extends Controller
                         $stockQuery->where('serial_number', 'LIKE', "%{$search}%")
                             ->orWhere('status', 'LIKE', "%{$search}%");
                     });
-                });
+            });
         }
 
         if ($request->filled('outlet_id')) {
@@ -79,7 +80,7 @@ class ProductController extends Controller
             ->withSum('stocks as available_stock_qty', 'qty_available')
             ->withSum([
                 'stockPembelians as approved_stock_pembelians_qty' => function ($query) {
-                    $query->whereHas('pembelian', fn ($pembelian) => $pembelian->where('owner_approval_status', 'approved'));
+                    $query->whereHas('pembelian', fn($pembelian) => $pembelian->where('owner_approval_status', 'approved'));
                 },
             ], 'qty')
             ->orderBy('code')
@@ -92,7 +93,7 @@ class ProductController extends Controller
                 ->latest()
                 ->take(5)
                 ->get()
-                ->map(fn (ProductImport $productImport) => $this->formatProductImport($productImport)),
+                ->map(fn(ProductImport $productImport) => $this->formatProductImport($productImport)),
             'categories' => Category::orderBy('name')->get(['id', 'name']),
             'locations' => Product::query()
                 ->whereNotNull('lokasi')
@@ -131,13 +132,13 @@ class ProductController extends Controller
             $file = $request->file('pic');
 
             // Generate a unique file name
-            $fileName = time().'.'.$file->getClientOriginalExtension();
+            $fileName = time() . '.' . $file->getClientOriginalExtension();
 
             // Store the file
             $file->storeAs('public/pics', $fileName);
 
             // Add the file path to the data array
-            $data['pic'] = 'storage/pics/'.$fileName;
+            $data['pic'] = 'storage/pics/' . $fileName;
         }
 
         $product = Product::create($data);
@@ -191,9 +192,9 @@ class ProductController extends Controller
             }
             // Store the new image file
             $file = $request->file('pic');
-            $fileName = time().'.'.$file->getClientOriginalExtension();
+            $fileName = time() . '.' . $file->getClientOriginalExtension();
             $file->storeAs('public/pics', $fileName);
-            $data['pic'] = 'storage/pics/'.$fileName;
+            $data['pic'] = 'storage/pics/' . $fileName;
         }
         $product->update($data);
 
@@ -210,6 +211,15 @@ class ProductController extends Controller
 
     public function destroy(Product $product)
     {
+        $totalStock = Stock::where('product_id', $product->id)->sum('qty');
+
+        if ($totalStock > 0) {
+            return redirect()->back()->with(
+                'toast_error',
+                "Tidak dapat menghapus produk \"{$product->name}\" karena masih memiliki stok sebanyak {$totalStock}. Kosongkan stok terlebih dahulu sebelum menghapus produk."
+            );
+        }
+
         // Delete the image file
         if ($product->pic) {
             Storage::delete(str_replace('storage', 'public', $product->pic));
@@ -252,7 +262,7 @@ class ProductController extends Controller
             ->latest()
             ->take(5)
             ->get()
-            ->map(fn (ProductImport $productImport) => $this->formatProductImport($productImport));
+            ->map(fn(ProductImport $productImport) => $this->formatProductImport($productImport));
 
         return response()->json(['data' => $imports]);
     }
