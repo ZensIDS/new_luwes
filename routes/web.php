@@ -19,6 +19,7 @@ use App\Http\Controllers\ProductMinimumAdjustmentController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RefundController;
 use App\Http\Controllers\RefundPembelianController;
+use App\Http\Controllers\RequestOrderController;
 use App\Http\Controllers\ReviewController;
 use App\Http\Controllers\SalesmanController;
 use App\Http\Controllers\SliderController;
@@ -70,6 +71,8 @@ Route::middleware(['role:admin-gudang|staff-outlet|owner|superadmin'])->group(fu
 
     Route::resource('/pengeluaran', PengeluaranController::class);
     Route::get('/pembelian/cek-stok-produk', [PembelianController::class, 'getAllProducts'])->name('pembelian.all-products');
+    Route::get('pembelian/data', [PembelianController::class, 'getIndexData'])->name('pembelian.index.data');
+    Route::get('pembelian/penerimaan/data', [PembelianController::class, 'getPenerimaanIndexData'])->name('pembelian.penerimaan.index.data');
     Route::resource('/pembelian', PembelianController::class);
     Route::post('/pembelian/{pembelian}/owner-approve', [PembelianController::class, 'approveOwner'])->name('pembelian.owner-approve');
     Route::post('/pembelian/{pembelian}/owner-reject', [PembelianController::class, 'rejectOwner'])->name('pembelian.owner-reject');
@@ -116,6 +119,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|owner|superadmin'])->group(fu
     Route::get('/laporan/labarugi', [LaporanController::class, 'exportLabaRugi'])->name('laporan.labarugi');
 
     // Request Orders
+    Route::get('request-orders/data', [RequestOrderController::class, 'getIndexData'])->name('request-orders.index.data');
     Route::resource('request-orders', App\Http\Controllers\RequestOrderController::class);
     Route::post('request-orders/{requestOrder}/update-stocks', [App\Http\Controllers\RequestOrderController::class, 'updateStocks'])->name('request-orders.update-stocks');
     Route::get('request-orders/{requestOrder}/verify', [App\Http\Controllers\RequestOrderController::class, 'verify'])->name('request-orders.verify');
@@ -147,6 +151,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|owner|superadmin'])->group(fu
     Route::patch('picking-lists/{pickingList}/picker-name', [App\Http\Controllers\PickingListController::class, 'updatePickerName'])->name('picking-lists.update-picker-name');
 
     // Delivery Orders
+    Route::get('delivery-orders/data', [App\Http\Controllers\DeliveryOrderController::class, 'getIndexData'])->name('delivery-orders.index.data');
     Route::resource('delivery-orders', App\Http\Controllers\DeliveryOrderController::class);
     Route::post('picking-lists/{pickingList}/generate-do', [App\Http\Controllers\DeliveryOrderController::class, 'generate'])->name('delivery-orders.generate');
     Route::post('delivery-orders/{deliveryOrder}/send', [App\Http\Controllers\DeliveryOrderController::class, 'send'])->name('delivery-orders.send');
@@ -154,6 +159,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|owner|superadmin'])->group(fu
 
     // Owner Stocks
     Route::get('owner-stocks', [App\Http\Controllers\OwnerStockController::class, 'index'])->name('owner-stocks.index');
+    Route::get('stocks/data', [StockController::class, 'getIndexData'])->name('stocks.index.data');
     Route::get('owner-stocks/{owner}', [App\Http\Controllers\OwnerStockController::class, 'show'])->name('owner-stocks.show');
 
     Route::get('/product/{product}/price-history', [App\Http\Controllers\ProductController::class, 'priceHistory'])->name('product.price-history');

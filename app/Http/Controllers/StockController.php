@@ -20,55 +20,214 @@ class StockController extends Controller
     // NEW INDEX STOCK WITHOUT SKU
     public function index()
     {
-        // 1. Ambil total qty dikelompokkan berdasarkan product_id (dan kolom SKU jika SKU ada di tabel Stock)
-        // Asumsi: Jika SKU melekat di tabel 'products', kita perlu melakukan join atau mengubah query.
-        // Di bawah ini adalah solusi jika kita ingin mengelompokkan per item/varian unik.
+        // Halaman awal cuma butuh opsi filter (query ringan), TIDAK ambil data stock sama sekali.
+        $kategoriOptions = \App\Models\Category::orderBy('name')->pluck('name');
 
-        $stocks = Stock::with([
-            'product.category',
-            'pembelian.supplier',
-            'ownerStock.owner',
-        ])
-            ->selectRaw('
-            product_id,
-            SUM(qty) as total_qty,
-            MAX(id) as last_stock_id
-        ')
-            ->where('qty', '>', 0)
-            ->groupBy('product_id') // Jika SKU ada di tabel stocks, ganti atau tambahkan groupBy('sku') di sini
-            ->orderBy('product_id')
-            ->get()
-            ->map(function ($row) {
-                // Kita gunakan data dari baris itu sendiri atau relasinya
-                // Daripada query Stock::find() lagi di sini (N+1 query),
-                // Kita bisa manipulasi langsung atau menggunakan pendekatan subquery.
-
-                // Mengingat Anda ingin mengambil data supplier/pembelian dari baris 'terakhir' (MAX id),
-                // Pendekatan terbaik adalah menggunakan Subquery Join. Lihat opsi di bawah.
-            });
-
-        // --- OPSI TERBAIK & PALING BERSIH (Menggunakan Subquery) ---
-        // Mengambil stock terbaru untuk setiap product/SKU dengan total qty yang benar
-
-        $latestStockIds = Stock::selectRaw('MAX(id)')
-            ->where('qty', '>', 0)
-            ->groupBy('product_id'); // Tambahkan kolom SKU jika ingin pecah per SKU
-
-        $stocks = Stock::with([
-            'product.category',
-            'pembelian.supplier',
-            'ownerStock.owner',
-        ])
-            ->whereIn('id', $latestStockIds)
-            ->get()
-            ->map(function ($stock) {
-                // Hitung total qty untuk product_id ini secara akurat
-                $stock->qty_available = Stock::where('product_id', $stock->product_id)->sum('qty');
-                return $stock;
-            });
+        $lokasiOptions = Product::whereNotNull('lokasi')
+            ->where('lokasi', '!=', '')
+            ->distinct()
+            ->orderBy('lokasi')
+            ->pluck('lokasi');
 
         return view('stocks.index', [
-            'stocks' => $stocks,
+            'kategoriOptions' => $kategoriOptions,
+            'lokasiOptions'   => $lokasiOptions,
+        ]);
+    }
+
+    public function getIndexData(Request $request)
+    {
+        $draw        = (int) $request->input('draw');
+        $start       = max((int) $request->input('start', 0), 0);
+        $length      = (int) $request->input('length', 25);
+        $length      = $length > 0 ? min($length, 100) : 25; // guard, jangan biarkan client minta ribuan per page
+        $searchValue = trim((string) ($request->input('search.value', '')));
+        $kategori    = $request->input('kategori');
+        $lokasi      = $request->input('lokasi');
+
+        $orderColIndex = (int) $request->input('order.0.column', 3);
+        $orderDir      = strtolower($request->input('order.0.dir', 'asc')) === 'desc' ? 'desc' : 'asc';
+
+        // Kolom yang boleh dipakai untuk sorting (mapping index kolom DataTables -> kolom SQL asli)
+        // Kolom lain (Konversi, Stock Outlet, Action) sengaja tidak sortable karena
+        // datanya computed/relasi terpisah, bukan kolom langsung.
+        $sortableColumns = [
+            2 => 'products.code',
+            3 => 'products.name',
+            5 => 's.harga_beli',
+            7 => 's.qty_reserved',
+            8 => 'g.total_qty',
+            9 => 's.created_at',
+            10 => 's.expired_at',
+            11 => 's.status',
+        ];
+        $orderBy = $sortableColumns[$orderColIndex] ?? 'products.name';
+
+        // Grouping per product: satu baris representatif (stok terakhir) + total qty (SUM),
+        // dihitung SEKALI lewat SQL groupBy -- bukan N query terpisah per baris seperti sebelumnya.
+        $grouped = Stock::query()
+            ->select('product_id')
+            ->selectRaw('MAX(id) as last_stock_id')
+            ->selectRaw('SUM(qty) as total_qty')
+            ->where('qty', '>', 0)
+            ->groupBy('product_id');
+
+        // recordsTotal: total produk (tanpa filter search/kategori/lokasi) yang masih punya stock > 0
+        $recordsTotal = DB::table(DB::raw("({$grouped->toSql()}) as g"))
+            ->mergeBindings($grouped->getQuery())
+            ->count();
+
+        // Join ke products, categories, dan stocks (baris representatif) langsung di SQL
+        // supaya search/filter/sort semuanya jalan di database.
+        // leftJoin ke pembelians + suppliers ditambahkan supaya search bisa menjangkau
+        // nama supplier (kolom itu ditampilkan di tabel tapi dulu tidak ikut ter-search
+        // sama sekali). Tetap leftJoin (bukan inner) supaya stock tanpa pembelian_id
+        // (mis. stok opname manual) tidak ikut hilang dari listing.
+        $base = DB::table(DB::raw("({$grouped->toSql()}) as g"))
+            ->mergeBindings($grouped->getQuery())
+            ->join('products', 'products.id', '=', 'g.product_id')
+            ->leftJoin('categories', 'categories.id', '=', 'products.category_id')
+            ->join('stocks as s', 's.id', '=', 'g.last_stock_id')
+            ->leftJoin('pembelians', 'pembelians.id', '=', 's.pembelian_id')
+            ->leftJoin('suppliers', 'suppliers.id', '=', 'pembelians.supplier_id');
+
+        if ($kategori) {
+            $base->where('categories.name', $kategori);
+        }
+
+        if ($lokasi) {
+            $base->where('products.lokasi', $lokasi);
+        }
+
+        // ==== SEARCH: meniru "smart search" DataTables, tapi tetap ringan ====
+        // DataTables (client-side) memecah input jadi kata per kata dan mencari baris
+        // yang mengandung SEMUA kata itu di kolom manapun, tidak peduli urutan/kerapatan.
+        // Contoh: "wing surya" tetap match "Wings Surya" karena "wing" dan "surya"
+        // masing-masing ketemu sebagai substring, walau tidak nempel persis.
+        //
+        // LIKE '%wing surya%' (satu string utuh) TIDAK match "Wings Surya" karena
+        // butuh substring persis "wing surya" -> data terasa "hilang" di versi lama.
+        //
+        // Fix: pecah $searchValue jadi per kata, AND-kan syarat antar kata (tiap kata
+        // wajib match di salah satu kolom), OR-kan antar kolom untuk kata yang sama.
+        // Ditambahkan juga 'suppliers.name' karena kolom itu tampil di tabel tapi
+        // sebelumnya tidak ikut ter-cover oleh search sama sekali.
+        //
+        // Ini query builder (bukan Eloquent), jadi semua kolom sudah di-JOIN langsung
+        // di $base -- tidak perlu whereHas/subquery seperti di controller lain, dan
+        // tetap satu query flat yang ringan untuk ratusan ribu baris.
+        if ($searchValue !== '') {
+            $searchWords = preg_split('/\s+/', $searchValue, -1, PREG_SPLIT_NO_EMPTY);
+            $searchWords = array_slice($searchWords, 0, 5); // batasi biar tidak disalahgunakan
+
+            $base->where(function ($q) use ($searchWords) {
+                foreach ($searchWords as $word) {
+                    $q->where(function ($qw) use ($word) {
+                        $qw->where('products.name', 'like', "%{$word}%")
+                            ->orWhere('products.code', 'like', "%{$word}%")
+                            ->orWhere('s.sku', 'like', "%{$word}%")
+                            ->orWhere('s.serial_number', 'like', "%{$word}%")
+                            ->orWhere('suppliers.name', 'like', "%{$word}%");
+                    });
+                }
+            });
+        }
+
+        $recordsFiltered = (clone $base)->count();
+
+        $rows = $base
+            ->orderBy($orderBy, $orderDir)
+            // Tie-breaker unik. g.product_id unik per baris (hasil groupBy per product),
+            // jadi dipakai sebagai secondary sort supaya urutan baris dengan nilai kolom
+            // utama yang sama (mis. banyak produk dengan status/harga sama) tetap
+            // konsisten antar query. Tanpa ini, saat DataTables pindah halaman atau
+            // re-query gara-gara search, ada baris yang bisa terlewat (tidak pernah
+            // muncul di offset manapun) atau malah dobel.
+            ->orderBy('g.product_id', $orderDir)
+            ->offset($start)
+            ->limit($length)
+            ->get([
+                'g.product_id',
+                'g.total_qty',
+                's.id as stock_id',
+                's.sku',
+                's.serial_number',
+                's.harga_beli',
+                's.qty_reserved',
+                's.created_at',
+                's.expired_at',
+                's.status',
+                's.pembelian_id',
+                'products.name as product_name',
+                'products.code as product_code',
+                'products.konversi_qty',
+                'products.satuan_besar',
+                'products.satuan',
+                'categories.name as category_name',
+                'products.lokasi',
+            ]);
+
+        // Data yang belum ikut di-join di atas (ownerStock.owner):
+        // ambil terpisah, tapi HANYA untuk baris di halaman ini (max 100 row), bukan semua data.
+        $stockIds = $rows->pluck('stock_id')->all();
+
+        $ownerStockMap = Stock::whereIn('id', $stockIds)
+            ->with('ownerStock.owner')
+            ->get()
+            ->keyBy('id')
+            ->map(fn($s) => $s->ownerStock?->qty ?? 0);
+
+        $pembelianIds = $rows->pluck('pembelian_id')->filter()->unique()->all();
+        $supplierMap = \App\Models\Pembelian::whereIn('id', $pembelianIds)
+            ->with('supplier:id,name')
+            ->get()
+            ->keyBy('id')
+            ->map(fn($p) => $p->supplier?->name ?? '-');
+
+        $data = $rows->map(function ($row) use ($ownerStockMap, $supplierMap) {
+            $konversiQty  = $row->konversi_qty;
+            $satuanBesar  = $row->satuan_besar;
+            $satuan       = $row->satuan ?? 'PCS';
+
+            $konversiDisplay = function ($qty) use ($konversiQty, $satuanBesar, $satuan) {
+                $qty = (int) $qty;
+                if (! $konversiQty || ! $satuanBesar) {
+                    return null;
+                }
+                $boxes = intdiv($qty, $konversiQty);
+                $rem   = $qty % $konversiQty;
+                if ($rem === 0) return "{$boxes} {$satuanBesar}";
+                if ($boxes > 0) return "{$boxes} {$satuanBesar} {$rem} {$satuan}";
+                return "{$qty} {$satuan}";
+            };
+
+            $stockOutlet = $ownerStockMap->get($row->stock_id, 0);
+
+            return [
+                'product_id'     => $row->product_id,
+                'stock_id'       => $row->stock_id,
+                'code'           => $row->serial_number ?: $row->product_code,
+                'product_name'   => $row->product_name,
+                'konversi'       => $konversiDisplay($row->total_qty) ? '' : '', // ditangani di frontend via konversi_qty dsb
+                'konversi_qty'   => $konversiQty,
+                'satuan_besar'   => $satuanBesar,
+                'satuan'         => $satuan,
+                'harga_beli'     => (float) $row->harga_beli,
+                'stock_outlet'   => (int) $stockOutlet,
+                'qty_reserved'   => (int) $row->qty_reserved,
+                'qty_warehouse'  => (int) $row->total_qty,
+                'created_at'     => $row->created_at ? \Carbon\Carbon::parse($row->created_at)->format('h:i a / d-M-Y') : '-',
+                'expired_at'     => $row->expired_at ? \Carbon\Carbon::parse($row->expired_at)->format('d-M-Y') : '-',
+                'status'         => $row->status,
+                'supplier'       => $row->pembelian_id ? ($supplierMap->get($row->pembelian_id) ?? '-') : '-',
+            ];
+        });
+
+        return response()->json([
+            'draw'            => $draw,
+            'recordsTotal'    => $recordsTotal,
+            'recordsFiltered' => $recordsFiltered,
+            'data'            => $data->values(),
         ]);
     }
 

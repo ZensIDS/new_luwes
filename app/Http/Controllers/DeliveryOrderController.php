@@ -15,18 +15,108 @@ class DeliveryOrderController extends Controller
 {
     public function index()
     {
-        $user  = auth()->user();
-        $query = DeliveryOrder::with(['requestOrder', 'owner', 'items.product'])
-            ->orderBy('created_at', 'desc');
+        $outlets = Outlet::orderBy('name')->get();
+
+        return view('delivery-orders.index', compact('outlets'));
+    }
+
+    public function getIndexData(Request $request)
+    {
+        $draw        = (int) $request->input('draw');
+        $start       = max((int) $request->input('start', 0), 0);
+        $length      = (int) $request->input('length', 25);
+        $length      = $length > 0 ? min($length, 100) : 25;
+        $searchValue = trim((string) ($request->input('search.value', '')));
+        $outletId    = $request->input('outlet_id');
+
+        $orderColIndex = (int) $request->input('order.0.column', 4);
+        $orderDir      = strtolower($request->input('order.0.dir', 'desc')) === 'asc' ? 'asc' : 'desc';
+
+        $sortableColumns = [
+            1 => 'delivery_orders.code',
+            3 => 'outlets.name',
+            4 => 'delivery_orders.delivery_date',
+            5 => 'delivery_orders.status',
+        ];
+        $orderBy = $sortableColumns[$orderColIndex] ?? 'delivery_orders.created_at';
+
+        $user = auth()->user();
+        $authUser = $user;
+
+        $base = DeliveryOrder::query()
+            ->leftJoin('outlets', 'outlets.id', '=', 'delivery_orders.owner_id')
+            ->leftJoin('request_orders', 'request_orders.id', '=', 'delivery_orders.request_order_id');
 
         // if ($user->role === 'staff-outlet') {
-        //     $query->where('owner_id', $user->outlet_id);
+        //     $base->where('delivery_orders.owner_id', $user->outlet_id);
         // }
 
-        $deliveryOrders = $query->get();
-        $outlets        = Outlet::orderBy('name')->get();
+        if ($outletId) {
+            $base->where('delivery_orders.owner_id', $outletId);
+        }
 
-        return view('delivery-orders.index', compact('deliveryOrders', 'outlets'));
+        $recordsTotal = (clone $base)->count('delivery_orders.id');
+
+        if ($searchValue !== '') {
+            $base->where(function ($q) use ($searchValue) {
+                $q->where('delivery_orders.code', 'like', "%{$searchValue}%")
+                    ->orWhere('outlets.name', 'like', "%{$searchValue}%")
+                    ->orWhere('request_orders.code', 'like', "%{$searchValue}%");
+            });
+        }
+
+        $recordsFiltered = (clone $base)->count('delivery_orders.id');
+
+        $pageIds = $base
+            ->orderBy($orderBy, $orderDir)
+            ->offset($start)
+            ->limit($length)
+            ->pluck('delivery_orders.id');
+
+        // Relasi berat cuma dimuat untuk baris di halaman ini
+        $deliveryOrders = DeliveryOrder::with(['requestOrder', 'owner', 'items.product'])
+            ->whereIn('id', $pageIds)
+            ->get()
+            ->sortBy(fn($d) => array_search($d->id, $pageIds->all()))
+            ->values();
+
+        $statusMap = [
+            'draft'     => ['label-default', 'Draft'],
+            'sent'      => ['label-info', 'Sent'],
+            'delivered' => ['label-success', 'Delivered'],
+            'completed' => ['label-primary', 'Completed'],
+        ];
+
+        $data = $deliveryOrders->map(function ($value) use ($statusMap, $authUser) {
+            [$statusClass, $statusText] = $statusMap[$value->status] ?? ['label-default', $value->status];
+            $statusHtml = '<span class="label ' . $statusClass . '">' . e($statusText) . '</span>';
+
+            $aksiHtml = '<a class="btn-xs btn btn-default" href="' . route('delivery-orders.show', $value->id) . '"><i class="fa fa-eye"></i> Detail</a> ';
+
+            if ($authUser->role !== 'admin-gudang' && in_array($value->status, ['draft', 'sent'])) {
+                $aksiHtml .= '<button class="btn-xs btn btn-success" data-toggle="modal" data-target="#sendModal' . $value->id . '">Delivery Completed</button> ';
+                $aksiHtml .= view('delivery-orders._send-modal', ['do' => $value])->render() . ' ';
+            }
+
+            $aksiHtml .= '<a class="btn-xs btn btn-success" href="' . route('laporan.delivery-order', $value->id) . '"><i class="fa fa-file-excel-o"></i> Export</a>';
+
+            return [
+                'id'             => $value->id,
+                'code'           => $value->code,
+                'request_order'  => $value->requestOrder->code ?? '-',
+                'owner'          => $value->owner->name ?? '-',
+                'delivery_date'  => $value->delivery_date->format('d-m-Y'),
+                'status_html'    => $statusHtml,
+                'aksi_html'      => $aksiHtml,
+            ];
+        });
+
+        return response()->json([
+            'draw'            => $draw,
+            'recordsTotal'    => $recordsTotal,
+            'recordsFiltered' => $recordsFiltered,
+            'data'            => $data->values(),
+        ]);
     }
 
     public function show(DeliveryOrder $deliveryOrder)

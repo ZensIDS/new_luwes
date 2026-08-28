@@ -33,135 +33,17 @@
                         <table id="example1" class="table table-bordered table-striped">
                             <thead>
                                 <tr>
-                                    <td>No</td>
-                                    <td>Kode Request</td>
-                                    <td>Owner (Outlet)</td>
-                                    <td>Requested By</td>
-                                    <td>Tanggal Request</td>
-                                    <td>Status</td>
-                                    <td>Items</td>
-                                    <td>Aksi</td>
+                                    <th>No</th>
+                                    <th>Kode Request</th>
+                                    <th>Owner (Outlet)</th>
+                                    <th>Requested By</th>
+                                    <th>Tanggal Request</th>
+                                    <th>Status</th>
+                                    <th>Items</th>
+                                    <th>Aksi</th>
                                 </tr>
                             </thead>
-                            @foreach ($requests as $value)
-                                <tr data-outlet="{{ $value->owner_id ?? '' }}">
-                                    <td>{{ $loop->iteration }}</td>
-                                    <td>{{ $value->code }}</td>
-                                    <td>{{ $value->owner->name ?? '-' }}</td>
-                                    <td>{{ $value->requestedBy->name ?? '-' }}</td>
-                                    <td>{{ $value->request_date->format('d-m-Y') }}</td>
-                                    <td>
-                                        @if ($value->status == 'pending')
-                                            <span class="label label-warning">Pending</span>
-                                        @elseif ($value->status == 'approved')
-                                            <span class="label label-success">Approved</span>
-                                        @elseif ($value->status == 'partial')
-                                            <span class="label label-info">Partial</span>
-                                        @elseif ($value->status == 'rejected')
-                                            <span class="label label-danger">Rejected</span>
-                                        @else
-                                            <span class="label label-default">{{ $value->status }}</span>
-                                        @endif
-                                    </td>
-                                    <td>
-                                        @php $totalItems = $value->items->count(); @endphp
-                                        <ul class="list-unstyled" style="margin:0">
-                                            @foreach ($value->items as $index => $item)
-                                                <li class="item-ro-{{ $value->id }} @if($index >= 3) extra-item-ro-{{ $value->id }} @endif"
-                                                    @if($index >= 3) style="display:none" @endif>
-                                                    <small>
-                                                        {{ $item->product->code ?? 'Code' }} | {{ $item->product->name ?? 'Produk' }}: {{ $item->qty_requested }}
-                                                        @php $k = $item->product?->konversiDisplay($item->qty_requested); @endphp
-                                                        @if($k && $k !== '-')
-                                                            <span class="label label-info">{{ $k }}</span>
-                                                        @endif
-                                                        @if (!empty($item->notes))
-                                                            <span class="text-muted">– {{ $item->notes }}</span>
-                                                        @endif
-                                                    </small>
-                                                </li>
-                                            @endforeach
-                                        </ul>
-
-                                        @if($totalItems > 3)
-                                            <a href="javascript:void(0)"
-                                                class="btn-toggle-ro-items"
-                                                data-target="{{ $value->id }}"
-                                                data-state="closed"
-                                                style="display:inline-block; margin-top:4px;">
-                                                <span class="label label-default">
-                                                    Selengkapnya ({{ $totalItems - 3 }})
-                                                </span>
-                                            </a>
-                                        @endif
-                                    </td>
-                                    <td>
-                                        {{-- @if ($value->status == 'pending') --}}
-                                            {{-- <a class="btn-xs btn btn-warning" href="{{ route('request-orders.edit', $value->id) }}">Edit</a> --}}
-                                            {{-- <form action="{{ route('request-orders.destroy', $value->id) }}" method="post" style="display: inline;"> --}}
-                                                {{-- @method('delete') --}}
-                                                {{-- @csrf --}}
-                                                {{-- <button class="border-0 btn-xs btn btn-danger" onclick="return confirm('Are you sure?')">Hapus</button> --}}
-                                            {{-- </form> --}}
-                                        {{-- @else --}}
-                                            <!-- optional print if needed -->
-                                            {{-- <a class="btn-xs btn btn-primary" href="{{ route('request-orders.print', $value->id) }}">Print</a> --}}
-                                        {{-- @endif --}}
-                                        @if (($value->status == 'approved' || $value->status == 'partial') && !isset($value->pickingList))
-                                            <form action="{{ route('picking-lists.generate', $value->id) }}" method="post">
-                                                @csrf
-                                                <button class="btn btn-xs btn-primary">
-                                                    <i class="fa fa-list"></i> Generate Picking List
-                                                </button>
-                                            </form>
-                                        @endif
-                                        @if (auth()->user()->role == 'staff-outlet')
-                                            @if ($value->status == 'approved' || $value->status == 'partial')
-                                                <a class="btn-xs btn btn-default" href="{{ route('request-orders.show', $value->id) }}"><i class="fa fa-eye"></i> Detail</a>
-                                            @else
-                                                <a class="btn-xs btn btn-primary" href="{{ route('request-orders.edit', $value->id) }}">
-                                                    <i class="fa fa-edit"></i> Edit
-                                                </a>
-                                                <a class="btn-xs btn btn-default" href="{{ route('request-orders.show', $value->id) }}"><i class="fa fa-eye"></i> Detail</a>
-                                                <form action="{{ route('request-orders.destroy', $value->id) }}" method="POST" style="display:inline-block;"
-                                                    onsubmit="return confirm('Yakin hapus request ini?')">
-                                                    @csrf
-                                                    @method('DELETE')
-                                                    <button type="submit" class="btn-xs btn btn-danger">
-                                                        <i class="fa fa-trash"></i> Hapus
-                                                    </button>
-                                                </form>
-                                            @endif
-                                        @else
-                                            @if ($value->status == 'approved' || $value->status == 'partial')
-                                                <a class="btn-xs btn btn-default" href="{{ route('request-orders.show', $value->id) }}"><i class="fa fa-eye"></i> Detail</a>
-                                            @else
-                                                @if (auth()->user()->role != 'admin-gudang')
-                                                    <a class="btn-xs btn btn-primary" href="{{ route('request-orders.edit', $value->id) }}">
-                                                        <i class="fa fa-edit"></i> Edit
-                                                    </a>
-                                                @endif
-                                                @if(!isset($value->owner_id))
-                                                <a class="btn-xs btn btn-danger" href="#"> Outlet Belum Ditentukan</a>
-                                                @else
-                                                <a class="btn-xs btn btn-default" href="{{ route('request-orders.process', $value->id) }}"><i class="fa fa-eye"></i> Detail</a>
-                                                @endif
-                                                @if (auth()->user()->role != 'admin-gudang')
-                                                <form action="{{ route('request-orders.destroy', $value->id) }}" method="POST" style="display:inline-block;"
-                                                    onsubmit="return confirm('Yakin hapus request ini?')">
-                                                    @csrf
-                                                    @method('DELETE')
-                                                    <button type="submit" class="btn-xs btn btn-danger">
-                                                        <i class="fa fa-trash"></i> Hapus
-                                                    </button>
-                                                </form>
-                                                @endif
-                                            @endif
-                                        @endif
-                                        <a class=" btn-xs btn btn-success" href="{{ route('laporan.request-order', $value->id) }}"><i class="fa fa-file-excel-o"></i> Export</a>
-                                    </td>
-                                </tr>
-                            @endforeach
+                            <tbody></tbody>
                         </table>
                     </div><!-- /.box-body -->
                 </div><!-- /.box -->
@@ -173,34 +55,59 @@
 @section('page-script')
 <script>
     $(function () {
-        var selectedOutlet = '';
+        if ($.fn.DataTable.isDataTable('#example1')) {
+            $('#example1').DataTable().destroy();
+        }
 
-        $.fn.dataTable.ext.search.push(function (settings, data, dataIndex) {
-            if (!selectedOutlet) return true;
-            var row = $('#example1').DataTable().row(dataIndex).node();
-            return String($(row).data('outlet')) === selectedOutlet;
+        var table = $('#example1').DataTable({
+            processing: true,
+            serverSide: true,
+            ajax: {
+                url: '{{ route('request-orders.index.data') }}',
+                data: function(d) {
+                    d.outlet_id = $('#outlet-filter').val();
+                }
+            },
+            order: [[4, 'desc']], // Tanggal Request terbaru dulu, setara ->orderBy('created_at', 'desc') lama
+            columns: [
+                {
+                    data: null,
+                    orderable: false,
+                    searchable: false,
+                    render: function(data, type, row, meta) {
+                        return meta.row + meta.settings._iDisplayStart + 1;
+                    }
+                },
+                { data: 'code', name: 'request_orders.code' },
+                { data: 'owner', name: 'outlets.name' },
+                { data: 'requested_by', orderable: false },
+                { data: 'request_date', name: 'request_orders.request_date' },
+                { data: 'status_html', name: 'request_orders.status' },
+                { data: 'items_html', orderable: false, searchable: false },
+                { data: 'aksi_html', orderable: false, searchable: false },
+            ]
         });
 
         $('#outlet-filter').on('change', function () {
-            selectedOutlet = $(this).val();
-            $('#example1').DataTable().draw();
+            table.draw();
         });
-    });
-    $(document).on('click', '.btn-toggle-ro-items', function() {
-        var id     = $(this).data('target');
-        var state  = $(this).data('state');
-        var $extra = $('.extra-item-ro-' + id);
-        var $badge = $(this).find('.label');
 
-        if (state === 'closed') {
-            $extra.show();
-            $badge.text('Tutup');
-            $(this).data('state', 'open');
-        } else {
-            $extra.hide();
-            $badge.text('Selengkapnya (' + $extra.length + ')');
-            $(this).data('state', 'closed');
-        }
+        $(document).on('click', '.btn-toggle-ro-items', function() {
+            var id     = $(this).data('target');
+            var state  = $(this).data('state');
+            var $extra = $('.extra-item-ro-' + id);
+            var $badge = $(this).find('.label');
+
+            if (state === 'closed') {
+                $extra.show();
+                $badge.text('Tutup');
+                $(this).data('state', 'open');
+            } else {
+                $extra.hide();
+                $badge.text('Selengkapnya (' + $extra.length + ')');
+                $(this).data('state', 'closed');
+            }
+        });
     });
 </script>
 @endsection

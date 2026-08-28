@@ -79,10 +79,176 @@ class PembelianController extends Controller
 
     public function index()
     {
-        return view('pembelians.index', [
-            'pembelians' => Pembelian::with(['supplier', 'pembelianProducts.product', 'pembelianTransaction', 'ownerApprovedBy'])
-                ->latest()
-                ->get(),
+        // Tidak lagi query semua PO di sini — halaman awal cuma render shell tabel.
+        return view('pembelians.index');
+    }
+
+    public function getIndexData(Request $request)
+    {
+        $draw        = (int) $request->input('draw');
+        $start       = max((int) $request->input('start', 0), 0);
+        $length      = (int) $request->input('length', 25);
+        $length      = $length > 0 ? min($length, 100) : 25;
+        $searchValue = trim((string) ($request->input('search.value', '')));
+
+        $orderColIndex = (int) $request->input('order.0.column', 2);
+        $orderDir      = strtolower($request->input('order.0.dir', 'asc')) === 'desc' ? 'desc' : 'asc';
+
+        $sortableColumns = [
+            1 => 'pembelians.code',
+            2 => 'pembelians.created_at',
+            3 => 'suppliers.name',
+            5 => 'pembelians.is_published',
+        ];
+        $orderBy = $sortableColumns[$orderColIndex] ?? 'pembelians.created_at';
+
+        // Query dasar cuma join tabel yang dibutuhkan untuk search/sort/filter,
+        // TIDAK eager-load pembelianProducts di sini (itu berat & belum perlu untuk listing/count).
+        $base = \App\Models\Pembelian::query()
+            ->leftJoin('suppliers', 'suppliers.id', '=', 'pembelians.supplier_id');
+
+        $recordsTotal = (clone $base)->count('pembelians.id');
+
+        // ==== SEARCH: meniru "smart search" DataTables, tapi tetap ringan ====
+        // DataTables (client-side) memecah input jadi kata per kata dan mencari baris
+        // yang mengandung SEMUA kata itu di kolom manapun, tidak peduli urutan/kerapatan.
+        // Contoh: "wing surya" tetap match "Wings Surya" karena "wing" dan "surya"
+        // masing-masing ketemu sebagai substring, walau tidak nempel persis.
+        //
+        // Query LIKE '%wing surya%' (satu string utuh) TIDAK match "Wings Surya"
+        // karena butuh substring persis "wing surya" (ada huruf 's' nyempil di
+        // "Wings" sebelum spasi) -> makanya data "hilang" versi lama.
+        //
+        // Solusinya: pecah $searchValue jadi per kata, lalu AND-kan syarat antar kata
+        // (tiap kata WAJIB match di salah satu kolom), OR-kan antar kolom untuk kata
+        // yang sama. Supaya tetap ringan untuk ratusan ribu baris:
+        //  - Query dasar TETAP hanya join suppliers (tidak eager-load produk di sini).
+        //  - Pencarian ke produk pakai whereHas (EXISTS subquery), bukan JOIN penuh,
+        //    supaya tidak menggandakan baris pembelian saat 1 PO punya banyak produk.
+        //  - Filter kata dibatasi (misal maks 5 kata) supaya user tidak bisa bikin
+        //    query jadi sangat berat dengan mengetik puluhan kata sekaligus.
+        //  - Pastikan ada index di pembelians.code, suppliers.name, products.name,
+        //    products.code (dan foreign key pembelian_products.product_id /
+        //    pembelian_id) supaya tiap LIKE + EXISTS tetap cepat di data besar.
+        //    Kalau volume sudah jutaan baris & LIKE mulai lambat, pertimbangkan
+        //    MySQL FULLTEXT index sebagai upgrade berikutnya.
+        if ($searchValue !== '') {
+            $searchWords = preg_split('/\s+/', $searchValue, -1, PREG_SPLIT_NO_EMPTY);
+            $searchWords = array_slice($searchWords, 0, 5); // batasi biar tidak disalahgunakan
+
+            $base->where(function ($q) use ($searchWords) {
+                foreach ($searchWords as $word) {
+                    $q->where(function ($qw) use ($word) {
+                        $qw->where('pembelians.code', 'like', "%{$word}%")
+                            ->orWhere('suppliers.name', 'like', "%{$word}%")
+                            ->orWhereHas('pembelianProducts.product', function ($qp) use ($word) {
+                                $qp->where('name', 'like', "%{$word}%")
+                                    ->orWhere('code', 'like', "%{$word}%");
+                            });
+                    });
+                }
+            });
+        }
+
+        $recordsFiltered = (clone $base)->count('pembelians.id');
+
+        // Ambil ID untuk halaman ini saja (ringan, tanpa eager load berat)
+        $pageIds = $base
+            ->orderBy($orderBy, $orderDir)
+            // Tie-breaker unik. Kolom seperti created_at (bisa sama persis kalau
+            // banyak PO dibuat di detik yang sama, misal via import/seed) atau
+            // is_published (cuma 2 nilai) punya banyak baris kembar. Tanpa secondary
+            // order by kolom unik, urutan hasil untuk baris bernilai sama TIDAK
+            // dijamin konsisten antar query -> saat DataTables pindah halaman /
+            // re-query gara-gara search, ada baris yang bisa terlewat (tidak pernah
+            // muncul di offset manapun) atau malah dobel.
+            ->orderBy('pembelians.id', $orderDir)
+            ->offset($start)
+            ->limit($length)
+            ->pluck('pembelians.id');
+
+        // Baru sekarang load relasi lengkap, TAPI cuma untuk baris di halaman ini (max 100 row)
+        $pembelians = \App\Models\Pembelian::with([
+            'supplier',
+            'pembelianProducts.product',
+            'pembelianTransaction',
+            'ownerApprovedBy',
+        ])
+            ->whereIn('id', $pageIds)
+            ->get()
+            ->sortBy(fn($p) => array_search($p->id, $pageIds->all()))
+            ->values();
+
+        $authUser = auth()->user();
+
+        $data = $pembelians->map(function ($value) use ($authUser) {
+            $payStatus = $value->pembelianTransaction?->status ?? 'unpaid';
+
+            // ==== Kolom Items ====
+            $totalItems = $value->pembelianProducts->count();
+            $itemsHtml = '<ul class="list-unstyled" style="margin:0">';
+            foreach ($value->pembelianProducts as $index => $item) {
+                $extraClass = $index >= 3 ? ' extra-item-' . $value->id : '';
+                $style = $index >= 3 ? ' style="display:none"' : '';
+                $k = $item->product?->konversiDisplay($item->qty);
+                $kLabel = ($k && $k !== '-') ? ' <span class="label label-info">' . e($k) . '</span>' : '';
+
+                $itemsHtml .= '<li class="item-pembelian-' . $value->id . $extraClass . '"' . $style . '>'
+                    . '<small>' . e($item->product?->code) . ' | ' . e($item->product?->name) . ' × ' . e($item->qty) . $kLabel . '</small>'
+                    . '</li>';
+            }
+            $itemsHtml .= '</ul>';
+
+            if ($totalItems > 3) {
+                $itemsHtml .= '<a href="javascript:void(0)" class="btn-toggle-items" data-target="' . $value->id . '" data-state="closed" style="display:inline-block;margin-top:4px;">'
+                    . '<span class="label label-default">Selengkapnya (' . ($totalItems - 3) . ')</span></a>';
+            }
+
+            // ==== Kolom Status PO ====
+            $statusHtml = $value->is_published
+                ? '<span class="label label-success">PUBLISHED</span>'
+                : '<span class="label label-default">DRAFT</span>';
+
+            // ==== Kolom Aksi ====
+            $aksiHtml = '';
+
+            if (in_array($authUser->role, ['owner', 'superadmin']) && $value->owner_approval_status === 'pending') {
+                $aksiHtml .= '<form action="' . route('pembelian.owner-approve', $value->id) . '" method="post" style="display:inline">'
+                    . csrf_field()
+                    . '<button class="btn btn-xs btn-success" title="ACC Owner"><i class="fa fa-check"></i> ACC</button></form> ';
+                $aksiHtml .= '<form action="' . route('pembelian.owner-reject', $value->id) . '" method="post" style="display:inline">'
+                    . csrf_field()
+                    . '<button class="btn btn-xs btn-danger" title="Tolak Owner"><i class="fa fa-times"></i> Tolak</button></form> ';
+            }
+
+            if ($value->canBeEditedBy($authUser)) {
+                $aksiHtml .= '<a href="' . route('pembelian.edit', $value->id) . '" class="btn btn-xs btn-warning" title="Edit"><i class="fa fa-pencil"></i></a> ';
+
+                if ($authUser->role !== 'owner') {
+                    $aksiHtml .= '<form action="' . route('pembelian.destroy', $value->id) . '" method="post" style="display:inline">'
+                        . method_field('delete') . csrf_field()
+                        . '<button class="btn btn-xs btn-danger" onclick="return confirm(\'Hapus PO ' . e($value->code) . '?\')" title="Hapus"><i class="fa fa-trash"></i></button></form> ';
+                }
+            }
+
+            $aksiHtml .= '<a href="' . route('laporan.pembelian', $value->id) . '" class="btn btn-xs btn-success" title="Export PO"><i class="fa fa-file-excel-o"></i> PO</a>';
+
+            return [
+                'id'          => $value->id,
+                'code'        => $value->code,
+                'tanggal'     => $value->created_at->setTimezone('Asia/Jakarta')->translatedFormat('d F Y - H:i') . ' WIB',
+                'supplier'    => $value->supplier?->name ?? '-',
+                'items_html'  => $itemsHtml,
+                'status_html' => $statusHtml,
+                'aksi_html'   => $aksiHtml,
+            ];
+        });
+
+        return response()->json([
+            'draw'            => $draw,
+            'recordsTotal'    => $recordsTotal,
+            'recordsFiltered' => $recordsFiltered,
+            'data'            => $data->values(),
         ]);
     }
 
@@ -193,11 +359,190 @@ class PembelianController extends Controller
 
     public function penerimaanIndex()
     {
-        $pembelians = Pembelian::with(['supplier', 'pembelianProducts.product', 'stocks'])
-            ->latest()
-            ->get();
+        // Halaman awal tidak lagi query semua PO — cuma render shell tabel.
+        return view('pembelians.penerimaan-index');
+    }
 
-        return view('pembelians.penerimaan-index', compact('pembelians'));
+    public function getPenerimaanIndexData(Request $request)
+    {
+        $draw        = (int) $request->input('draw');
+        $start       = max((int) $request->input('start', 0), 0);
+        $length      = (int) $request->input('length', 25);
+        $length      = $length > 0 ? min($length, 100) : 25;
+        $searchValue = trim((string) ($request->input('search.value', '')));
+
+        $orderColIndex = (int) $request->input('order.0.column', 2);
+        $orderDir      = strtolower($request->input('order.0.dir', 'asc')) === 'desc' ? 'desc' : 'asc';
+
+        $sortableColumns = [
+            1 => 'pembelians.code',
+            2 => 'pembelians.code_gr',
+            3 => 'suppliers.name',
+            5 => 'pembelians.receipt_status',
+            6 => 'pembelians.owner_approval_status',
+            7 => 'pembelians.receipt_date',
+            8 => 'pembelians.receipt_pic',
+        ];
+        $orderBy = $sortableColumns[$orderColIndex] ?? 'pembelians.created_at';
+        $orderDirDefault = $request->has('order.0.column') ? $orderDir : 'desc'; // default: PO terbaru dulu, setara ->latest()
+
+        $base = \App\Models\Pembelian::query()
+            ->leftJoin('suppliers', 'suppliers.id', '=', 'pembelians.supplier_id');
+
+        $recordsTotal = (clone $base)->count('pembelians.id');
+
+        // ==== SEARCH: meniru "smart search" DataTables, tapi tetap ringan ====
+        // DataTables (client-side) memecah input jadi kata per kata dan mencari baris
+        // yang mengandung SEMUA kata itu di kolom manapun, tidak peduli urutan/kerapatan.
+        // Contoh: "wing surya" tetap match "Wings Surya" karena "wing" dan "surya"
+        // masing-masing ketemu sebagai substring, walau tidak nempel persis.
+        //
+        // LIKE '%wing surya%' (satu string utuh) TIDAK match "Wings Surya" karena
+        // butuh substring persis "wing surya" -> data terasa "hilang" di versi lama.
+        //
+        // Fix: pecah $searchValue jadi per kata, AND-kan syarat antar kata (tiap kata
+        // wajib match di salah satu kolom), OR-kan antar kolom untuk kata yang sama.
+        // Supaya tetap ringan untuk ratusan ribu baris:
+        //  - Query dasar tetap hanya join suppliers, tidak eager-load produk di sini.
+        //  - Pencarian ke produk pakai whereHas (EXISTS subquery), bukan JOIN penuh,
+        //    supaya tidak menggandakan baris pembelian saat 1 PO punya banyak produk.
+        //  - Jumlah kata dibatasi (maks 5) supaya query tidak bisa dibuat sangat berat.
+        //  - Pastikan ada index di pembelians.code, pembelians.code_gr, suppliers.name,
+        //    pembelians.receipt_pic, products.name, products.code, serta foreign key
+        //    pembelian_products.pembelian_id / product_id.
+        if ($searchValue !== '') {
+            $searchWords = preg_split('/\s+/', $searchValue, -1, PREG_SPLIT_NO_EMPTY);
+            $searchWords = array_slice($searchWords, 0, 5); // batasi biar tidak disalahgunakan
+
+            $base->where(function ($q) use ($searchWords) {
+                foreach ($searchWords as $word) {
+                    $q->where(function ($qw) use ($word) {
+                        $qw->where('pembelians.code', 'like', "%{$word}%")
+                            ->orWhere('pembelians.code_gr', 'like', "%{$word}%")
+                            ->orWhere('suppliers.name', 'like', "%{$word}%")
+                            ->orWhere('pembelians.receipt_pic', 'like', "%{$word}%")
+                            ->orWhereHas('pembelianProducts.product', function ($qp) use ($word) {
+                                $qp->where('name', 'like', "%{$word}%")
+                                    ->orWhere('code', 'like', "%{$word}%");
+                            });
+                    });
+                }
+            });
+        }
+
+        $recordsFiltered = (clone $base)->count('pembelians.id');
+
+        $pageIds = $base
+            ->orderBy($orderBy, $orderDirDefault)
+            // Tie-breaker unik. Kolom seperti receipt_status / owner_approval_status
+            // hanya punya sedikit nilai berbeda, jadi banyak baris kembar. Tanpa
+            // secondary order by kolom unik, urutan hasil untuk baris bernilai sama
+            // TIDAK dijamin konsisten antar query -> saat DataTables pindah halaman
+            // / re-query gara-gara search, ada baris yang bisa terlewat (tidak pernah
+            // muncul di offset manapun) atau malah dobel.
+            ->orderBy('pembelians.id', $orderDirDefault)
+            ->offset($start)
+            ->limit($length)
+            ->pluck('pembelians.id');
+
+        // Relasi berat cuma dimuat untuk baris di halaman ini
+        $pembelians = \App\Models\Pembelian::with([
+            'supplier',
+            'pembelianProducts.product',
+            'stocks',
+            'ownerApprovedBy',
+        ])
+            ->whereIn('id', $pageIds)
+            ->get()
+            ->sortBy(fn($p) => array_search($p->id, $pageIds->all()))
+            ->values();
+
+        $data = $pembelians->map(function ($value) {
+            $receiptStatus = $value->receipt_status ?? 'draft';
+            $receiptBadge  = match ($receiptStatus) {
+                'completed' => 'success',
+                'validated' => 'info',
+                default     => 'warning',
+            };
+
+            // ==== Kolom Items ====
+            $totalItems = $value->pembelianProducts->count();
+            $itemsHtml = '<ul class="list-unstyled" style="margin:0">';
+            foreach ($value->pembelianProducts as $index => $item) {
+                $extraClass = $index >= 3 ? ' extra-item-pembelian-' . $value->id : '';
+                $style = $index >= 3 ? ' style="display:none"' : '';
+
+                $konversiLabel = '';
+                if ($item->product?->konversi_qty && $item->product?->satuan_besar) {
+                    $konversiLabel = ' <span class="label label-info">' . e($item->product->konversiDisplay($item->qty)) . '</span>';
+                }
+
+                $hasStock = $value->stocks->where('product_id', $item->product_id)->count() > 0;
+                $receivedLabel = $hasStock
+                    ? ' <span class="label label-success">✓ ' . e($item->qty_diterima) . ' diterima</span>'
+                    : ' <span class="label label-warning">Belum diterima</span>';
+
+                $itemsHtml .= '<li class="' . trim($extraClass) . '"' . $style . '>'
+                    . '<small>' . e($item->product?->code) . ' | ' . e($item->product?->name) . '</small>'
+                    . ' <span class="label label-default">' . e($item->qty) . '</span>'
+                    . $konversiLabel
+                    . $receivedLabel
+                    . '</li>';
+            }
+            $itemsHtml .= '</ul>';
+
+            if ($totalItems > 3) {
+                $itemsHtml .= '<a href="javascript:void(0)" class="btn-toggle-pembelian-items" data-target="' . $value->id . '" data-state="closed">'
+                    . '<span class="label label-default">Selengkapnya (' . ($totalItems - 3) . ')</span></a>';
+            }
+
+            // ==== Kolom Status Penerimaan ====
+            $receiptStatusHtml = '<span class="label label-' . $receiptBadge . '">' . strtoupper($receiptStatus) . '</span>';
+
+            // ==== Kolom Status PO ====
+            $approvalStatus = $value->owner_approval_status ?? 'pending';
+            $approvalBadge  = match ($approvalStatus) {
+                'approved' => 'success',
+                'rejected' => 'danger',
+                default    => 'warning',
+            };
+            $poStatusHtml = '<span class="label label-' . $approvalBadge . '">' . strtoupper($approvalStatus) . '</span>';
+            if ($value->ownerApprovedBy) {
+                $poStatusHtml .= '<br><small>' . e($value->ownerApprovedBy->name) . '</small>';
+            }
+
+            // ==== Kolom Aksi ====
+            $btnLabel = $receiptStatus === 'completed' ? 'Detail' : 'Input Pembelian';
+            $btnIcon  = $receiptStatus === 'completed' ? 'eye' : 'edit';
+            $btnClass = $receiptStatus === 'completed' ? 'default' : 'primary';
+
+            $aksiHtml = '<a href="' . route('pembelian.penerimaan', $value->id) . '" class="btn btn-xs btn-' . $btnClass . '">'
+                . '<i class="fa fa-' . $btnIcon . '"></i> ' . $btnLabel . '</a> ';
+            $aksiHtml .= '<a href="' . route('laporan.penerimaan', [$value->id, 'po']) . '" class="btn btn-xs btn-success" title="Export Pembelian">'
+                . '<i class="fa fa-file-excel-o"></i> Pembelian</a> ';
+            $aksiHtml .= '<a href="' . route('laporan.pdf.penerimaan-single', $value->id) . '" target="_blank" class="btn btn-xs btn-danger" title="Export PDF Pembelian">'
+                . '<i class="fa fa-file-pdf-o"></i> Pembelian</a>';
+
+            return [
+                'id'                  => $value->id,
+                'code'                => $value->code,
+                'code_gr'             => $value->code_gr ?? '-',
+                'supplier'            => $value->supplier?->name ?? '-',
+                'items_html'          => $itemsHtml,
+                'receipt_status_html' => $receiptStatusHtml,
+                'po_status_html'      => $poStatusHtml,
+                'receipt_date'        => $value->receipt_date ? \Carbon\Carbon::parse($value->receipt_date)->format('d/m/Y H:i') : '-',
+                'receipt_pic'         => $value->receipt_pic ?? '-',
+                'aksi_html'           => $aksiHtml,
+            ];
+        });
+
+        return response()->json([
+            'draw'            => $draw,
+            'recordsTotal'    => $recordsTotal,
+            'recordsFiltered' => $recordsFiltered,
+            'data'            => $data->values(),
+        ]);
     }
 
     public function penerimaan(Pembelian $pembelian)
