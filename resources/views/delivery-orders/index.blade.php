@@ -25,45 +25,16 @@
                         <table id="example1" class="table table-bordered table-striped">
                             <thead>
                                 <tr>
-                                    <td>No</td>
-                                    <td>Kode DO</td>
-                                    <td>Request Order</td>
-                                    <td>Owner/Outlet</td>
-                                    <td>Delivery Date</td>
-                                    <td>Status</td>
-                                    <td>Aksi</td>
+                                    <th>No</th>
+                                    <th>Kode DO</th>
+                                    <th>Request Order</th>
+                                    <th>Owner/Outlet</th>
+                                    <th>Delivery Date</th>
+                                    <th>Status</th>
+                                    <th>Aksi</th>
                                 </tr>
                             </thead>
-                            @foreach ($deliveryOrders as $value)
-                                <tr data-outlet="{{ $value->owner_id ?? '' }}">
-                                    <td>{{ $loop->iteration }}</td>
-                                    <td>{{ $value->code }}</td>
-                                    <td>{{ $value->requestOrder->code }}</td>
-                                    <td>{{ $value->owner->name }}</td>
-                                    <td>{{ $value->delivery_date->format('d-m-Y') }}</td>
-                                    <td>
-                                        @if ($value->status == 'draft')
-                                            <span class="label label-default">Draft</span>
-                                        @elseif ($value->status == 'sent')
-                                            <span class="label label-info">Sent</span>
-                                        @elseif ($value->status == 'delivered')
-                                            <span class="label label-success">Delivered</span>
-                                        @elseif ($value->status == 'completed')
-                                            <span class="label label-primary">Completed</span>
-                                        @endif
-                                    </td>
-                                    <td>
-                                        <a class="btn-xs btn btn-default" href="{{ route('delivery-orders.show', $value->id) }}"><i class="fa fa-eye"></i> Detail</a>
-                                        @if (auth()->user()->role !== 'admin-gudang' && ($value->status == 'draft' || $value->status == 'sent'))
-                                            <button class="btn-xs btn btn-success" data-toggle="modal"
-                                                data-target="#sendModal{{ $value->id }}">Delivery Completed</button>
-
-                                            @include('delivery-orders._send-modal', ['do' => $value])
-                                        @endif
-                                        <a class=" btn-xs btn btn-success" href="{{ route('laporan.delivery-order', $value->id) }}"><i class="fa fa-file-excel-o"></i> Export</a>
-                                    </td>
-                                </tr>
-                            @endforeach
+                            <tbody></tbody>
                         </table>
                     </div>
                 </div>
@@ -75,17 +46,40 @@
 @section('page-script')
 <script>
     $(function () {
-        var selectedOutlet = '';
+        if ($.fn.DataTable.isDataTable('#example1')) {
+            $('#example1').DataTable().destroy();
+        }
 
-        $.fn.dataTable.ext.search.push(function (settings, data, dataIndex) {
-            if (!selectedOutlet) return true;
-            var row = $('#example1').DataTable().row(dataIndex).node();
-            return String($(row).data('outlet')) === selectedOutlet;
+        var table = $('#example1').DataTable({
+            processing: true,
+            serverSide: true,
+            ajax: {
+                url: '{{ route('delivery-orders.index.data') }}',
+                data: function(d) {
+                    d.outlet_id = $('#outlet-filter').val();
+                }
+            },
+            order: [[4, 'desc']], // Delivery Date terbaru dulu, setara ->orderBy('created_at', 'desc') lama
+            columns: [
+                {
+                    data: null,
+                    orderable: false,
+                    searchable: false,
+                    render: function(data, type, row, meta) {
+                        return meta.row + meta.settings._iDisplayStart + 1;
+                    }
+                },
+                { data: 'code', name: 'delivery_orders.code' },
+                { data: 'request_order', orderable: false },
+                { data: 'owner', name: 'outlets.name' },
+                { data: 'delivery_date', name: 'delivery_orders.delivery_date' },
+                { data: 'status_html', name: 'delivery_orders.status' },
+                { data: 'aksi_html', orderable: false, searchable: false },
+            ]
         });
 
         $('#outlet-filter').on('change', function () {
-            selectedOutlet = $(this).val();
-            $('#example1').DataTable().draw();
+            table.draw();
         });
     });
 </script>
