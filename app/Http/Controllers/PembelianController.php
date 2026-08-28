@@ -79,10 +79,134 @@ class PembelianController extends Controller
 
     public function index()
     {
-        return view('pembelians.index', [
-            'pembelians' => Pembelian::with(['supplier', 'pembelianProducts.product', 'pembelianTransaction', 'ownerApprovedBy'])
-                ->latest()
-                ->get(),
+        // Tidak lagi query semua PO di sini — halaman awal cuma render shell tabel.
+        return view('pembelians.index');
+    }
+
+    public function getIndexData(Request $request)
+    {
+        $draw        = (int) $request->input('draw');
+        $start       = max((int) $request->input('start', 0), 0);
+        $length      = (int) $request->input('length', 25);
+        $length      = $length > 0 ? min($length, 100) : 25;
+        $searchValue = trim((string) ($request->input('search.value', '')));
+
+        $orderColIndex = (int) $request->input('order.0.column', 2);
+        $orderDir      = strtolower($request->input('order.0.dir', 'asc')) === 'desc' ? 'desc' : 'asc';
+
+        $sortableColumns = [
+            1 => 'pembelians.code',
+            2 => 'pembelians.created_at',
+            3 => 'suppliers.name',
+            5 => 'pembelians.is_published',
+        ];
+        $orderBy = $sortableColumns[$orderColIndex] ?? 'pembelians.created_at';
+
+        // Query dasar cuma join tabel yang dibutuhkan untuk search/sort/filter,
+        // TIDAK eager-load pembelianProducts di sini (itu berat & belum perlu untuk listing/count).
+        $base = \App\Models\Pembelian::query()
+            ->leftJoin('suppliers', 'suppliers.id', '=', 'pembelians.supplier_id');
+
+        $recordsTotal = (clone $base)->count('pembelians.id');
+
+        if ($searchValue !== '') {
+            $base->where(function ($q) use ($searchValue) {
+                $q->where('pembelians.code', 'like', "%{$searchValue}%")
+                    ->orWhere('suppliers.name', 'like', "%{$searchValue}%");
+            });
+        }
+
+        $recordsFiltered = (clone $base)->count('pembelians.id');
+
+        // Ambil ID untuk halaman ini saja (ringan, tanpa eager load berat)
+        $pageIds = $base
+            ->orderBy($orderBy, $orderDir)
+            ->offset($start)
+            ->limit($length)
+            ->pluck('pembelians.id');
+
+        // Baru sekarang load relasi lengkap, TAPI cuma untuk baris di halaman ini (max 100 row)
+        $pembelians = \App\Models\Pembelian::with([
+            'supplier',
+            'pembelianProducts.product',
+            'pembelianTransaction',
+            'ownerApprovedBy',
+        ])
+            ->whereIn('id', $pageIds)
+            ->get()
+            ->sortBy(fn($p) => array_search($p->id, $pageIds->all()))
+            ->values();
+
+        $authUser = auth()->user();
+
+        $data = $pembelians->map(function ($value) use ($authUser) {
+            $payStatus = $value->pembelianTransaction?->status ?? 'unpaid';
+
+            // ==== Kolom Items ====
+            $totalItems = $value->pembelianProducts->count();
+            $itemsHtml = '<ul class="list-unstyled" style="margin:0">';
+            foreach ($value->pembelianProducts as $index => $item) {
+                $extraClass = $index >= 3 ? ' extra-item-' . $value->id : '';
+                $style = $index >= 3 ? ' style="display:none"' : '';
+                $k = $item->product?->konversiDisplay($item->qty);
+                $kLabel = ($k && $k !== '-') ? ' <span class="label label-info">' . e($k) . '</span>' : '';
+
+                $itemsHtml .= '<li class="item-pembelian-' . $value->id . $extraClass . '"' . $style . '>'
+                    . '<small>' . e($item->product?->code) . ' | ' . e($item->product?->name) . ' × ' . e($item->qty) . $kLabel . '</small>'
+                    . '</li>';
+            }
+            $itemsHtml .= '</ul>';
+
+            if ($totalItems > 3) {
+                $itemsHtml .= '<a href="javascript:void(0)" class="btn-toggle-items" data-target="' . $value->id . '" data-state="closed" style="display:inline-block;margin-top:4px;">'
+                    . '<span class="label label-default">Selengkapnya (' . ($totalItems - 3) . ')</span></a>';
+            }
+
+            // ==== Kolom Status PO ====
+            $statusHtml = $value->is_published
+                ? '<span class="label label-success">PUBLISHED</span>'
+                : '<span class="label label-default">DRAFT</span>';
+
+            // ==== Kolom Aksi ====
+            $aksiHtml = '';
+
+            if (in_array($authUser->role, ['owner', 'superadmin']) && $value->owner_approval_status === 'pending') {
+                $aksiHtml .= '<form action="' . route('pembelian.owner-approve', $value->id) . '" method="post" style="display:inline">'
+                    . csrf_field()
+                    . '<button class="btn btn-xs btn-success" title="ACC Owner"><i class="fa fa-check"></i> ACC</button></form> ';
+                $aksiHtml .= '<form action="' . route('pembelian.owner-reject', $value->id) . '" method="post" style="display:inline">'
+                    . csrf_field()
+                    . '<button class="btn btn-xs btn-danger" title="Tolak Owner"><i class="fa fa-times"></i> Tolak</button></form> ';
+            }
+
+            if ($value->canBeEditedBy($authUser)) {
+                $aksiHtml .= '<a href="' . route('pembelian.edit', $value->id) . '" class="btn btn-xs btn-warning" title="Edit"><i class="fa fa-pencil"></i></a> ';
+
+                if ($authUser->role !== 'owner') {
+                    $aksiHtml .= '<form action="' . route('pembelian.destroy', $value->id) . '" method="post" style="display:inline">'
+                        . method_field('delete') . csrf_field()
+                        . '<button class="btn btn-xs btn-danger" onclick="return confirm(\'Hapus PO ' . e($value->code) . '?\')" title="Hapus"><i class="fa fa-trash"></i></button></form> ';
+                }
+            }
+
+            $aksiHtml .= '<a href="' . route('laporan.pembelian', $value->id) . '" class="btn btn-xs btn-success" title="Export PO"><i class="fa fa-file-excel-o"></i> PO</a>';
+
+            return [
+                'id'          => $value->id,
+                'code'        => $value->code,
+                'tanggal'     => $value->created_at->setTimezone('Asia/Jakarta')->translatedFormat('d F Y - H:i') . ' WIB',
+                'supplier'    => $value->supplier?->name ?? '-',
+                'items_html'  => $itemsHtml,
+                'status_html' => $statusHtml,
+                'aksi_html'   => $aksiHtml,
+            ];
+        });
+
+        return response()->json([
+            'draw'            => $draw,
+            'recordsTotal'    => $recordsTotal,
+            'recordsFiltered' => $recordsFiltered,
+            'data'            => $data->values(),
         ]);
     }
 
@@ -193,11 +317,153 @@ class PembelianController extends Controller
 
     public function penerimaanIndex()
     {
-        $pembelians = Pembelian::with(['supplier', 'pembelianProducts.product', 'stocks'])
-            ->latest()
-            ->get();
+        // Halaman awal tidak lagi query semua PO — cuma render shell tabel.
+        return view('pembelians.penerimaan-index');
+    }
 
-        return view('pembelians.penerimaan-index', compact('pembelians'));
+    public function getPenerimaanIndexData(Request $request)
+    {
+        $draw        = (int) $request->input('draw');
+        $start       = max((int) $request->input('start', 0), 0);
+        $length      = (int) $request->input('length', 25);
+        $length      = $length > 0 ? min($length, 100) : 25;
+        $searchValue = trim((string) ($request->input('search.value', '')));
+
+        $orderColIndex = (int) $request->input('order.0.column', 2);
+        $orderDir      = strtolower($request->input('order.0.dir', 'asc')) === 'desc' ? 'desc' : 'asc';
+
+        $sortableColumns = [
+            1 => 'pembelians.code',
+            2 => 'pembelians.code_gr',
+            3 => 'suppliers.name',
+            5 => 'pembelians.receipt_status',
+            6 => 'pembelians.owner_approval_status',
+            7 => 'pembelians.receipt_date',
+            8 => 'pembelians.receipt_pic',
+        ];
+        $orderBy = $sortableColumns[$orderColIndex] ?? 'pembelians.created_at';
+        $orderDirDefault = $request->has('order.0.column') ? $orderDir : 'desc'; // default: PO terbaru dulu, setara ->latest()
+
+        $base = \App\Models\Pembelian::query()
+            ->leftJoin('suppliers', 'suppliers.id', '=', 'pembelians.supplier_id');
+
+        $recordsTotal = (clone $base)->count('pembelians.id');
+
+        if ($searchValue !== '') {
+            $base->where(function ($q) use ($searchValue) {
+                $q->where('pembelians.code', 'like', "%{$searchValue}%")
+                    ->orWhere('pembelians.code_gr', 'like', "%{$searchValue}%")
+                    ->orWhere('suppliers.name', 'like', "%{$searchValue}%")
+                    ->orWhere('pembelians.receipt_pic', 'like', "%{$searchValue}%");
+            });
+        }
+
+        $recordsFiltered = (clone $base)->count('pembelians.id');
+
+        $pageIds = $base
+            ->orderBy($orderBy, $orderDirDefault)
+            ->offset($start)
+            ->limit($length)
+            ->pluck('pembelians.id');
+
+        // Relasi berat cuma dimuat untuk baris di halaman ini
+        $pembelians = \App\Models\Pembelian::with([
+            'supplier',
+            'pembelianProducts.product',
+            'stocks',
+            'ownerApprovedBy',
+        ])
+            ->whereIn('id', $pageIds)
+            ->get()
+            ->sortBy(fn($p) => array_search($p->id, $pageIds->all()))
+            ->values();
+
+        $data = $pembelians->map(function ($value) {
+            $receiptStatus = $value->receipt_status ?? 'draft';
+            $receiptBadge  = match ($receiptStatus) {
+                'completed' => 'success',
+                'validated' => 'info',
+                default     => 'warning',
+            };
+
+            // ==== Kolom Items ====
+            $totalItems = $value->pembelianProducts->count();
+            $itemsHtml = '<ul class="list-unstyled" style="margin:0">';
+            foreach ($value->pembelianProducts as $index => $item) {
+                $extraClass = $index >= 3 ? ' extra-item-pembelian-' . $value->id : '';
+                $style = $index >= 3 ? ' style="display:none"' : '';
+
+                $konversiLabel = '';
+                if ($item->product?->konversi_qty && $item->product?->satuan_besar) {
+                    $konversiLabel = ' <span class="label label-info">' . e($item->product->konversiDisplay($item->qty)) . '</span>';
+                }
+
+                $hasStock = $value->stocks->where('product_id', $item->product_id)->count() > 0;
+                $receivedLabel = $hasStock
+                    ? ' <span class="label label-success">✓ ' . e($item->qty_diterima) . ' diterima</span>'
+                    : ' <span class="label label-warning">Belum diterima</span>';
+
+                $itemsHtml .= '<li class="' . trim($extraClass) . '"' . $style . '>'
+                    . '<small>' . e($item->product?->code) . ' | ' . e($item->product?->name) . '</small>'
+                    . ' <span class="label label-default">' . e($item->qty) . '</span>'
+                    . $konversiLabel
+                    . $receivedLabel
+                    . '</li>';
+            }
+            $itemsHtml .= '</ul>';
+
+            if ($totalItems > 3) {
+                $itemsHtml .= '<a href="javascript:void(0)" class="btn-toggle-pembelian-items" data-target="' . $value->id . '" data-state="closed">'
+                    . '<span class="label label-default">Selengkapnya (' . ($totalItems - 3) . ')</span></a>';
+            }
+
+            // ==== Kolom Status Penerimaan ====
+            $receiptStatusHtml = '<span class="label label-' . $receiptBadge . '">' . strtoupper($receiptStatus) . '</span>';
+
+            // ==== Kolom Status PO ====
+            $approvalStatus = $value->owner_approval_status ?? 'pending';
+            $approvalBadge  = match ($approvalStatus) {
+                'approved' => 'success',
+                'rejected' => 'danger',
+                default    => 'warning',
+            };
+            $poStatusHtml = '<span class="label label-' . $approvalBadge . '">' . strtoupper($approvalStatus) . '</span>';
+            if ($value->ownerApprovedBy) {
+                $poStatusHtml .= '<br><small>' . e($value->ownerApprovedBy->name) . '</small>';
+            }
+
+            // ==== Kolom Aksi ====
+            $btnLabel = $receiptStatus === 'completed' ? 'Detail' : 'Input Pembelian';
+            $btnIcon  = $receiptStatus === 'completed' ? 'eye' : 'edit';
+            $btnClass = $receiptStatus === 'completed' ? 'default' : 'primary';
+
+            $aksiHtml = '<a href="' . route('pembelian.penerimaan', $value->id) . '" class="btn btn-xs btn-' . $btnClass . '">'
+                . '<i class="fa fa-' . $btnIcon . '"></i> ' . $btnLabel . '</a> ';
+            $aksiHtml .= '<a href="' . route('laporan.penerimaan', [$value->id, 'po']) . '" class="btn btn-xs btn-success" title="Export Pembelian">'
+                . '<i class="fa fa-file-excel-o"></i> Pembelian</a> ';
+            $aksiHtml .= '<a href="' . route('laporan.pdf.penerimaan-single', $value->id) . '" target="_blank" class="btn btn-xs btn-danger" title="Export PDF Pembelian">'
+                . '<i class="fa fa-file-pdf-o"></i> Pembelian</a>';
+
+            return [
+                'id'                  => $value->id,
+                'code'                => $value->code,
+                'code_gr'             => $value->code_gr ?? '-',
+                'supplier'            => $value->supplier?->name ?? '-',
+                'items_html'          => $itemsHtml,
+                'receipt_status_html' => $receiptStatusHtml,
+                'po_status_html'      => $poStatusHtml,
+                'receipt_date'        => $value->receipt_date ? \Carbon\Carbon::parse($value->receipt_date)->format('d/m/Y H:i') : '-',
+                'receipt_pic'         => $value->receipt_pic ?? '-',
+                'aksi_html'           => $aksiHtml,
+            ];
+        });
+
+        return response()->json([
+            'draw'            => $draw,
+            'recordsTotal'    => $recordsTotal,
+            'recordsFiltered' => $recordsFiltered,
+            'data'            => $data->values(),
+        ]);
     }
 
     public function penerimaan(Pembelian $pembelian)
