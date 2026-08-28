@@ -26,6 +26,7 @@
                                     <th>Kode Pembelian</th>
                                     <th>Supplier</th>
                                     <th>Items</th>
+                                    <!--<th>Total PO</th>-->
                                     <th width="130">Status Penerimaan</th>
                                     <th width="130">Status PO</th>
                                     <th>Tgl Terima</th>
@@ -33,7 +34,91 @@
                                     <th width="180">Aksi</th>
                                 </tr>
                             </thead>
-                            <tbody></tbody>
+                            <tbody>
+                                @foreach ($pembelians as $value)
+                                    @php
+                                        $receiptStatus = $value->receipt_status ?? 'draft';
+                                        $receiptBadge = match($receiptStatus) {
+                                            'completed' => 'success',
+                                            'validated' => 'info',
+                                            default     => 'warning',
+                                        };
+                                    @endphp
+                                    <tr>
+                                        <td>{{ $loop->iteration }}</td>
+                                        <td><strong>{{ $value->code }}</strong></td>
+                                        <td>{{ $value->code_gr ?? '-' }}</td>
+                                        <td>{{ $value->supplier?->name }}</td>
+                                        <td>
+                                            @php $totalItems = $value->pembelianProducts->count(); @endphp
+                                            <ul class="list-unstyled" style="margin:0">
+                                                @foreach ($value->pembelianProducts as $index => $item)
+                                                    <li class="@if($index >= 3) extra-item-pembelian-{{ $value->id }} @endif"
+                                                        @if($index >= 3) style="display:none" @endif>
+                                                        <small>{{ $item->product?->code }} | {{ $item->product?->name }}</small>
+                                                        <span class="label label-default">{{ $item->qty }}</span>
+                                                        @if($item->product?->konversi_qty && $item->product?->satuan_besar)
+                                                            <span class="label label-info">{{ $item->product?->konversiDisplay($item->qty) }}</span>
+                                                        @endif
+                                                        @if($value->stocks->where('product_id', $item->product_id)->count())
+                                                            <span class="label label-success">
+                                                                ✓ {{ $item->qty_diterima }} diterima
+                                                            </span>
+                                                        @else
+                                                            <span class="label label-warning">Belum diterima</span>
+                                                        @endif
+                                                    </li>
+                                                @endforeach
+                                            </ul>
+
+                                            @if($totalItems > 3)
+                                                <a href="javascript:void(0)"
+                                                   class="btn-toggle-pembelian-items"
+                                                   data-target="{{ $value->id }}"
+                                                   data-state="closed">
+                                                    <span class="label label-default">
+                                                        Selengkapnya ({{ $totalItems - 3 }})
+                                                    </span>
+                                                </a>
+                                            @endif
+                                        </td>
+                                        <!--<td>{{$value->total}}</td>-->
+                                        <td>
+                                            <span class="label label-{{ $receiptBadge }}">
+                                                {{ strtoupper($receiptStatus) }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span class="label label-{{ $value->owner_approval_status === 'approved' ? 'success' : ($value->owner_approval_status === 'rejected' ? 'danger' : 'warning') }}">
+                                                {{ strtoupper($value->owner_approval_status ?? 'pending') }}
+                                            </span>
+                                            @if ($value->ownerApprovedBy)
+                                                <br><small>{{ $value->ownerApprovedBy->name }}</small>
+                                            @endif
+                                        </td>
+                                        <td>
+                                            {{ $value->receipt_date ? \Carbon\Carbon::parse($value->receipt_date)->format('d/m/Y H:i') : '-' }}
+                                        </td>
+                                        <td>{{ $value->receipt_pic ?? '-' }}</td>
+                                        <td>
+                                            <a href="{{ route('pembelian.penerimaan', $value) }}"
+                                               class="btn btn-xs btn-{{ $receiptStatus === 'completed' ? 'default' : 'primary' }}">
+                                                <i class="fa fa-{{ $receiptStatus === 'completed' ? 'eye' : 'edit' }}"></i>
+                                                {{ $receiptStatus === 'completed' ? 'Detail' : 'Input Pembelian' }}
+                                            </a>
+                                            {{-- @if($value->stocks->count()) --}}
+                                                <a href="{{ route('laporan.penerimaan', [$value->id, 'po']) }}"
+                                                   class="btn btn-xs btn-success" title="Export Pembelian">
+                                                    <i class="fa fa-file-excel-o"></i> Pembelian
+                                                </a>
+                                                <a href="{{ route('laporan.pdf.penerimaan-single', $value->id) }}" target="_blank" class="btn btn-xs btn-danger" title="Export PDF Pembelian">
+                                                    <i class="fa fa-file-pdf-o"></i> Pembelian
+                                                </a>
+                                            {{-- @endif --}}
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
                         </table>
                     </div>
                 </div>
@@ -43,59 +128,21 @@
 @endsection
 @section('page-script')
     <script>
-        $(document).ready(function() {
-            if ($.fn.DataTable.isDataTable('#example1')) {
-                $('#example1').DataTable().destroy();
-            }
+        $(document).on('click', '.btn-toggle-pembelian-items', function () {
+        var id = $(this).data('target');
+        var state = $(this).data('state');
+        var $extra = $('.extra-item-pembelian-' + id);
+        var $badge = $(this).find('.label');
 
-            var table = $('#example1').DataTable({
-                processing: true,
-                serverSide: true,
-                ajax: {
-                    url: '{{ route('pembelian.penerimaan.index.data') }}'
-                },
-                order: [[1, 'desc']], // setara ->latest() sebelumnya (server default juga sudah desc by created_at)
-                columns: [
-                    {
-                        data: null,
-                        orderable: false,
-                        searchable: false,
-                        render: function(data, type, row, meta) {
-                            return meta.row + meta.settings._iDisplayStart + 1;
-                        }
-                    },
-                    {
-                        data: 'code',
-                        name: 'pembelians.code',
-                        render: function(data) { return '<strong>' + data + '</strong>'; }
-                    },
-                    { data: 'code_gr', name: 'pembelians.code_gr' },
-                    { data: 'supplier', name: 'suppliers.name' },
-                    { data: 'items_html', orderable: false, searchable: false },
-                    { data: 'receipt_status_html', name: 'pembelians.receipt_status', orderable: false },
-                    { data: 'po_status_html', name: 'pembelians.owner_approval_status', orderable: false },
-                    { data: 'receipt_date', name: 'pembelians.receipt_date' },
-                    { data: 'receipt_pic', name: 'pembelians.receipt_pic' },
-                    { data: 'aksi_html', orderable: false, searchable: false },
-                ]
-            });
-
-            $(document).on('click', '.btn-toggle-pembelian-items', function () {
-                var id = $(this).data('target');
-                var state = $(this).data('state');
-                var $extra = $('.extra-item-pembelian-' + id);
-                var $badge = $(this).find('.label');
-
-                if (state === 'closed') {
-                    $extra.show();
-                    $badge.text('Tutup');
-                    $(this).data('state', 'open');
-                } else {
-                    $extra.hide();
-                    $badge.text('Selengkapnya (' + $extra.length + ')');
-                    $(this).data('state', 'closed');
-                }
-            });
-        });
+        if (state === 'closed') {
+            $extra.show();
+            $badge.text('Tutup');
+            $(this).data('state', 'open');
+        } else {
+            $extra.hide();
+            $badge.text('Selengkapnya (' + $extra.length + ')');
+            $(this).data('state', 'closed');
+        }
+    });
     </script>
 @endsection

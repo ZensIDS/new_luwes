@@ -70,8 +70,6 @@ Route::middleware(['role:admin-gudang|staff-outlet|owner|superadmin'])->group(fu
 
     Route::resource('/pengeluaran', PengeluaranController::class);
     Route::get('/pembelian/cek-stok-produk', [PembelianController::class, 'getAllProducts'])->name('pembelian.all-products');
-    Route::get('pembelian/data', [PembelianController::class, 'getIndexData'])->name('pembelian.index.data');
-    Route::get('pembelian/penerimaan/data', [PembelianController::class, 'getPenerimaanIndexData'])->name('pembelian.penerimaan.index.data');
     Route::resource('/pembelian', PembelianController::class);
     Route::post('/pembelian/{pembelian}/owner-approve', [PembelianController::class, 'approveOwner'])->name('pembelian.owner-approve');
     Route::post('/pembelian/{pembelian}/owner-reject', [PembelianController::class, 'rejectOwner'])->name('pembelian.owner-reject');
