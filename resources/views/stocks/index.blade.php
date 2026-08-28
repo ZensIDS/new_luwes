@@ -12,15 +12,9 @@
                         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                             <select id="filterKategori" class="form-control input-sm select2" style="width:auto; min-width:160px;">
                                 <option value="">Semua Kategori</option>
-                                @foreach($kategoriOptions as $kat)
-                                    <option value="{{ $kat }}">{{ $kat }}</option>
-                                @endforeach
                             </select>
                             <select id="filterLokasi" class="form-control input-sm select2" style="width:auto; min-width:160px;">
                                 <option value="">Semua Lokasi</option>
-                                @foreach($lokasiOptions as $lok)
-                                    <option value="{{ $lok }}">{{ $lok }}</option>
-                                @endforeach
                             </select>
                         </div>
                     </div>
@@ -28,21 +22,70 @@
                         <table id="example1" class="table table-bordered table-striped">
                             <thead>
                                 <tr>
-                                    <th>No</th>
-                                    <th>Code</th>
-                                    <th>Product</th>
-                                    <th>Konversi</th>
-                                    <th>Harga Beli</th>
-                                    <th>Stock Outlet</th>
-                                    <th>Qty Reserved</th>
-                                    <th>Qty Warehouse</th>
-                                    <th>Created</th>
-                                    <th>Expired</th>
-                                    <th>Status</th>
-                                    <th>Action</th>
+                                    <td>No</td>
+                                    <td style="display: none;">SKU</td>
+                                    <td>Code</td>
+                                    <td>Product</td>
+                                    <td>Konversi</td>
+                                    <td>Harga Beli</td>
+                                    <td>Stock Outlet</td>
+                                    <td>Qty Reserved</td>
+                                    <td>Qty Warehouse</td>
+                                    <td>Created</td>
+                                    <td>Expired</td>
+                                    <td>Status</td>
+                                    <td>Action</td>
+                                    <td style="display:none;">Kategori</td>
+                                    <td style="display:none;">Lokasi</td>
                                 </tr>
                             </thead>
-                            <tbody></tbody>
+                            <tbody>
+                                @foreach ($stocks as $stock)
+                                    <tr>
+                                        <td>{{ $loop->iteration }}</td>
+                                        <td style="display: none;">{{ $stock->sku }}</td>
+                                        <td>{{ $stock->serial_number ?? $stock->product->code }}</td>
+                                        <td>{{ $stock->product->name }}</td>
+                                        <td>{{ $stock->product->konversi_string }}</td>
+                                        <td>
+                                            <button type="button" class="btn btn-xs btn-info btn-price-history"
+                                                data-toggle="modal" data-target="#priceHistoryModal"
+                                                data-id="{{ $stock->product_id }}">
+                                                @currency($stock->harga_beli ?? 0)
+                                            </button>
+                                        </td>
+                                        <td>
+                                            @php $v = $stock->ownerStock?->qty ?? 0; $k = $stock->product->konversiDisplay($v); @endphp
+                                            {{ $v }} @if($k !== '-') <span class="label label-info">{{ $k }}</span>@endif
+                                        </td>
+                                        <td>
+                                            @php $v = $stock->qty_reserved ?? 0; $k = $stock->product->konversiDisplay($v); @endphp
+                                            {{ $v }} @if($k !== '-') <span class="label label-info">{{ $k }}</span>@endif
+                                        </td>
+                                        <td>
+                                            @php $v = $stock->qty_available ?? 0; $k = $stock->product->konversiDisplay($v); @endphp
+                                            {{ $v }} @if($k !== '-') <span class="label label-info">{{ $k }}</span>@endif
+                                        </td>
+                                        <td>{{ $stock->created_at?->format('h:i a / d-M-Y') }}</td>
+                                        <td>{{ $stock->expired_at?->format('d-M-Y') }}</td>
+                                        <td>
+                                            <span
+                                                class="label label-{{ $stock->status == 'available' ? 'success' : 'warning' }}">
+                                                {{ $stock->status }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <button type="button" class="btn btn-xs btn-primary btn-stock-history"
+                                                data-toggle="modal" data-target="#stockHistoryModal"
+                                                data-id="{{ $stock->id }}">
+                                                <i class="fa fa-history"></i> History
+                                            </button>
+                                        </td>
+                                        <td style="display:none;">{{ $stock->product->category?->name ?? '' }}</td>
+                                        <td style="display:none;">{{ $stock->product->lokasi ?? '' }}</td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
                         </table>
 
                         <!-- Price History Modal -->
@@ -133,111 +176,48 @@
 @endsection
 @section('page-script')
     <script>
-        function konversiDisplayFmt(qty, konversiQty, satuanBesar, satuan) {
-            satuan = satuan || 'PCS';
-            qty = parseInt(qty) || 0;
-            if (!konversiQty || !satuanBesar) return null;
-            var boxes = Math.floor(qty / konversiQty);
-            var rem = qty % konversiQty;
-            if (rem === 0) return boxes + ' ' + satuanBesar;
-            if (boxes > 0) return boxes + ' ' + satuanBesar + ' ' + rem + ' ' + satuan;
-            return qty + ' ' + satuan;
-        }
-
-        function qtyWithLabel(qty, row) {
-            var k = konversiDisplayFmt(qty, row.konversi_qty, row.satuan_besar, row.satuan);
-            return qty + (k ? ' <span class="label label-info">' + k + '</span>' : '');
-        }
-
-        function formatRupiah(amount) {
-            return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(amount || 0);
-        }
-
         $(document).ready(function() {
+            // Destroy pre-initialised DataTables (from master) to avoid column mismatch
             if ($.fn.DataTable.isDataTable('#example1')) {
                 $('#example1').DataTable().destroy();
             }
+            if ($.fn.DataTable.isDataTable('#example2')) {
+                $('#example2').DataTable().destroy();
+            }
+            if ($.fn.DataTable.isDataTable('#example3')) {
+                $('#example3').DataTable().destroy();
+            }
 
             var table = $('#example1').DataTable({
-                processing: true,
-                serverSide: true,
-                ajax: {
-                    url: '{{ route('stocks.index.data') }}',
-                    data: function(d) {
-                        d.kategori = $('#filterKategori').val();
-                        d.lokasi = $('#filterLokasi').val();
-                    }
-                },
-                order: [[2, 'asc']], // Product name
-                columns: [
-                    {
-                        data: null,
-                        orderable: false,
-                        searchable: false,
-                        render: function(data, type, row, meta) {
-                            return meta.row + meta.settings._iDisplayStart + 1;
-                        }
-                    },
-                    { data: 'code', name: 'products.code' },
-                    { data: 'product_name', name: 'products.name' },
-                    {
-                        data: null,
-                        orderable: false,
-                        searchable: false,
-                        render: function(data, type, row) {
-                            var k = konversiDisplayFmt(row.qty_warehouse, row.konversi_qty, row.satuan_besar, row.satuan);
-                            return k || '-';
-                        }
-                    },
-                    {
-                        data: 'harga_beli',
-                        name: 's.harga_beli',
-                        render: function(data, type, row) {
-                            return '<button type="button" class="btn btn-xs btn-info btn-price-history" ' +
-                                'data-toggle="modal" data-target="#priceHistoryModal" data-id="' + row.product_id + '">' +
-                                formatRupiah(data) + '</button>';
-                        }
-                    },
-                    {
-                        data: 'stock_outlet',
-                        orderable: false,
-                        render: function(data, type, row) { return qtyWithLabel(data, row); }
-                    },
-                    {
-                        data: 'qty_reserved',
-                        name: 's.qty_reserved',
-                        render: function(data, type, row) { return qtyWithLabel(data, row); }
-                    },
-                    {
-                        data: 'qty_warehouse',
-                        name: 'g.total_qty',
-                        render: function(data, type, row) { return qtyWithLabel(data, row); }
-                    },
-                    { data: 'created_at', name: 's.created_at' },
-                    { data: 'expired_at', name: 's.expired_at' },
-                    {
-                        data: 'status',
-                        name: 's.status',
-                        render: function(data) {
-                            var cls = data === 'available' ? 'success' : 'warning';
-                            return '<span class="label label-' + cls + '">' + data + '</span>';
-                        }
-                    },
-                    {
-                        data: null,
-                        orderable: false,
-                        searchable: false,
-                        render: function(data, type, row) {
-                            return '<button type="button" class="btn btn-xs btn-primary btn-stock-history" ' +
-                                'data-toggle="modal" data-target="#stockHistoryModal" data-id="' + row.stock_id + '">' +
-                                '<i class="fa fa-history"></i> History</button>';
-                        }
-                    },
-                ]
+                columnDefs: [{ visible: false, targets: [13, 14] }]
             });
 
-            $('#filterKategori, #filterLokasi').on('change', function() {
-                table.draw();
+            // Populate Kategori dropdown (column 13)
+            table.column(13).data().unique().sort().each(function(val) {
+                if (val && String(val).trim() !== '') {
+                    $('#filterKategori').append($('<option>', { value: val, text: val }));
+                }
+            });
+
+            // Populate Lokasi dropdown (column 14)
+            table.column(14).data().unique().sort().each(function(val) {
+                if (val && String(val).trim() !== '') {
+                    $('#filterLokasi').append($('<option>', { value: val, text: val }));
+                }
+            });
+
+            function escReg(val) {
+                return val.replace(/[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|]/g, '\\$&');
+            }
+
+            $('#filterKategori').on('change', function() {
+                var val = $(this).val();
+                table.column(13).search(val ? '^' + escReg(val) + '$' : '', true, false).draw();
+            });
+
+            $('#filterLokasi').on('change', function() {
+                var val = $(this).val();
+                table.column(14).search(val ? '^' + escReg(val) + '$' : '', true, false).draw();
             });
 
             $('#priceHistoryModal').on('show.bs.modal', function(event) {
