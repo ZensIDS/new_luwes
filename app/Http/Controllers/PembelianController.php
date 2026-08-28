@@ -109,10 +109,44 @@ class PembelianController extends Controller
 
         $recordsTotal = (clone $base)->count('pembelians.id');
 
+        // ==== SEARCH: meniru "smart search" DataTables, tapi tetap ringan ====
+        // DataTables (client-side) memecah input jadi kata per kata dan mencari baris
+        // yang mengandung SEMUA kata itu di kolom manapun, tidak peduli urutan/kerapatan.
+        // Contoh: "wing surya" tetap match "Wings Surya" karena "wing" dan "surya"
+        // masing-masing ketemu sebagai substring, walau tidak nempel persis.
+        //
+        // Query LIKE '%wing surya%' (satu string utuh) TIDAK match "Wings Surya"
+        // karena butuh substring persis "wing surya" (ada huruf 's' nyempil di
+        // "Wings" sebelum spasi) -> makanya data "hilang" versi lama.
+        //
+        // Solusinya: pecah $searchValue jadi per kata, lalu AND-kan syarat antar kata
+        // (tiap kata WAJIB match di salah satu kolom), OR-kan antar kolom untuk kata
+        // yang sama. Supaya tetap ringan untuk ratusan ribu baris:
+        //  - Query dasar TETAP hanya join suppliers (tidak eager-load produk di sini).
+        //  - Pencarian ke produk pakai whereHas (EXISTS subquery), bukan JOIN penuh,
+        //    supaya tidak menggandakan baris pembelian saat 1 PO punya banyak produk.
+        //  - Filter kata dibatasi (misal maks 5 kata) supaya user tidak bisa bikin
+        //    query jadi sangat berat dengan mengetik puluhan kata sekaligus.
+        //  - Pastikan ada index di pembelians.code, suppliers.name, products.name,
+        //    products.code (dan foreign key pembelian_products.product_id /
+        //    pembelian_id) supaya tiap LIKE + EXISTS tetap cepat di data besar.
+        //    Kalau volume sudah jutaan baris & LIKE mulai lambat, pertimbangkan
+        //    MySQL FULLTEXT index sebagai upgrade berikutnya.
         if ($searchValue !== '') {
-            $base->where(function ($q) use ($searchValue) {
-                $q->where('pembelians.code', 'like', "%{$searchValue}%")
-                    ->orWhere('suppliers.name', 'like', "%{$searchValue}%");
+            $searchWords = preg_split('/\s+/', $searchValue, -1, PREG_SPLIT_NO_EMPTY);
+            $searchWords = array_slice($searchWords, 0, 5); // batasi biar tidak disalahgunakan
+
+            $base->where(function ($q) use ($searchWords) {
+                foreach ($searchWords as $word) {
+                    $q->where(function ($qw) use ($word) {
+                        $qw->where('pembelians.code', 'like', "%{$word}%")
+                            ->orWhere('suppliers.name', 'like', "%{$word}%")
+                            ->orWhereHas('pembelianProducts.product', function ($qp) use ($word) {
+                                $qp->where('name', 'like', "%{$word}%")
+                                    ->orWhere('code', 'like', "%{$word}%");
+                            });
+                    });
+                }
             });
         }
 
@@ -121,6 +155,14 @@ class PembelianController extends Controller
         // Ambil ID untuk halaman ini saja (ringan, tanpa eager load berat)
         $pageIds = $base
             ->orderBy($orderBy, $orderDir)
+            // Tie-breaker unik. Kolom seperti created_at (bisa sama persis kalau
+            // banyak PO dibuat di detik yang sama, misal via import/seed) atau
+            // is_published (cuma 2 nilai) punya banyak baris kembar. Tanpa secondary
+            // order by kolom unik, urutan hasil untuk baris bernilai sama TIDAK
+            // dijamin konsisten antar query -> saat DataTables pindah halaman /
+            // re-query gara-gara search, ada baris yang bisa terlewat (tidak pernah
+            // muncul di offset manapun) atau malah dobel.
+            ->orderBy('pembelians.id', $orderDir)
             ->offset($start)
             ->limit($length)
             ->pluck('pembelians.id');
@@ -349,12 +391,42 @@ class PembelianController extends Controller
 
         $recordsTotal = (clone $base)->count('pembelians.id');
 
+        // ==== SEARCH: meniru "smart search" DataTables, tapi tetap ringan ====
+        // DataTables (client-side) memecah input jadi kata per kata dan mencari baris
+        // yang mengandung SEMUA kata itu di kolom manapun, tidak peduli urutan/kerapatan.
+        // Contoh: "wing surya" tetap match "Wings Surya" karena "wing" dan "surya"
+        // masing-masing ketemu sebagai substring, walau tidak nempel persis.
+        //
+        // LIKE '%wing surya%' (satu string utuh) TIDAK match "Wings Surya" karena
+        // butuh substring persis "wing surya" -> data terasa "hilang" di versi lama.
+        //
+        // Fix: pecah $searchValue jadi per kata, AND-kan syarat antar kata (tiap kata
+        // wajib match di salah satu kolom), OR-kan antar kolom untuk kata yang sama.
+        // Supaya tetap ringan untuk ratusan ribu baris:
+        //  - Query dasar tetap hanya join suppliers, tidak eager-load produk di sini.
+        //  - Pencarian ke produk pakai whereHas (EXISTS subquery), bukan JOIN penuh,
+        //    supaya tidak menggandakan baris pembelian saat 1 PO punya banyak produk.
+        //  - Jumlah kata dibatasi (maks 5) supaya query tidak bisa dibuat sangat berat.
+        //  - Pastikan ada index di pembelians.code, pembelians.code_gr, suppliers.name,
+        //    pembelians.receipt_pic, products.name, products.code, serta foreign key
+        //    pembelian_products.pembelian_id / product_id.
         if ($searchValue !== '') {
-            $base->where(function ($q) use ($searchValue) {
-                $q->where('pembelians.code', 'like', "%{$searchValue}%")
-                    ->orWhere('pembelians.code_gr', 'like', "%{$searchValue}%")
-                    ->orWhere('suppliers.name', 'like', "%{$searchValue}%")
-                    ->orWhere('pembelians.receipt_pic', 'like', "%{$searchValue}%");
+            $searchWords = preg_split('/\s+/', $searchValue, -1, PREG_SPLIT_NO_EMPTY);
+            $searchWords = array_slice($searchWords, 0, 5); // batasi biar tidak disalahgunakan
+
+            $base->where(function ($q) use ($searchWords) {
+                foreach ($searchWords as $word) {
+                    $q->where(function ($qw) use ($word) {
+                        $qw->where('pembelians.code', 'like', "%{$word}%")
+                            ->orWhere('pembelians.code_gr', 'like', "%{$word}%")
+                            ->orWhere('suppliers.name', 'like', "%{$word}%")
+                            ->orWhere('pembelians.receipt_pic', 'like', "%{$word}%")
+                            ->orWhereHas('pembelianProducts.product', function ($qp) use ($word) {
+                                $qp->where('name', 'like', "%{$word}%")
+                                    ->orWhere('code', 'like', "%{$word}%");
+                            });
+                    });
+                }
             });
         }
 
@@ -362,6 +434,13 @@ class PembelianController extends Controller
 
         $pageIds = $base
             ->orderBy($orderBy, $orderDirDefault)
+            // Tie-breaker unik. Kolom seperti receipt_status / owner_approval_status
+            // hanya punya sedikit nilai berbeda, jadi banyak baris kembar. Tanpa
+            // secondary order by kolom unik, urutan hasil untuk baris bernilai sama
+            // TIDAK dijamin konsisten antar query -> saat DataTables pindah halaman
+            // / re-query gara-gara search, ada baris yang bisa terlewat (tidak pernah
+            // muncul di offset manapun) atau malah dobel.
+            ->orderBy('pembelians.id', $orderDirDefault)
             ->offset($start)
             ->limit($length)
             ->pluck('pembelians.id');
