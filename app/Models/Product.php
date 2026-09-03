@@ -136,6 +136,11 @@ class Product extends Model
         return $this->hasMany(OwnerStock::class);
     }
 
+    public function outletPrices()
+    {
+        return $this->hasMany(OutletPrice::class);
+    }
+
     public function movements()
     {
         return $this->hasMany(StockMovement::class);

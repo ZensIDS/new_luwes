@@ -47,8 +47,11 @@
                             </div>
                             <div class="form-group">
                                 <label for="">Nominal Awal</label>
-                                <input type="text" class="form-control" name="nominal" value="{{ old('nominal', $kas->nominal) }}"
+                                <div class="input-group">
+                                    <span class="input-group-addon">Rp</span>
+                                    <input type="text" inputmode="numeric" data-currency-input data-currency-decimals="0" class="form-control" name="nominal" value="{{ old('nominal', $kas->nominal) }}"
                                     placeholder="Masukkan Nominal Awal">
+                                </div>
                                 @error('nominal')
                                     <div class="invalid-feedback text-danger">
                                         {{ $message }}

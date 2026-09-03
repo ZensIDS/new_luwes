@@ -108,8 +108,11 @@
                             </div>
                             <div class="col-md-6 form-group">
                                 <label for="">Harga Beli</label>
-                                <input type="text" class="form-control" name="harga_beli"
-                                    value="{{ old('harga_beli', $product->harga_beli) }}" placeholder="Masukkan Harga Beli">
+                                <div class="input-group">
+                                    <span class="input-group-addon">Rp</span>
+                                    <input type="text" inputmode="numeric" data-currency-input data-currency-decimals="0" class="form-control" name="harga_beli"
+                                        value="{{ old('harga_beli', $product->harga_beli) }}" placeholder="Masukkan Harga Beli">
+                                </div>
                                 @error('harga_beli')
                                     <div class="invalid-feedback text-danger">
                                         {{ $message }}

@@ -19,19 +19,19 @@
                             </tr>
                             <tr>
                                 <th>Request Order</th>
-                                <td>{{ $deliveryOrder->requestOrder->code }}</td>
+                                <td>{{ $deliveryOrder->requestOrder?->code ?? '-' }}</td>
                             </tr>
                             <tr>
                                 <th>Owner/Outlet</th>
-                                <td>{{ $deliveryOrder->owner->name }}</td>
+                                <td>{{ $deliveryOrder->owner?->name ?? '-' }}</td>
                             </tr>
                             <tr>
                                 <th>Prepared By</th>
-                                <td>{{ $deliveryOrder->preparedBy->name }}</td>
+                                <td>{{ $deliveryOrder->preparedBy?->name ?? '-' }}</td>
                             </tr>
                             <tr>
                                 <th>Delivery Date</th>
-                                <td>{{ $deliveryOrder->delivery_date->format('d-m-Y') }}</td>
+                                <td>{{ optional($deliveryOrder->delivery_date)->format('d-m-Y') ?? '-' }}</td>
                             </tr>
                             <tr>
                                 <th>Status</th>
@@ -103,7 +103,7 @@
                                     @endphp
                                     <tr>
                                         <td>{{ $loop->iteration }}</td>
-                                        <td>{{ $item->product->name }}</td>
+                                        <td>{{ $item->product?->name ?? '-' }}</td>
                                         <td>{{ $item->sku ?? '-' }}</td>
                                         <td>{{ $item->expired_at ? $item->expired_at->format('d-m-Y') : '-' }}</td>
                                         <td class="text-center">{{ $item->qty }}</td>

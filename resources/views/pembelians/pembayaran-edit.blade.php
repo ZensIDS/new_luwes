@@ -202,11 +202,14 @@
 
                                         <div class="form-group">
                                             <label class="form-label">Jumlah Pembayaran</label>
-                                            <input type="number" name="amount" class="form-control" id="amountInput"
-                                                value="0" step="0.01" min="0"
-                                                max="{{ $pembelian->total - ($pembelian->pembelianTransaction?->amount ?? 0) }}"
-                                                placeholder="Masukkan jumlah yang dibayar" required
-                                                @if ($pembelian->pembelianTransaction?->status === 'paid') disabled @endif />
+                                            <div class="input-group">
+                                                <span class="input-group-addon">Rp</span>
+                                                <input type="text" inputmode="numeric" data-currency-input data-currency-decimals="0" name="amount" class="form-control" id="amountInput"
+                                                    value="0" min="0"
+                                                    data-max="{{ $pembelian->total - ($pembelian->pembelianTransaction?->amount ?? 0) }}"
+                                                    placeholder="Masukkan jumlah yang dibayar" required
+                                                    @if ($pembelian->pembelianTransaction?->status === 'paid') disabled @endif />
+                                            </div>
                                             <small class="text-muted">
                                                 @if ($pembelian->pembelianTransaction && $pembelian->pembelianTransaction->status === 'partial')
                                                     Sudah dibayar: Rp
@@ -287,18 +290,18 @@
         });
 
         $('#amountInput').on('input', function() {
-            let value = $(this).val().replace(/[^0-9.]/g, '');
+            let value = window.parseIdNumber ? window.parseIdNumber($(this).val()) : (parseFloat($(this).val()) || 0);
             if (value) {
                 const max = {{ $pembelian->total - ($pembelian->pembelianTransaction?->amount ?? 0) }};
-                if (parseFloat(value) > max) {
-                    $(this).val(max);
+                if (value > max) {
+                    $(this).val(window.formatIdNumber ? window.formatIdNumber(max) : max);
                 }
             }
         });
 
         $('#amountInput').on('change', function() {
             const currentPaid = {{ $pembelian->pembelianTransaction?->amount ?? 0 }};
-            const inputAmount = parseFloat($(this).val()) || 0;
+            const inputAmount = window.parseIdNumber ? window.parseIdNumber($(this).val()) : (parseFloat($(this).val()) || 0);
             const totalPaid = currentPaid + inputAmount;
             const grandTotal = {{ $pembelian->total }};
 

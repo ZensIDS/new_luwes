@@ -19,10 +19,25 @@ class Penjualan extends Model
         'salesman_id',
         'discount',
         'total',
+        'subtotal',
+        'discount_total',
+        'voucher_total',
+        'grand_total',
+        'paid_amount',
+        'change_amount',
+        'payment_method_id',
+        'payment_method_name',
+        'status',
     ];
 
     protected $casts = [
         'created_at' => 'datetime',
+        'subtotal' => 'float',
+        'discount_total' => 'float',
+        'voucher_total' => 'float',
+        'grand_total' => 'float',
+        'paid_amount' => 'float',
+        'change_amount' => 'float',
     ];
 
     public function customer()
@@ -65,8 +80,20 @@ class Penjualan extends Model
         return $this->hasMany(PenjualanItem::class);
     }
 
+    public function vouchers()
+    {
+        return $this->belongsToMany(Voucher::class, 'voucher_redemptions')
+            ->withPivot('outlet_id', 'cashier_id', 'code', 'type', 'value', 'amount')
+            ->withTimestamps();
+    }
+
+    public function paymentMethod()
+    {
+        return $this->belongsTo(PaymentMethod::class);
+    }
+
     public function getFinalTotalAttribute()
     {
-        return $this->total - $this->discount;
+        return $this->grand_total ?? $this->total - $this->discount;
     }
 }

@@ -36,15 +36,19 @@ class User extends Authenticatable
         'email_verified_at' => 'datetime',
     ];
 
-    // public function cart()
-    // {
-    //     return $this->belongsToMany(Product::class, 'user_cart')->withPivot('qty', 'serial_number', 'stock_id');
-    // }
+    public function cart()
+    {
+        return $this->belongsToMany(Product::class, 'user_cart')
+            ->withPivot('qty', 'serial_number', 'stock_id', 'owner_stock_id', 'outlet_id')
+            ->withTimestamps();
+    }
 
-    // public function wishlist()
-    // {
-    //     return $this->belongsToMany(Product::class, 'user_wishlist')->withPivot('qty', 'name', 'customer_id', 'outlet_id');
-    // }
+    public function wishlist()
+    {
+        return $this->belongsToMany(Product::class, 'user_wishlist')
+            ->withPivot('qty', 'name', 'customer_id', 'outlet_id', 'stock_id', 'owner_stock_id')
+            ->withTimestamps();
+    }
 
     // public function reviews()
     // {

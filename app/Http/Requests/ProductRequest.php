@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use App\Support\IndonesianNumber;
 
 class ProductRequest extends FormRequest
 {
@@ -17,6 +18,9 @@ class ProductRequest extends FormRequest
             'konversi_qty' => $this->filled('konversi_qty')
                 ? round((float) $this->input('konversi_qty'), 2)
                 : null,
+            'harga_beli' => IndonesianNumber::parse($this->input('harga_beli')),
+            'harga_jual' => IndonesianNumber::parse($this->input('harga_jual')),
+            'diskon' => IndonesianNumber::parse($this->input('diskon')),
         ]);
     }
 

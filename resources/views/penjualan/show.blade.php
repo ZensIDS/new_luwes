@@ -24,12 +24,12 @@
                                 </tr>
                                 <tr>
                                     <td colspan="2">Customer</td>
-                                    <td colspan="2">{{ $penjualan->customer->name }}</td>
+                                        <td colspan="2">{{ $penjualan->customer?->name ?? 'Umum' }}</td>
                                 </tr>
                                 <tr>
                                     <td colspan="2">Kas/Metode Pembayaran</td>
                                     <td colspan="2">
-                                        {{ $penjualan->kas->name ?? $penjualan->transaction?->payment?->name }}
+                                        {{ $penjualan->kas?->name ?? $penjualan->paymentMethod?->name ?? $penjualan->transaction?->payment?->name ?? 'Tunai' }}
                                     </td>
                                 </tr>
                                 <tr>
@@ -58,24 +58,32 @@
                                     </tr>
                                     @php $totalCost += $item->qty * $item->price; @endphp
                                 @endforeach
-                                @php $kembali = abs(($totalCost - $penjualan->discount - $penjualan->voucher?->value) - $penjualan->total); @endphp
+                                @php $grandTotal = $penjualan->grand_total ?? ($totalCost - $penjualan->discount - $penjualan->voucher?->value); @endphp
                                 <tr>
                                     <th colspan="4" class="text-sm text-right">Sub Total : @currency($totalCost)</th>
                                 </tr>
                                 <tr>
-                                    <th colspan="4" class="text-sm text-right">Diskon : -@currency($penjualan->discount)</th>
+                                    <th colspan="4" class="text-sm text-right">Disc Toko : -@currency($penjualan->discount_total ?? $penjualan->discount)</th>
                                 </tr>
                                 <tr>
-                                    <th colspan="4" class="text-sm text-right">Voucher : -@currency($penjualan->voucher?->value)</th>
+                                    <th colspan="4" class="text-sm text-right">Voucher : -@currency($penjualan->voucher_total ?? 0)</th>
                                 </tr>
+                                @if ($penjualan->vouchers->isNotEmpty())
+                                    <tr>
+                                        <th colspan="4" class="text-sm text-right">Kode Voucher: {{ $penjualan->vouchers->pluck('code')->join(', ') }}</th>
+                                    </tr>
+                                @endif
                                 <tr>
-                                    <th colspan="4" class="text-right">Grand Total : @currency($totalCost - $penjualan->discount - $penjualan->voucher?->value)</th>
+                                    <th colspan="4" class="text-right">Grand Total : @currency($grandTotal)</th>
                                 </tr>
                                 {{-- <tr> --}}
                                     {{-- <th colspan="4" class="text-sm text-right">Di Bayar : @currency($penjualan->total)</th> --}}
                                 {{-- </tr> --}}
                                 <tr>
-                                    <th colspan="4" class="text-sm text-right">Hemat: @currency($kembali)</th>
+                                    <th colspan="4" class="text-sm text-right">Dibayar: @currency($penjualan->paid_amount ?? $penjualan->total)</th>
+                                </tr>
+                                <tr>
+                                    <th colspan="4" class="text-sm text-right">Kembalian: @currency($penjualan->change_amount ?? 0)</th>
                                 </tr>
                             </tbody>
                         </table>

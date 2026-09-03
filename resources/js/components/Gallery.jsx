@@ -39,7 +39,7 @@ const Gallery = ({ products, addProductToCart }) => {
                             <td>{p.name}</td>
                             <td>{p.total_stock}</td>
                             <td>
-                                {p.stocks
+                                {p.owner_stocks
                                     .filter(
                                         (s) => s.available && s.serial_number
                                     )

@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use App\Support\IndonesianNumber;
 
 class KasRequest extends FormRequest
 {
@@ -18,5 +19,10 @@ class KasRequest extends FormRequest
             'outlet_id' => 'required',
             'nominal' => 'nullable|numeric',
         ];
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $this->merge(['nominal' => IndonesianNumber::parse($this->input('nominal'))]);
     }
 }

@@ -5,9 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\DeliveryOrder;
 use App\Models\DeliveryOrderItem;
 use App\Models\Outlet;
-use App\Models\OwnerStock;
 use App\Models\PickingList;
-use App\Models\StockMovement;
+use App\Services\OutletStockService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -261,8 +260,12 @@ class DeliveryOrderController extends Controller
         return $count;
     }
 
-    public function send(Request $request, DeliveryOrder $deliveryOrder)
+    public function send(Request $request, DeliveryOrder $deliveryOrder, OutletStockService $stockService)
     {
+        if (in_array($deliveryOrder->status, ['delivered', 'completed'], true)) {
+            return back()->with('toast_error', 'Delivery order ini sudah diterima dan tidak dapat diproses ulang.');
+        }
+
         $request->validate([
             'photo'   => 'nullable|image|max:2048',
             'items'   => 'required|array',
@@ -294,37 +297,40 @@ class DeliveryOrderController extends Controller
                 $qtySent = max(0, (int) ($itemData[$item->id]['qty_sent'] ?? $item->qty));
                 $stock   = $item->stock;
 
+                if (! $stock) {
+                    throw new \RuntimeException("Stok warehouse untuk item {$item->id} tidak ditemukan.");
+                }
+                if ($qtySent > (int) $item->qty) {
+                    throw new \RuntimeException("Qty kirim item {$item->id} melebihi qty delivery order.");
+                }
+
                 $item->update(['qty_sent' => $qtySent]);
 
                 // DIHAPUS: $stock->allocate($qtySent);
                 // Stock sudah dialokasikan di completeAndShip() saat picking selesai
 
-                // Create/update owner stock using admin-confirmed qty
-                OwnerStock::updateOrCreate(
-                    [
-                        'owner_id'   => $deliveryOrder->owner_id,
-                        'product_id' => $item->product_id,
-                        'stock_id'   => $stock->id,
-                        'sku'        => $stock->sku,
-                    ],
-                    [
-                        'qty'        => DB::raw('qty + ' . $qtySent),
-                        'expired_at' => $item->expired_at,
-                        'harga_beli' => $item->harga_beli,
-                    ]
-                );
-
-                // Log movement tetap berjalan
-                StockMovement::create([
-                    'product_id'     => $item->product_id,
-                    'user_id'        => auth()->id(),
-                    'type'           => 'out',
-                    'reference_type' => DeliveryOrder::class,
-                    'reference_id'   => $deliveryOrder->id,
-                    'qty_out'        => $qtySent,
-                    'balance'        => $item->product->stocks()->sum('qty'),
-                    'notes'          => "Delivery to {$deliveryOrder->owner->name} - SKU: {$stock->sku}",
-                ]);
+                // Receive the confirmed quantity into the outlet-owned stock ledger.
+                $batchNumber = $stock->batch_number ?: 'DO-' . $deliveryOrder->id . '-' . $item->id;
+                if ($qtySent > 0) {
+                    $stockService->receive(
+                        $deliveryOrder->owner_id,
+                        $item->product_id,
+                        $qtySent,
+                        (float) $item->harga_beli,
+                        [
+                            'stock_id' => $stock->id,
+                            'sku' => $stock->sku,
+                            'expired_at' => $item->expired_at,
+                            'batch_number' => $batchNumber,
+                            'source_type' => DeliveryOrder::class,
+                            'source_id' => $deliveryOrder->id,
+                            'notes' => "Delivery to {$deliveryOrder->owner->name} - SKU: {$stock->sku}",
+                        ],
+                        DeliveryOrder::class,
+                        $deliveryOrder->id,
+                        auth()->user()
+                    );
+                }
             }
 
             $data = [

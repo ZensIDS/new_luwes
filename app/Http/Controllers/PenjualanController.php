@@ -2,31 +2,30 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Requests\PenjualanRequest;
-use App\Models\Kas;
 use App\Models\Outlet;
 use App\Models\Penjualan;
-use App\Models\Stock;
-use App\Models\Voucher;
-use Carbon\Carbon;
-use Exception;
+use App\Services\CashierSaleService;
+use App\Support\OutletAccess;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use PDF;
+use Throwable;
 
 class PenjualanController extends Controller
 {
-    public function getPenjualan($outlet_id)
+    public function getPenjualan(Request $request, $outlet_id)
     {
+        $request->merge(['outlet_id' => $outlet_id]);
+        OutletAccess::id($request);
         $penjualans = Penjualan::where('outlet_id', $outlet_id)->get();
 
         return response()->json($penjualans);
     }
 
-    public function getItems($penjualan_id)
+    public function getItems(Request $request, $penjualan_id)
     {
         $penjualan = Penjualan::find($penjualan_id);
         if ($penjualan) {
+            $request->merge(['outlet_id' => $penjualan->outlet_id]);
+            OutletAccess::id($request);
             $items = $penjualan->items;
 
             return response()->json($items);
@@ -42,16 +41,24 @@ class PenjualanController extends Controller
         ]);
     }
 
-    public function index()
+    public function index(Request $request)
     {
+        $outletId = OutletAccess::id($request, false);
+        $query = Penjualan::with(['items.product', 'outlet', 'kasir', 'vouchers'])
+            ->orderBy('created_at', 'desc');
+        if ($outletId) {
+            $query->where('outlet_id', $outletId);
+        }
+
         return view('penjualan.index', [
-            'penjualan' => Penjualan::doesntHave('transaction')->orderBy('created_at', 'desc')->get(),
+            'penjualan' => $query->get(),
         ]);
     }
 
     public function create()
     {
-        if (auth()->user()->role == 'kasir' | auth()->user()->role == 'admin'){
+        if (in_array(auth()->user()->role, ['kasir', 'staff-outlet'], true)) {
+            abort_unless(auth()->user()->outlet_id, 422, 'User belum memiliki outlet.');
             return redirect()->route('outlet.show', auth()->user()->outlet_id);
         }
 
@@ -60,119 +67,49 @@ class PenjualanController extends Controller
         ]);
     }
 
-    public function store(Request $request)
+    public function store(Request $request, CashierSaleService $saleService)
     {
         $request->validate([
-            'customer_id' => 'required',
-            // 'kas_id' => 'required',
-            'kasir_id' => 'nullable',
-            'total' => 'required',
+            'customer_id' => 'nullable|integer|exists:users,id',
+            'outlet_id' => 'required|integer|exists:outlets,id',
+            'paid_amount' => 'required|numeric|min:0',
+            'payment_method_id' => 'nullable|integer|exists:payment_methods,id',
+            'payment_method_name' => 'nullable|string|max:100',
+            'salesman_id' => 'nullable|integer|exists:salesmen,id',
+            'voucher_codes' => 'nullable|array',
+            'voucher_codes.*' => 'string|max:100',
         ]);
 
-        DB::beginTransaction();
-
         try {
-            $lastOrder = Penjualan::where('outlet_id', $request->outlet_id)
-                ->orderBy('created_at', 'desc')
-                ->first();
-            $nextInvoiceNumber = $lastOrder ? ((int) substr($lastOrder->code, 3) + 1) : 1;
-            $nextInvoiceNumber = str_pad($nextInvoiceNumber, 3, '0', STR_PAD_LEFT);
-            $nextInvoiceCode = 'INV'.$nextInvoiceNumber;
-            $order = Penjualan::create([
-                'code' => $nextInvoiceCode,
-                'customer_id' => $request->customer_id,
-                'outlet_id' => $request->outlet_id,
-                'salesman_id' => $request->salesman_id,
-                'kasir_id' => $request->kasir_id,
-                'voucher_id' => $request->voucher_id,
-                'discount' => $request->discount,
-                'total' => $request->total,
-            ]);
+            OutletAccess::id($request);
+            $order = $saleService->checkout($request->user(), $request->all());
 
-            if (isset($request->voucher_id)) {
-                Voucher::find($request->voucher_id)->update(['limit' => 0]);
-            }
-            // $kas = Kas::find($request->kas_id);
-            // $kas->nominal += $request->total;
-            // $kas->save();
+            return response()->json([
+                'success' => true,
+                'message' => 'Pesanan berhasil dibuat.',
+                'redirect' => route('penjualan.show', $order),
+                'order' => $order,
+            ], 201);
+        } catch (Throwable $e) {
+            report($e);
 
-            $cart = $request->user()->cart()->get();
-            foreach ($cart as $item) {
-                $order->items()->create([
-                    'subtotal' => $item->harga_jual * $item->pivot->qty,
-                    'price' => $item->harga_jual,
-                    'qty' => $item->pivot->qty,
-                    'product_id' => $item->id,
-                    'serial_number' => $item->pivot->serial_number,
-                    'stock_id' => $item->pivot->stock_id,
-                ]);
-
-                if ($item->is_serialized) {
-                    // For serialized items, update specific stock
-                    $stock = Stock::find($item->pivot->stock_id);
-                    if (! $stock || $stock->qty < $item->pivot->qty) {
-                        throw new Exception('Stock not found or insufficient quantity');
-                    }
-                    $stock->qty -= $item->pivot->qty;
-                    $stock->save();
-                } else {
-                    // Existing FIFO logic for non-serialized items
-                    $now = Carbon::now();
-                    $stocks = Stock::where('product_id', $item->id)
-                        ->where('qty', '>', 0)
-                        ->get();
-
-                    if ($stocks->isEmpty()) {
-                        throw new Exception('Stock not found or expired');
-                    }
-
-                    $remainingQty = $item->pivot->qty;
-                    foreach ($stocks as $stock) {
-                        if ($remainingQty <= 0) {
-                            break;
-                        }
-
-                        if ($stock->qty >= $remainingQty) {
-                            $stock->qty -= $remainingQty;
-                            $remainingQty = 0;
-                        } else {
-                            $remainingQty -= $stock->qty;
-                            $stock->qty = 0;
-                        }
-                        $stock->save();
-                    }
-
-                    if ($remainingQty > 0) {
-                        throw new Exception('Insufficient stock quantity');
-                    }
-                }
-            }
-
-            $request->user()->cart()->detach();
-
-            DB::commit();
-        } catch (Exception $e) {
-            DB::rollBack();
-
-            return $e->getMessage();
+            return response()->json(['message' => $e->getMessage()], 422);
         }
     }
 
     public function show(Penjualan $penjualan)
     {
-        // dd($penjualan->load(['kasir', 'customer', 'items.product'])->toArray());
-        // $pdf = PDF::loadView('penjualan.penjualan_pdf', ['penjualan' => $penjualan]);
-
-        // return $pdf->download('penjualan_'.$penjualan->id.'.pdf');
+        $this->ensureSaleAccess($penjualan);
         return view('penjualan.show', [
-            'penjualan' => $penjualan,
+            'penjualan' => $penjualan->load(['kasir', 'customer', 'outlet', 'items.product', 'vouchers', 'paymentMethod']),
         ]);
     }
 
     public function print(Penjualan $penjualan)
     {
+        $this->ensureSaleAccess($penjualan);
         return view('penjualan.print', [
-            'penjualan' => $penjualan,
+            'penjualan' => $penjualan->load(['kasir', 'customer', 'outlet', 'items.product', 'vouchers', 'paymentMethod']),
         ]);
     }
 
@@ -194,8 +131,20 @@ class PenjualanController extends Controller
 
     public function destroy(Penjualan $penjualan)
     {
+        $this->ensureSaleAccess($penjualan);
+        if ($penjualan->status === 'paid' && $penjualan->items()->exists()) {
+            return redirect()->back()->with('toast_error', 'Penjualan paid tidak dapat dihapus karena stok dan voucher harus tetap dapat diaudit. Gunakan alur retur/void.');
+        }
         $penjualan->delete();
 
         return redirect(route('penjualan.index'))->with('toast_success', 'Berhasil Menghapus Data!');
+    }
+
+    private function ensureSaleAccess(Penjualan $penjualan): void
+    {
+        $user = auth()->user();
+        if (in_array($user?->role, ['staff-outlet', 'kasir'], true)) {
+            abort_unless($user->outlet_id && (int) $user->outlet_id === (int) $penjualan->outlet_id, 403);
+        }
     }
 }

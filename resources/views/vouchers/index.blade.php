@@ -24,7 +24,10 @@
                                 <tr>
                                     <td>No</td>
                                     <td>Nama</td>
-                                    <td>Nominal</td>
+                                    <td>Kode</td>
+                                    <td>Outlet</td>
+                                    <td>Tipe / Nilai</td>
+                                    <td>Status</td>
                                     <td>Aksi</td>
                                 </tr>
                             </thead>
@@ -32,6 +35,8 @@
                                 <tr>
                                     <td>{{ $loop->iteration }}</td>
                                     <td>{{ $value->name }}</td>
+                                    <td>{{ $value->code }}</td>
+                                    <td>{{ $value->outlet?->name ?? 'Semua outlet' }}</td>
                                     <td>
                                         @if ($value->type == 'percentage')
                                             {{ $value->value }}%
@@ -39,6 +44,7 @@
                                             @currency($value->value)
                                         @endif
                                     </td>
+                                    <td>{{ $value->redemptions_count ? 'Sudah digunakan' : ($value->isActive() ? 'Tersedia' : 'Tidak aktif') }}</td>
                                     <td>
                                         <a class="btn btn-warning" href="{{ route('voucher.edit', $value->id) }}">Edit</a>
                                         <a class="btn btn-info" href="{{ route('voucher.show', $value->id) }}">Lihat</a>

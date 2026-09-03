@@ -155,5 +155,7 @@ class DatabaseSeeder extends Seeder
         //         ]);
         //     }
         // }
+
+        $this->call(CashierStockSeeder::class);
     }
 }
