@@ -35,7 +35,7 @@ Route::get('/', function () {
     return redirect('/dashboard');
 });
 
-Route::middleware(['role:admin-gudang|staff-outlet|owner|superadmin'])->group(function () {
+Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
@@ -45,6 +45,16 @@ Route::middleware(['role:admin-gudang|staff-outlet|owner|superadmin'])->group(fu
     Route::get('/get-customer/{penjualan_id}', [CustomerController::class, 'getCustomer']);
     Route::get('/get-penjualan/{outlet_id}', [PenjualanController::class, 'getPenjualan']);
     Route::get('/penjualan-detail/{penjualan_id}/items', [PenjualanController::class, 'getItems']);
+    Route::resource('/penjualan', PenjualanController::class)->only(['index', 'create', 'store', 'show', 'destroy']);
+    Route::get('/penjualan/{penjualan}/print', [PenjualanController::class, 'print'])->name('penjualan.print');
+    Route::get('/cart', [CartController::class, 'index'])->name('cart.index');
+    Route::post('/cart', [CartController::class, 'store'])->name('cart.store');
+    Route::post('/cart-change-qty', [CartController::class, 'changeQty'])->name('cart.change-qty');
+    Route::post('/cart/destroy', [CartController::class, 'destroy'])->name('cart.destroy');
+    Route::delete('/cart-empty', [CartController::class, 'empty'])->name('cart.empty');
+    Route::post('/wishlist-pos', [CartController::class, 'addToWishlist'])->name('wishlist-pos.store');
+    Route::get('/wishlist-pos/{outlet_id}', [CartController::class, 'getWishlist'])->name('wishlist-pos.index');
+    Route::post('/wishlist/move-to-cart', [CartController::class, 'moveToCart'])->name('wishlist.move-to-cart');
     Route::get('/get-pembelian/{outlet_id}', [PembelianController::class, 'getPembelian']);
     Route::get('/pembelian-detail/{pembelian_id}/items', [PembelianController::class, 'getItems']);
 
@@ -65,7 +75,15 @@ Route::middleware(['role:admin-gudang|staff-outlet|owner|superadmin'])->group(fu
         ->name('product.minimum-adjustment.store');
     Route::resource('/product', ProductController::class);
 
-    Route::resource('/stock', StockController::class);
+    Route::resource('/stock', StockController::class)->middleware('role:superadmin|admin-gudang|owner');
+    Route::resource('/outlet-prices', App\Http\Controllers\OutletPriceController::class)->except(['show']);
+    Route::resource('/outlet-purchases', App\Http\Controllers\OutletPurchaseController::class)->only(['index', 'create', 'store', 'show']);
+    Route::get('/owner-stock-kartu', [App\Http\Controllers\OwnerStockController::class, 'kartu'])->name('owner-stocks.kartu');
+    Route::get('/owner-stock-kartu/data', [App\Http\Controllers\OwnerStockController::class, 'getKartuData'])->name('owner-stocks.kartu.data');
+    Route::get('/owner-stock-opname', [App\Http\Controllers\OwnerStockController::class, 'opname'])->name('owner-stock-opname');
+    Route::get('/owner-stock-opname/data', [App\Http\Controllers\OwnerStockController::class, 'getOpnameData'])->name('owner-stock-opname.data');
+    Route::post('/owner-stock-opname/save', [App\Http\Controllers\OwnerStockController::class, 'saveOpname'])->name('owner-stock-opname.save');
+    Route::get('/voucher/lookup', [VoucherController::class, 'lookup'])->name('voucher.lookup');
     Route::resource('/voucher', VoucherController::class);
     Route::resource('/slider', SliderController::class);
 
@@ -159,22 +177,22 @@ Route::middleware(['role:admin-gudang|staff-outlet|owner|superadmin'])->group(fu
 
     // Owner Stocks
     Route::get('owner-stocks', [App\Http\Controllers\OwnerStockController::class, 'index'])->name('owner-stocks.index');
-    Route::get('stocks/data', [StockController::class, 'getIndexData'])->name('stocks.index.data');
+    Route::get('stocks/data', [StockController::class, 'getIndexData'])->middleware('role:superadmin|admin-gudang|owner')->name('stocks.index.data');
     Route::get('owner-stocks/{owner}', [App\Http\Controllers\OwnerStockController::class, 'show'])->name('owner-stocks.show');
 
     Route::get('/product/{product}/price-history', [App\Http\Controllers\ProductController::class, 'priceHistory'])->name('product.price-history');
-    Route::get('/stock/{stock}/history', [App\Http\Controllers\StockController::class, 'history'])->name('stock.history');
+    Route::get('/stock/{stock}/history', [App\Http\Controllers\StockController::class, 'history'])->middleware('role:superadmin|admin-gudang|owner')->name('stock.history');
 
     // Stock Kartu
-    Route::get('/stock-kartu', [App\Http\Controllers\StockController::class, 'kartu'])->name('stock.kartu');
-    Route::get('/stocks/search', [StockController::class, 'searchStock'])->name('stocks.search');
-    Route::get('/stock/kartu/data', [App\Http\Controllers\StockController::class, 'getKartuData'])->name('stock.kartu.data');
+    Route::get('/stock-kartu', [App\Http\Controllers\StockController::class, 'kartu'])->middleware('role:superadmin|admin-gudang|owner')->name('stock.kartu');
+    Route::get('/stocks/search', [StockController::class, 'searchStock'])->middleware('role:superadmin|admin-gudang|owner')->name('stocks.search');
+    Route::get('/stock/kartu/data', [App\Http\Controllers\StockController::class, 'getKartuData'])->middleware('role:superadmin|admin-gudang|owner')->name('stock.kartu.data');
 
     // Stock Opname
-    Route::get('/stock-opname', [App\Http\Controllers\StockController::class, 'opname'])->name('stock.opname');
-    Route::get('/stock-opname/data', [App\Http\Controllers\StockController::class, 'getOpnameData'])->name('stock.opname.data');
-    Route::post('/stock-opname/save', [App\Http\Controllers\StockController::class, 'saveOpname'])->name('stock.opname.save');
-    Route::get('/stock-opname/export-template', [App\Http\Controllers\StockController::class, 'exportOpnameTemplate'])->name('stock.opname.export-template');
+    Route::get('/stock-opname', [App\Http\Controllers\StockController::class, 'opname'])->middleware('role:superadmin|admin-gudang|owner')->name('stock.opname');
+    Route::get('/stock-opname/data', [App\Http\Controllers\StockController::class, 'getOpnameData'])->middleware('role:superadmin|admin-gudang|owner')->name('stock.opname.data');
+    Route::post('/stock-opname/save', [App\Http\Controllers\StockController::class, 'saveOpname'])->middleware('role:superadmin|admin-gudang|owner')->name('stock.opname.save');
+    Route::get('/stock-opname/export-template', [App\Http\Controllers\StockController::class, 'exportOpnameTemplate'])->middleware('role:superadmin|admin-gudang|owner')->name('stock.opname.export-template');
 
     // Supplier
     Route::get('suppliers/export', [SupplierController::class, 'export'])->name('supplier.export');

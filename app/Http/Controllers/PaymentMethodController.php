@@ -9,6 +9,10 @@ class PaymentMethodController extends Controller
 {
     public function index()
     {
+        if (request()->wantsJson()) {
+            return response()->json(PaymentMethod::orderBy('name')->get());
+        }
+
         return view('payment.index', ['payments' => PaymentMethod::get()]);
     }
 

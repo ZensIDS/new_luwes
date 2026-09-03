@@ -10,6 +10,7 @@ use App\Models\RefundPembelianItem;
 use App\Models\Stock;
 use App\Models\StockMovement;
 use App\Models\Supplier;
+use App\Support\IndonesianNumber;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -121,6 +122,14 @@ class RefundPembelianController extends Controller
 
     public function store(Request $request)
     {
+        $request->merge([
+            'product' => collect($request->input('product', []))->map(function ($product) {
+                if (array_key_exists('harga', $product)) {
+                    $product['harga'] = IndonesianNumber::parse($product['harga']);
+                }
+                return $product;
+            })->all(),
+        ]);
         $type = $request->input('type');
         $selectedRows = collect($request->input('selected_rows', []))
             ->map(fn ($row) => (string) $row)
@@ -199,7 +208,7 @@ class RefundPembelianController extends Controller
                     $stock->qty -= $product['qty'];
                     $stock->save();
 
-                    $harga  = (int) str_replace(',', '', $product['harga'] ?? $stock->harga_beli);
+                    $harga  = (float) ($product['harga'] ?? $stock->harga_beli);
                     $total += $harga * $product['qty'];
 
                     StockMovement::create([

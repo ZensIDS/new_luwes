@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use App\Support\IndonesianNumber;
 
 class RefundPembelianRequest extends FormRequest
 {
@@ -22,5 +23,10 @@ class RefundPembelianRequest extends FormRequest
             'tanggal' => 'required',
             'total' => 'required',
         ];
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $this->merge(['total' => IndonesianNumber::parse($this->input('total'))]);
     }
 }

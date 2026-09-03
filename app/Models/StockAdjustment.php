@@ -13,6 +13,8 @@ class StockAdjustment extends Model
         'adjustment_date',
         'product_id',
         'stock_id',
+        'owner_id',
+        'owner_stock_id',
         'sku',
         'quantity',
         'system_qty',
@@ -37,5 +39,15 @@ class StockAdjustment extends Model
     public function stock()
     {
         return $this->belongsTo(Stock::class);
+    }
+
+    public function owner()
+    {
+        return $this->belongsTo(Outlet::class, 'owner_id');
+    }
+
+    public function ownerStock()
+    {
+        return $this->belongsTo(OwnerStock::class);
     }
 }

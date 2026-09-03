@@ -35,10 +35,14 @@
                                 </tr>
                             @endif
                             <tr>
+                                <td>Outlet</td>
+                                <td>{{ $voucher->outlet?->name ?? 'Semua outlet' }}</td>
+                            </tr>
+                            <tr>
                                 <td>Tanggal</td>
                                 <td>
-                                    {{ \Carbon\Carbon::parse($voucher->start_at)->format('d F Y') }} -
-                                    {{ \Carbon\Carbon::parse($voucher->end_at)->format('d F Y') }}
+                                    {{ $voucher->start_at?->format('d F Y H:i') ?? 'Tanpa batas' }} -
+                                    {{ $voucher->end_at?->format('d F Y H:i') ?? 'Tanpa batas' }}
                                 </td>
                             </tr>
                             <tr>
@@ -62,6 +66,14 @@
                             <tr>
                                 <td>Minimal Pembelian</td>
                                 <td>@currency($voucher->min_purchase)</td>
+                            </tr>
+                            <tr>
+                                <td>Maksimal Potongan</td>
+                                <td>{{ $voucher->max_discount_amount !== null ? 'Rp ' . number_format($voucher->max_discount_amount, 0, ',', '.') : 'Tanpa batas' }}</td>
+                            </tr>
+                            <tr>
+                                <td>Redemption</td>
+                                <td>{{ $voucher->redemptions_count ?? $voucher->redemptions()->count() }}x</td>
                             </tr>
                         </table>
                     </div><!-- /.box-body -->

@@ -2,36 +2,87 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\OwnerStock;
+use App\Models\OutletPrice;
 use App\Models\Product;
+use App\Services\PriceCalculator;
+use App\Support\OutletAccess;
 use Exception;
 use Illuminate\Http\Request;
-use Illuminate\Support\Carbon;
 
 class CartController extends Controller
 {
-    public function index(Request $request)
+    public function index(Request $request, PriceCalculator $calculator)
     {
-        // Get the cart data
-        $cart = $request->user()->cart()->get();
+        $outletId = OutletAccess::id($request);
+        $cart = $request->user()->cart()
+            ->wherePivot('outlet_id', (string) $outletId)
+            ->withPivot('qty', 'serial_number', 'stock_id', 'owner_stock_id', 'outlet_id')
+            ->get();
 
-        // Add the available stock for each product
         foreach ($cart as $item) {
-            $now = Carbon::now();
-            $stockQty = $item->stocks()
-                ->available()
+            $ownerStocks = $item->ownerStocks()
+                ->where('owner_id', $outletId)
+                ->where('qty', '>', 0)
+                ->where(function ($expiryQuery) {
+                    $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                })
+                ->with('stock')
+                ->orderBy('created_at')
+                ->get();
+            $item->availableStock = $item->ownerStocks()
+                ->where('owner_id', $outletId)
+                ->where('qty', '>', 0)
+                ->where(function ($expiryQuery) {
+                    $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                })
                 ->sum('qty');
-            $item->availableStock = $stockQty;
 
-            // Get available serial numbers for serialized products
             if ($item->is_serialized) {
-                $item->availableSerials = $item->stocks()
-                    ->available()
-                    ->whereNotNull('serial_number')
-                    ->pluck('serial_number', 'id')
+                $item->availableSerials = $item->ownerStocks()
+                    ->with('stock')
+                    ->where('owner_id', $outletId)
+                    ->where('qty', '>', 0)
+                    ->where(function ($expiryQuery) {
+                        $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                    })
+                    ->whereHas('stock', fn ($query) => $query->whereNotNull('serial_number'))
+                    ->get()
+                    ->mapWithKeys(fn ($ownerStock) => [
+                        $ownerStock->id => $ownerStock->stock?->serial_number,
+                    ])
                     ->toArray();
             }
+            $rule = OutletPrice::where('outlet_id', $outletId)
+                ->where('product_id', $item->id)
+                ->currentlyActive()
+                ->first();
+            $remainingQty = max(1, (int) $item->pivot->qty);
+            $cashierSubtotal = 0;
+            $firstPrice = null;
+            foreach ($ownerStocks as $ownerStock) {
+                if ($remainingQty <= 0) {
+                    break;
+                }
+                $price = $calculator->calculateItem(
+                    (float) ($ownerStock->hpp ?? $item->harga_beli ?? 0),
+                    $rule,
+                    $item
+                );
+                $allocatedQty = $item->is_serialized ? 1 : min($remainingQty, (int) $ownerStock->qty);
+                $cashierSubtotal += (int) ($price['price'] * $allocatedQty);
+                $firstPrice ??= $price;
+                $remainingQty -= $allocatedQty;
+            }
+            $item->cashierPrice = $firstPrice;
+            $item->cashier_subtotal = $cashierSubtotal;
+            if ($firstPrice) {
+                $item->harga_jual = $remainingQty > 0
+                    ? $firstPrice['price']
+                    : $calculator->money($cashierSubtotal / max(1, (int) $item->pivot->qty));
+            }
         }
-        // Return the cart data with the available stocks
+
         return response($cart);
     }
 
@@ -40,65 +91,79 @@ class CartController extends Controller
         try {
             $request->validate([
                 'barcode' => 'required|exists:products,code',
-                'serial_number' => 'nullable|string'
+                'serial_number' => 'nullable|string',
+                'outlet_id' => 'required|integer|exists:outlets,id',
             ]);
+            $outletId = OutletAccess::id($request);
+            $product = Product::where('code', $request->barcode)->firstOrFail();
 
-            $barcode = $request->barcode;
-            $product = Product::where('code', $barcode)->first();
-            $now = Carbon::now();
-
-            if ($product->is_serialized && $request->serial_number) {
-                // For serialized products, check specific serial number
-                $stock = $product->stocks()
-                    ->available()
-                    ->where('serial_number', $request->serial_number)
+            if ($product->is_serialized) {
+                $stock = OwnerStock::with('stock')
+                    ->where('owner_id', $outletId)
+                    ->where('product_id', $product->id)
+                    ->where('qty', '>', 0)
+                    ->where(function ($expiryQuery) {
+                        $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                    })
+                    ->when($request->serial_number, function ($query) use ($request) {
+                        $query->whereHas('stock', fn ($stockQuery) => $stockQuery->where('serial_number', $request->serial_number));
+                    })
                     ->first();
 
                 if (! $stock) {
-                    return response(['message' => 'Serial number not available'], 400);
+                    return response(['message' => 'Serial number tidak tersedia di outlet ini.'], 400);
                 }
 
-                // Check if this serial is already in cart
                 $cart = $request->user()->cart()
-                    ->where('code', $barcode)
-                    ->wherePivot('serial_number', $request->serial_number)
+                    ->wherePivot('outlet_id', (string) $outletId)
+                    ->wherePivot('owner_stock_id', $stock->id)
                     ->first();
 
                 if ($cart) {
-                    return response(['message' => 'Serial number already in cart'], 400);
+                    return response(['message' => 'Serial number sudah ada di keranjang.'], 400);
                 }
 
                 $request->user()->cart()->attach($product->id, [
                     'qty' => 1,
-                    'serial_number' => $request->serial_number,
-                    'stock_id' => $stock->id
+                    'outlet_id' => $outletId,
+                    'owner_stock_id' => $stock->id,
+                    'serial_number' => $stock->stock?->serial_number,
                 ]);
             } else {
-                // For non-serialized products
-                $stockQty = $product->stocks()
-                    ->available()
+                $stockQty = OwnerStock::where('owner_id', $outletId)
+                    ->where('product_id', $product->id)
+                    ->where('qty', '>', 0)
+                    ->where(function ($expiryQuery) {
+                        $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                    })
                     ->sum('qty');
+                $cart = $request->user()->cart()
+                    ->wherePivot('outlet_id', (string) $outletId)
+                    ->where('products.id', $product->id)
+                    ->first();
 
-                $cart = $request->user()->cart()->where('code', $barcode)->first();
                 if ($cart) {
                     if ($stockQty <= $cart->pivot->qty) {
-                        return response(['message' => 'Product available only: '.$stockQty], 400);
+                        return response(['message' => 'Stok outlet tersedia hanya: ' . $stockQty], 400);
                     }
-                    $cart->pivot->qty = $cart->pivot->qty + 1;
+                    $cart->pivot->qty++;
                     $cart->pivot->save();
                 } else {
                     if ($stockQty < 1) {
-                        return response(['message' => 'Product out of stock'], 400);
+                        return response(['message' => 'Produk tidak memiliki stok di outlet ini.'], 400);
                     }
-                    $request->user()->cart()->attach($product->id, ['qty' => 1]);
+                    $request->user()->cart()->attach($product->id, [
+                        'qty' => 1,
+                        'outlet_id' => $outletId,
+                    ]);
                 }
             }
 
             return response('success', 204);
         } catch (Exception $e) {
-            error_log($e->getMessage());
+            report($e);
 
-            return response(['message' => 'An error occurred while processing your request.'], 500);
+            return response(['message' => $e->getMessage()], 400);
         }
     }
 
@@ -108,59 +173,57 @@ class CartController extends Controller
             $request->validate([
                 'product_id' => 'required|exists:products,id',
                 'qty' => 'required|integer|min:1',
-                'serial_number' => 'nullable|string'
+                'outlet_id' => 'required|integer|exists:outlets,id',
             ]);
-
-            $product = Product::find($request->product_id);
+            $outletId = OutletAccess::id($request);
+            $product = Product::findOrFail($request->product_id);
 
             if ($product->is_serialized) {
-                // For serialized products, quantity should always be 1
-                return response(['message' => 'Cannot change quantity for serialized products'], 400);
+                return response(['message' => 'Quantity barang serialized selalu satu.'], 400);
             }
 
-            $cart = $request->user()->cart()->where('products.id', $request->product_id)->first();
+            $stockQty = OwnerStock::where('owner_id', $outletId)
+                ->where('product_id', $product->id)
+                ->where('qty', '>', 0)
+                ->where(function ($expiryQuery) {
+                    $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                })
+                ->sum('qty');
+            if ($stockQty < $request->qty) {
+                return response(['message' => 'Stok outlet tersedia hanya: ' . $stockQty], 400);
+            }
 
+            $cart = $request->user()->cart()
+                ->wherePivot('outlet_id', (string) $outletId)
+                ->where('products.id', $request->product_id)
+                ->first();
             if ($cart) {
-                // $now = Carbon::now();
-                $stockQty = $product->stocks()
-                    ->available()
-                    ->sum('qty');
-
-                if ($stockQty < $request->qty) {
-                    return response(['message' => 'Product available only: '.$stockQty], 400);
-                } else {
-                    $cart->pivot->qty = $request->qty;
-                    $cart->pivot->save();
-                }
+                $cart->pivot->qty = $request->qty;
+                $cart->pivot->save();
             }
 
             return response(['success' => true]);
         } catch (Exception $e) {
-            error_log($e->getMessage());
+            report($e);
 
-            return response(['message' => 'An error occurred while processing your request.'], 500);
+            return response(['message' => $e->getMessage()], 400);
         }
     }
 
     public function removeSerial(Request $request)
     {
-        try {
-            $request->validate([
-                'product_id' => 'required|exists:products,id',
-                'serial_number' => 'required|string'
-            ]);
+        $request->validate([
+            'product_id' => 'required|exists:products,id',
+            'serial_number' => 'required|string',
+            'outlet_id' => 'required|integer|exists:outlets,id',
+        ]);
+        $outletId = OutletAccess::id($request);
+        $request->user()->cart()
+            ->wherePivot('outlet_id', (string) $outletId)
+            ->wherePivot('serial_number', $request->serial_number)
+            ->detach($request->product_id);
 
-            $request->user()->cart()
-                ->wherePivot('product_id', $request->product_id)
-                ->wherePivot('serial_number', $request->serial_number)
-                ->detach();
-
-            return response(['success' => true]);
-        } catch (Exception $e) {
-            error_log($e->getMessage());
-
-            return response(['message' => 'An error occurred while processing your request.'], 500);
-        }
+        return response(['success' => true]);
     }
 
     public function addToWishlist(Request $request)
@@ -169,38 +232,37 @@ class CartController extends Controller
             'cart' => 'required|array',
             'cart.*.id' => 'required|exists:products,id',
             'cart.*.pivot.qty' => 'required|integer|min:1',
-            'cart.*.pivot.stock_id' => 'nullable|exists:stocks,id',
-            'outlet_id' => 'required',
-            'customer_id' => 'required',
+            'cart.*.pivot.owner_stock_id' => 'nullable|exists:owner_stocks,id',
+            'outlet_id' => 'required|integer|exists:outlets,id',
+            'customer_id' => 'nullable',
             'name' => 'required',
         ]);
+        $outletId = OutletAccess::id($request);
 
         foreach ($request->cart as $item) {
-            $product = Product::find($item['id']);
-            $stockId = $item['pivot']['stock_id'] ?? null;
-
+            $product = Product::findOrFail($item['id']);
+            $ownerStockId = $item['pivot']['owner_stock_id'] ?? null;
             $request->user()->wishlist()->attach($product->id, [
                 'qty' => $item['pivot']['qty'],
-                'outlet_id' => $request->outlet_id,
+                'outlet_id' => $outletId,
                 'customer_id' => $request->customer_id,
                 'name' => $request->name,
-                'stock_id' => $stockId
+                'owner_stock_id' => $ownerStockId,
             ]);
-
-            // Update stock status if it's a specific stock item
-            if ($stockId) {
-                \App\Models\Stock::where('id', $stockId)
-                    ->update(['status' => 'on_keep']);
-            }
         }
-        $request->user()->cart()->detach();
+        $request->user()->cart()->wherePivot('outlet_id', (string) $outletId)->detach();
 
         return response(['success' => true]);
     }
 
     public function getWishlist(Request $request, $outlet_id)
     {
-        $wishlist = $request->user()->wishlist()->wherePivot('outlet_id', $outlet_id)->withPivot('name', 'customer_id', 'outlet_id')->get();
+        $request->merge(['outlet_id' => $outlet_id]);
+        $outletId = OutletAccess::id($request);
+        $wishlist = $request->user()->wishlist()
+            ->wherePivot('outlet_id', (string) $outletId)
+            ->withPivot('name', 'customer_id', 'outlet_id', 'owner_stock_id', 'qty')
+            ->get();
         $grouped = $wishlist->groupBy(['pivot.name', 'pivot.customer_id']);
 
         return response($grouped);
@@ -208,48 +270,26 @@ class CartController extends Controller
 
     public function moveToCart(Request $request)
     {
-        $request->validate([
-            'name' => 'required',
-            'customer_id' => 'required',
-        ]);
-
+        $request->validate(['name' => 'required', 'customer_id' => 'nullable', 'outlet_id' => 'required']);
+        $outletId = OutletAccess::id($request);
         $wishlistItems = $request->user()->wishlist()
+            ->wherePivot('outlet_id', (string) $outletId)
             ->wherePivot('name', $request->name)
             ->wherePivot('customer_id', $request->customer_id)
-            ->withPivot('stock_id', 'qty')
+            ->withPivot('owner_stock_id', 'qty')
             ->get();
 
         foreach ($wishlistItems as $item) {
-            // For serialized products, detach using both product_id and stock_id
-            if ($item->is_serialized && $item->pivot->stock_id) {
-                $request->user()->wishlist()
-                    ->wherePivot('product_id', $item->id)
-                    ->wherePivot('stock_id', $item->pivot->stock_id)
-                    ->detach();
-            } else {
-                // For non-serialized products, just detach by product_id
-                $request->user()->wishlist()->detach($item->id);
-            }
-
-            // Rest of your existing cart attachment logic...
-            $pivotData = [
+            $request->user()->wishlist()
+                ->wherePivot('product_id', $item->id)
+                ->wherePivot('outlet_id', (string) $outletId)
+                ->wherePivot('name', $request->name)
+                ->detach();
+            $request->user()->cart()->attach($item->id, [
                 'qty' => $item->pivot->qty,
-                'stock_id' => $item->pivot->stock_id
-            ];
-
-            if ($item->is_serialized && $item->pivot->stock_id) {
-                $stock = \App\Models\Stock::find($item->pivot->stock_id);
-                if ($stock && $stock->serial_number) {
-                    $pivotData['serial_number'] = $stock->serial_number;
-                }
-            }
-
-            $request->user()->cart()->attach($item->id, $pivotData);
-
-            if ($item->pivot->stock_id) {
-                \App\Models\Stock::where('id', $item->pivot->stock_id)
-                    ->update(['status' => 'free']);
-            }
+                'outlet_id' => $outletId,
+                'owner_stock_id' => $item->pivot->owner_stock_id,
+            ]);
         }
 
         return response(['success' => true]);
@@ -257,17 +297,19 @@ class CartController extends Controller
 
     public function destroy(Request $request)
     {
-        $request->validate([
-            'product_id' => 'required|integer|exists:products,id',
-        ]);
-        $request->user()->cart()->detach($request->product_id);
+        $request->validate(['product_id' => 'required|integer|exists:products,id', 'outlet_id' => 'required']);
+        $outletId = OutletAccess::id($request);
+        $request->user()->cart()
+            ->wherePivot('outlet_id', (string) $outletId)
+            ->detach($request->product_id);
 
         return response('success', 204);
     }
 
     public function empty(Request $request)
     {
-        $request->user()->cart()->detach();
+        $outletId = OutletAccess::id($request);
+        $request->user()->cart()->wherePivot('outlet_id', (string) $outletId)->detach();
 
         return response('success', 204);
     }

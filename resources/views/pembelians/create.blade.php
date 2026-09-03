@@ -69,7 +69,7 @@
                                             <span class="konversi-display"></span>
                                         </td>
                                         <td>
-                                            <input type="text" class="form-control harga_beli numeral-mask"
+                                            <input type="text" inputmode="numeric" data-currency-input data-currency-decimals="0" class="form-control harga_beli"
                                                 name="product[0][harga_beli]" required>
                                         </td>
                                         <td>
@@ -194,14 +194,14 @@
                         <input type="number" required value="1" min="1" class="form-control qty" name="product[${index}][qty]">
                         <span class="konversi-display"></span>
                     </td>
-                    <td><input required type="text" class="form-control harga_beli numeral-mask" name="product[${index}][harga_beli]"></td>
+                    <td><input required type="text" inputmode="numeric" data-currency-input data-currency-decimals="0" class="form-control harga_beli" name="product[${index}][harga_beli]"></td>
                     <td><input type="text" required class="form-control subtotal" name="product[${index}][subtotal]" readonly></td>
                     <td><button class="btn btn-sm btn-danger" onclick="removeBahanBaku(this)" type="button">Remove</button></td>
                 </tr>`;
         }
 
         function initializeProductRow($row) {
-            $row.find('.numeral-mask').mask("#,##0", { reverse: true });
+            window.initCurrencyInputs?.($row[0]);
             $row.find('.select2').select2();
 
             if (currentProducts) {
@@ -289,8 +289,8 @@
                 let qty = $row.find('.qty').val();
                 let $hargaInput = $row.find('.harga_beli');
                 // Use cleanVal() only when mask is initialized (has data from plugin)
-                let harga_beli = ($hargaInput.data('mask') !== undefined)
-                    ? ($hargaInput.cleanVal() || 0)
+                let harga_beli = window.parseIdNumber
+                    ? window.parseIdNumber($hargaInput.val())
                     : (parseFloat($hargaInput.val()) || 0);
                 let subtotal = (qty || 0) * harga_beli;
                 // Set formatted subtotal (readonly)

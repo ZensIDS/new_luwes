@@ -118,7 +118,7 @@
                                         </div>
                                         <div class="form-group">
                                             <label>Total Retur (IDR)</label>
-                                            <input type="text" class="form-control numeral-mask" name="total"
+                                            <input type="text" inputmode="numeric" data-currency-input data-currency-decimals="0" class="form-control" name="total"
                                                 id="total-supplier" readonly value="0">
                                         </div>
                                     </div>
@@ -531,7 +531,7 @@
                                 min="1" max="${item.qty_available}" required>
                         </td>
                         <td>
-                            <input type="text" class="form-control numeral-mask input-harga" style="width:100px" name="product[${i}][harga]"
+                            <input type="text" inputmode="numeric" data-currency-input data-currency-decimals="0" class="form-control input-harga" style="width:100px" name="product[${i}][harga]"
                                 value="${item.harga_beli}" required>
                         </td>
                         <td>
@@ -548,6 +548,7 @@
                 });
 
                 applyMask();
+                window.initCurrencyInputs?.();
                 $('#supplier-product-area').show();
 
                 dtSupplier = $('#tbl-supplier').DataTable({

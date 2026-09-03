@@ -10,6 +10,7 @@ use App\Models\PembelianProduct;
 use App\Models\PembelianTransaction;
 use App\Models\Product;
 use App\Models\Stock;
+use App\Support\IndonesianNumber;
 use App\Models\StockMovement;
 use App\Models\StockPembelian;
 use App\Models\Supplier;
@@ -1177,6 +1178,7 @@ class PembelianController extends Controller
 
         $currentAmount = $pembelian->pembelianTransaction?->amount ?? 0;
         $maxAmount = $pembelian->total - $currentAmount;
+        $request->merge(['amount' => IndonesianNumber::parse($request->input('amount'))]);
 
         $request->validate([
             'payment_date'      => 'required|date',

@@ -124,7 +124,7 @@
                         Dibuat : {{ $penjualan->created_at->format('Y-m-d') }}
                     </span>
                     <span class="left" style="text-align: left;">
-                        Nama Customer : {{ $penjualan->customer->name }}
+                        Nama Customer : {{ $penjualan->customer?->name ?? 'Umum' }}
                     </span>
                     <span class="left" style="text-align: left;">{{ $penjualan->outlet->desc }}</span>
                 </td>
@@ -161,7 +161,7 @@
                 <td style="text-align:center; width:30px;" valign="top">{{ $penjualan->items->count() }}</td>
                 <td style="text-align:left; width:130px; padding-bottom: 10px" valign="top"></td>
                 <td style="text-align:center; width:50px;" valign="top">{{ $penjualan->items->sum('qty') }}</td>
-                <td style="text-align:center; width:50px;" valign="top">@currency($penjualan->items->sum('price'))</td>
+                <td style="text-align:center; width:50px;" valign="top">-</td>
                 <td style="text-align:right; width:70px;" valign="top">@currency($penjualan->items->reduce(function ($carry, $item) { return $carry + $item->qty * $item->price; }, 0))</td>
             </tr>
         </tbody>
@@ -180,19 +180,31 @@
                 <td style="text-align:left; padding-top: 5px;"></td>
                 <td style="text-align:right; padding-right:1.5%; border-right: 1px solid #000;font-weight:bold;"></td>
                 <td style="text-align:left; padding-left:1.5%;">Diskon</td>
-                <td style="text-align:right;font-weight:bold;">-@currency($penjualan->discount)</td>
+                <td style="text-align:right;font-weight:bold;">-@currency($penjualan->discount_total ?? $penjualan->discount)</td>
             </tr>
 
             <tr>
-                <td colspan="2" style="text-align:left; font-weight:bold; border-top:1px solid #000; padding-top:5px;">Total Keseluruhan</td>
-                <td colspan="2" style="border-top:1px solid #000; padding-top:5px; text-align:right; font-weight:bold;"> @currency($totalCost - $penjualan->discount)</td>
+                <td colspan="2" style="text-align:left; font-weight:bold; border-top:1px solid #000; padding-top:5px;">Voucher</td>
+                <td colspan="2" style="border-top:1px solid #000; padding-top:5px; text-align:right; font-weight:bold;">-@currency($penjualan->voucher_total ?? 0)</td>
             </tr>
+
+            <tr>
+                <td colspan="2" style="text-align:left; font-weight:bold; padding-top:5px;">Total Keseluruhan</td>
+                <td colspan="2" style="padding-top:5px; text-align:right; font-weight:bold;">@currency($penjualan->grand_total ?? ($totalCost - ($penjualan->discount ?? 0) - ($penjualan->voucher?->value ?? 0)))</td>
+            </tr>
+
+            @if ($penjualan->vouchers->isNotEmpty())
+                <tr>
+                    <td colspan="2" style="text-align:left; padding-top:5px;">Kode Voucher</td>
+                    <td colspan="2" style="text-align:right; padding-top:5px;">{{ $penjualan->vouchers->pluck('code')->join(', ') }}</td>
+                </tr>
+            @endif
 
             <tr>
                 <td style="text-align:left; padding-top: 5px;"></td>
                 <td style="text-align:right; padding-right:1.5%; border-right: 1px solid #000;font-weight:bold;"></td>
                 <td style="text-align:left; padding-left:1.5%;">Total Dibayar</td>
-                <td style="text-align:right;font-weight:bold;">@currency($penjualan->total)</td>
+                <td style="text-align:right;font-weight:bold;">@currency($penjualan->paid_amount ?? $penjualan->total)</td>
             </tr>
 
             <tr>
@@ -200,8 +212,7 @@
                 <td style="text-align:right; padding-right:1.5%; border-right: 1px solid #000;font-weight:bold;"></td>
                 <td style="text-align:left; padding-left:1.5%;">kembali</td>
                 <td style="text-align:right;font-weight:bold;">
-                    @php $kembali = abs(($totalCost - $penjualan->discount) - $penjualan->total); @endphp
-                    @currency($kembali)
+                    @currency($penjualan->change_amount ?? 0)
                 </td>
             </tr>
 
@@ -211,12 +222,7 @@
                 </td>
                 <td style="text-align:right; padding-top: 5px; padding-right:1.5%; border-top: 1px solid #000;font-weight:bold;"
                     colspan="3">
-                    @if ($penjualan->transaction)
-                        {{ $penjualan->transaction->payment->name }}.
-                        {{ $penjualan->transaction->payment->bank_number }}
-                    @else
-                        {{ $penjualan->kas->name }}
-                    @endif
+                    {{ $penjualan->paymentMethod?->name ?? $penjualan->payment_method_name ?? 'Tunai' }}
                 </td>
             </tr>
         </tbody>

@@ -57,7 +57,7 @@ class RefundController extends Controller
     {
         $data = $request->validated();
 
-        $data['total'] = (int) str_replace(',', '', $data['total']);
+        $data['total'] = (float) $data['total'];
         $data['user_id'] = auth()->user()->id;
         $refund = Refund::create($data);
 
@@ -109,7 +109,7 @@ class RefundController extends Controller
     {
         $oldTotal = $refund->total;
         $data = $request->validated();
-        $data['total'] = (int) str_replace(',', '', $data['total']);
+        $data['total'] = (float) $data['total'];
         $data['user_id'] = auth()->user()->id;
         $refund->update($data);
         RefundItem::where('refund_id', $refund->id)->delete();

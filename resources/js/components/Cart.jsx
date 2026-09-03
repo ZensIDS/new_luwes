@@ -1,486 +1,281 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import axios from "axios";
-import { sum } from "lodash";
 import Swal from "sweetalert2";
 import Barcodes from "./Barcodes.jsx";
-import Customers from "./Customers";
-// import Kas from "./Kas";
 import CartTable from "./CartTable";
 import Gallery from "./Gallery";
-import Wishlist from "./Wishlist";
 import SerialSelectionModal from "./SerialSelectionModal.jsx";
 import Vouchers from "./Vouchers.jsx";
+import { formatIdNumber, parseIdNumber } from "../utils";
 
 const Cart = () => {
+    const outlet = window.outlet || {};
     const [cart, setCart] = useState([]);
     const [products, setProducts] = useState([]);
     const [customers, setCustomers] = useState([]);
     const [customerId, setCustomerId] = useState("");
-    const [salesmans, setSalesmans] = useState([]);
-    const [salesmanId, setSalesmanId] = useState("");
-    const [vouchers, setVouchers] = useState([]);
-    const [voucherId, setVoucherId] = useState("");
-    // const [kas, setKas] = useState([]);
-    // const [kasId, setKasId] = useState("");
-    const [kasir, setKasir] = useState([]);
-    const [kasirId, setKasirId] = useState("");
+    const [paymentMethods, setPaymentMethods] = useState([]);
+    const [paymentMethodId, setPaymentMethodId] = useState("");
+    const [appliedVouchers, setAppliedVouchers] = useState([]);
     const [barcode, setBarcode] = useState("");
     const [search, setSearch] = useState("");
-    const [discount, setDiscount] = useState(0);
-    const [voucherDiscount, setVoucherDiscount] = useState(0);
-    const [total, setTotal] = useState(0);
-    const [wishlist, setWishlist] = useState([]);
+    const [paidAmount, setPaidAmount] = useState("");
     const [errorMessage, setErrorMessage] = useState("");
-    // Add these state variables to your existing Cart component
     const [serialModal, setSerialModal] = useState(false);
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [selectedSerial, setSelectedSerial] = useState("");
     const [availableSerials, setAvailableSerials] = useState([]);
-    const outlet = window.outlet;
-    const limitDiscount = window.user?.limit_discount || 0;
+    const [selectedCartProductId, setSelectedCartProductId] = useState(null);
+    const barcodeRef = useRef(null);
+    const searchRef = useRef(null);
+    const voucherRef = useRef(null);
+    const paidRef = useRef(null);
+    const customerRef = useRef(null);
+    const paymentMethodRef = useRef(null);
+    const cartTableRef = useRef(null);
 
-    useEffect(() => {
-        setTotal(getTotal(cart) - discount - voucherDiscount);
-    }, [cart, discount, voucherDiscount]);
+    const getSubtotal = (items = cart) => items.reduce(
+        (sum, item) => sum + Number(item.cashier_subtotal ?? (Number(item.pivot.qty || 0) * Number(item.harga_jual || 0))), 0
+    );
+
+    const discountAmount = (base, voucher) => {
+        if (base < Number(voucher.min_purchase || 0)) return 0;
+        let amount = voucher.type === "percentage"
+            ? Math.round(base * Math.min(100, Number(voucher.value || 0)) / 100)
+            : Math.round(Number(voucher.value || 0));
+        if (voucher.max_discount_amount !== null && voucher.max_discount_amount !== undefined) {
+            amount = Math.min(amount, Number(voucher.max_discount_amount));
+        }
+        return Math.max(0, Math.min(base, amount));
+    };
+
+    const getVoucherBreakdown = () => {
+        const lineBalances = cart.map((item) => Number(item.cashier_subtotal ?? (Number(item.pivot.qty || 0) * Number(item.harga_jual || 0))));
+        return appliedVouchers.map((voucher) => {
+            const eligibleIndexes = cart.map((item, index) => ({ item, index }))
+                .filter(({ item, index }) => (voucher.product_id === null || voucher.product_id === undefined || Number(voucher.product_id) === Number(item.id)) && lineBalances[index] > 0)
+                .map(({ index }) => index);
+            const base = eligibleIndexes.reduce((sum, index) => sum + lineBalances[index], 0);
+            const amount = discountAmount(base, voucher);
+            let remaining = amount;
+            eligibleIndexes.forEach((index, position) => {
+                const reduction = position === eligibleIndexes.length - 1
+                    ? Math.min(lineBalances[index], remaining)
+                    : Math.min(lineBalances[index], Math.round(amount * lineBalances[index] / Math.max(1, base)));
+                lineBalances[index] -= reduction;
+                remaining -= reduction;
+            });
+            return { ...voucher, amount };
+        });
+    };
+
+    const voucherBreakdown = getVoucherBreakdown();
+    const voucherTotal = voucherBreakdown.reduce((sum, voucher) => sum + voucher.amount, 0);
+    const grandTotal = Math.max(0, getSubtotal() - voucherTotal);
+
+    const loadCart = () => {
+        axios.get("/cart?outlet_id=" + outlet.id).then((response) => {
+            setCart(response.data || []);
+            setPaidAmount((current) => current === "" ? "" : current);
+        }).catch((error) => setErrorMessage(error.response?.data?.message || "Gagal memuat keranjang."));
+    };
+
+    const loadProducts = (term = "") => {
+        const params = new URLSearchParams({ outlet_id: outlet.id, status_produk: "all" });
+        if (term) params.set("search", term);
+        axios.get("/product?" + params.toString())
+            .then((response) => setProducts(response.data.data || []))
+            .catch(() => setErrorMessage("Gagal memuat produk outlet."));
+    };
+
+    const loadCustomers = () => {
+        axios.get("/customer", { headers: { Accept: "application/json" } })
+            .then((response) => {
+                const values = response.data || [];
+                setCustomers(values);
+            });
+    };
+
+    const loadPaymentMethods = () => {
+        axios.get("/payment", { headers: { Accept: "application/json" } })
+            .then((response) => setPaymentMethods(response.data || []));
+    };
 
     useEffect(() => {
         loadCart();
         loadProducts();
         loadCustomers();
-        loadVouchers();
-        loadSalesmans();
-        // loadKas();
-        loadKasir();
-        loadWishlist();
+        loadPaymentMethods();
+        setTimeout(() => barcodeRef.current?.focus(), 100);
     }, []);
 
-    //Data Products
-    const loadProducts = (search = "") => {
-        let queryParams = [];
-
-        if (search) {
-            queryParams.push(`search=${search}`);
+    const addToCart = (value, serialNumber = null) => {
+        const product = products.find((item) => item.barcode === value || item.code === value);
+        if (!product) {
+            setErrorMessage("Barcode tidak ditemukan pada stok outlet.");
+            return;
         }
 
-        if (outlet && outlet.id) {
-            queryParams.push(`outlet_id=${outlet.id}`);
+        if (product.is_serialized && !serialNumber) {
+            const serials = (product.owner_stocks || [])
+                .filter((stock) => stock.serial_number && Number(stock.qty) > 0)
+                .map((stock) => ({ id: stock.id, serial: stock.serial_number, status: "available" }));
+            setSelectedProduct(product);
+            setAvailableSerials(serials);
+            setSerialModal(true);
+            return;
         }
 
-        const queryString =
-            queryParams.length > 0 ? `?${queryParams.join("&")}` : "";
-
-        axios.get(`/product${queryString}`).then((res) => {
-            const products = res.data.data;
-            setProducts(products);
-            console.log(products);
-        });
-    };
-
-    const handleChangeSearch = (event) => {
-        setSearch(event.target.value);
-    };
-
-    const handleSeach = (event) => {
-        if (event.keyCode === 13) {
-            loadProducts(event.target.value);
-        }
-    };
-
-    //Data Cart
-    const loadCart = () => {
-        axios.get("/cart").then((res) => {
-            const cart = res.data;
-            setCart(cart);
-        });
-    };
-
-    const addToCart = (barcode, serialNumber = null) => {
-        let product = products.find((p) => p.barcode === barcode);
-        if (!!product) {
-            console.log("product : ", product);
-            console.log("product stocks: ", product.stocks);
-            console.log("serial number: ", serialNumber);
-
-            if (product.is_serialized && !serialNumber) {
-                // Show serial selection modal
-                console.log("Show serial selection modal");
-                setSelectedProduct(product);
-
-                // Convert to array instead of object
-                const serials = [];
-                if (product.stocks && Array.isArray(product.stocks)) {
-                    product.stocks.forEach((stock) => {
-                        if (stock.serial_number && stock.qty > 0) {
-                            serials.push({
-                                id: stock.id,
-                                serial: stock.serial_number,
-                                status: stock.status,
-                            });
-                        }
-                    });
-                }
-
-                console.log("serials : ", serials);
-                setAvailableSerials(serials);
-                setSerialModal(true);
-                return;
-            }
-
-            // For non-serialized products
-            if (!product.is_serialized) {
-                let cartItem = cart.find((c) => c.id === product.id);
-                if (!!cartItem) {
-                    setCart(
-                        cart.map((c) => {
-                            if (
-                                c.id === product.id &&
-                                product.qty > c.pivot.qty
-                            ) {
-                                c.pivot.qty += 1;
-                            }
-                            return c;
-                        })
-                    );
-                } else {
-                    if (product.qty > 0) {
-                        product = {
-                            ...product,
-                            pivot: {
-                                qty: 1,
-                                product_id: product.id,
-                                user_id: 1,
-                            },
-                        };
-                        setCart([...cart, product]);
-                    }
-                }
-            }
-
-            const payload = { barcode };
-            if (serialNumber) payload.serial_number = serialNumber;
-
-            axios
-                .post("/cart", payload)
-                .then((res) => {
-                    loadCart();
-                    setSerialModal(false);
-                    setSelectedSerial("");
-                    console.log(res);
-                })
-                .catch((err) => {
-                    console.log("Error!", err.response.data.message, "error");
-                    Swal.fire("Error!", err.response.data.message, "error");
-                });
-        }
-    };
-
-    const handleSerialSelection = () => {
-        if (selectedSerial && selectedProduct) {
-            addToCart(selectedProduct.barcode, selectedSerial);
-        }
-    };
-
-    const updateCart = (product_id, newQty) => {
-        const updatedCart = cart.map((c) => {
-            if (c.id === product_id) {
-                c.pivot.qty = newQty;
-            }
-            return c;
-        });
-        setCart(updatedCart);
-        axios
-            .post("/cart-change-qty", { product_id, qty: newQty })
-            .then((res) => {})
-            .catch((err) => {
-                console.log("Error!", err.response.data.message, "error");
-                Swal.fire("Error!", err.response.data.message, "error").then(
-                    () => {
-                        location.reload();
-                        setState((prevState) => ({
-                            ...prevState,
-                            error: true,
-                        }));
-                    }
-                );
-            });
-    };
-
-    const addProductToCart = (barcode) => {
-        addToCart(barcode);
-    };
-
-    const handleClickIncrease = (product_id) => {
-        const currentQty = cart.find((c) => c.id === product_id).pivot.qty;
-        updateCart(product_id, Number(currentQty) + 1);
-    };
-
-    const handleClickDecrease = (product_id) => {
-        const currentQty = cart.find((c) => c.id === product_id).pivot.qty;
-        if (currentQty > 1) {
-            updateCart(product_id, Number(currentQty) - 1);
-        } else {
-            // delete the product
-            handleClickDelete(product_id);
-        }
-    };
-
-    const handleChangeQty = (product_id, qty) => {
-        const parsedQty = parseInt(qty, 10);
-        if (!isNaN(parsedQty) && parsedQty >= 1) {
-            updateCart(product_id, parsedQty);
-        }
-    };
-
-    //Delete 1 item
-    const handleClickDelete = (product_id) => {
-        axios
-            .post("/cart/destroy", { product_id, _method: "DELETE" })
-            .then((res) => {
-                const updatedCart = cart.filter((c) => c.id !== product_id);
-                setCart(updatedCart);
-            });
-    };
-
-    //Delete All item
-    const handleEmptyCart = () => {
-        Swal.fire({
-            title: "Are you sure?",
-            text: "Do you want to clear your cart?",
-            icon: "warning",
-            showCancelButton: true,
-            confirmButtonText: "Yes, clear it!",
-            cancelButtonText: "No, keep it",
-        }).then((result) => {
-            if (result.isConfirmed) {
-                axios.post("/cart-empty", { _method: "DELETE" }).then((res) => {
-                    setCart([]);
-                });
-            }
-        });
-    };
-
-    const getTotal = (cart) => {
-        return cart.reduce(
-            (sum, item) => sum + item.pivot.qty * item.harga_jual,
-            0
-        );
-    };
-
-    const handleChangeTotal = (event) => {
-        setTotal(event.target.value);
-    };
-
-    //Data Customers
-    const loadCustomers = () => {
-        axios
-            .get("/customer")
-            .then((res) => {
-                const customers = res.data;
-                setCustomers(customers);
-                // Only set customerId if there are customers
-                if (customers.length > 0) {
-                    setCustomerId(customers[0].id);
-                } else {
-                    setCustomerId(null);
-                }
+        axios.post("/cart", { barcode: product.barcode, serial_number: serialNumber, outlet_id: outlet.id })
+            .then(() => {
+                setBarcode("");
+                setErrorMessage("");
+                loadCart();
+                loadProducts(search);
+                barcodeRef.current?.focus();
             })
-            .catch((error) => {
-                console.error("Error loading customers:", error);
-                setCustomers([]);
-                setCustomerId(null);
-            });
-    };
-
-    // Data Vouchers
-    const loadVouchers = () => {
-        axios
-            .get("/voucher")
-            .then((res) => {
-                const vouchers = res.data ?? [];
-                setVouchers(vouchers);
-
-                if (vouchers.length > 0 && vouchers[0]?.id) {
-                    setVoucherId(vouchers[0].id);
-                } else {
-                    setVoucherId(null); // or undefined or a fallback value
-                }
-            })
-            .catch((error) => {
-                console.error("Failed to load vouchers:", error);
-                setVouchers([]);
-                setVoucherId(null); // handle the error case gracefully
-            });
-    };
-
-    // Data Salesmans
-    const loadSalesmans = () => {
-        axios
-            .get("/salesman")
-            .then((res) => {
-                const salesmans = res.data ?? [];
-                setSalesmans(salesmans);
-
-                if (salesmans.length > 0 && salesmans[0]?.id) {
-                    setSalesmanId(salesmans[0].id);
-                } else {
-                    setSalesmanId(null); // or undefined or a fallback value
-                }
-            })
-            .catch((error) => {
-                console.error("Failed to load salesmans:", error);
-                setSalesmans([]);
-                setSalesmanId(null); // handle the error case gracefully
-            });
-    };
-
-    //Data Kas
-    // const loadKas = () => {
-    //     axios.get(`/kas?outlet_id=${outlet.id}`).then((res) => {
-    //         const kas = res.data;
-    //         setKas(kas);
-    //     });
-    // };
-
-    //Data Kasir
-    const loadKasir = () => {
-        axios.get("/kasir").then((res) => {
-            const kasir = res.data;
-            setKasir(kasir);
-        });
-    };
-
-    const handleOnChangeBarcode = (event) => {
-        setBarcode(event.target.value);
+            .catch((error) => setErrorMessage(error.response?.data?.message || "Produk tidak dapat ditambahkan."));
     };
 
     const handleScanBarcode = (event) => {
         event.preventDefault();
-        addToCart(barcode);
+        if (barcode.trim()) addToCart(barcode.trim());
     };
 
-    const handleDiscountChange = (event) => {
-        let value = parseInt(event.target.value, 10);
-
-        if (isNaN(value)) {
-            setDiscount(0);
-            return;
-        }
-
-        // Clamp value between 0 and limitDiscount
-        value = Math.min(Math.max(value, 0), limitDiscount);
-        setDiscount(value);
+    const updateCart = (productId, quantity) => {
+        axios.post("/cart-change-qty", { product_id: productId, qty: quantity, outlet_id: outlet.id })
+            .then(() => loadCart())
+            .catch((error) => setErrorMessage(error.response?.data?.message || "Quantity melebihi stok outlet."));
     };
 
-    //Hold
-    const loadWishlist = () => {
-        axios.get(`/wishlist-pos/${outlet.id}`).then((res) => {
-            setWishlist(res.data);
-        });
-    };
-
-    const handleClickWishlist = () => {
-        Swal.fire({
-            title: "Wishlist Name",
-            input: "text",
-            showCancelButton: true,
-            confirmButtonText: "Send",
-            showLoaderOnConfirm: true,
-            preConfirm: (name) => {
-                return axios
-                    .post("/wishlist-pos", {
-                        cart,
-                        customer_id: customerId,
-                        outlet_id: outlet.id,
-                        name: name,
-                    })
-                    .then((res) => {
-                        loadWishlist();
-                        loadCart();
-                        loadWishlist();
-                        loadProducts();
-                        setBarcode("");
-                        // setCustomerId("");
-                        setSearch("");
-                        setDiscount(0);
-                        Swal.fire(
-                            "Success!",
-                            "Items have been added to your wishlist",
-                            "success"
-                        );
-                    })
-                    .catch((err) => {
-                        console.log(
-                            "Error!",
-                            err.response.data.message,
-                            "error"
-                        );
-                        Swal.fire("Error!", err.response.data.message, "error");
-                    });
-            },
-            allowOutsideClick: () => !Swal.isLoading(),
-        });
-    };
-
-    const handleMoveToCart = (name, customer_id) => {
-        axios
-            .post("/wishlist/move-to-cart", { name, customer_id })
-            .then((res) => {
+    const deleteCartItem = (productId) => {
+        axios.post("/cart/destroy", { product_id: productId, outlet_id: outlet.id })
+            .then(() => {
                 loadCart();
-                loadWishlist();
-                loadProducts();
-                setBarcode("");
-                setCustomerId(customer_id);
-                setSearch("");
-                setDiscount(0);
+                barcodeRef.current?.focus();
             });
     };
 
-    // Handle form submission
-    const handleSubmit = (event) => {
-        // Get the total amount from the input field
-        // const totalAmount = $(".total").val();
-        const totalAmount = getTotal(cart);
+    const emptyCart = () => {
+        axios.post("/cart-empty", { _method: "DELETE", outlet_id: outlet.id })
+            .then(() => setCart([]));
+    };
 
-        // Send the POST request with the data
-        axios
-            .post("/penjualan", {
-                customer_id: customerId,
-                voucher_id: voucherId,
-                outlet_id: outlet.id,
-                salesman_id: salesmanId,
-                kasir_id: kasirId,
-                total: totalAmount,
-                discount: discount,
-                cart: cart,
-            })
-            .then((res) => {
-                loadCart();
-                loadProducts();
-                loadCustomers();
-                loadVouchers();
-                loadSalesmans();
-                // loadKas();
-                loadKasir();
-                loadWishlist();
-                $("#tombolSubmit").modal("hide");
-                Swal.fire(
-                    "Success!",
-                    "Pesanan berhasil dibuat",
-                    "success"
-                ).then(() => {
-                    window.location.reload(true); // <-- added this line to refresh the page
+    const holdTransaction = () => {
+        if (!cart.length) return;
+        const name = window.prompt("Nama transaksi hold:");
+        if (!name) return;
+        axios.post("/wishlist-pos", {
+            cart,
+            outlet_id: outlet.id,
+            customer_id: customerId || null,
+            name,
+        }).then(() => {
+            setCart([]);
+            setAppliedVouchers([]);
+            setErrorMessage("");
+            barcodeRef.current?.focus();
+        }).catch((error) => setErrorMessage(error.response?.data?.message || "Transaksi tidak dapat di-hold."));
+    };
+
+    const recallTransaction = () => {
+        axios.get("/wishlist-pos/" + outlet.id, { headers: { Accept: "application/json" } })
+            .then((response) => {
+                const holds = response.data || {};
+                const names = Object.keys(holds);
+                if (!names.length) {
+                    setErrorMessage("Tidak ada transaksi hold.");
+                    return;
+                }
+                const name = window.prompt("Pilih nama hold:\n" + names.join("\n"), names[0]);
+                if (!name || !holds[name]) return;
+                const customerGroups = holds[name];
+                const customerIds = Object.keys(customerGroups);
+                const customer = customerIds.length === 1
+                    ? customerIds[0]
+                    : window.prompt("ID customer (kosong untuk Umum):", customerIds[0] || "");
+                axios.post("/wishlist/move-to-cart", {
+                    name,
+                    customer_id: customer || null,
+                    outlet_id: outlet.id,
+                }).then(() => {
+                    setCustomerId(customer || "");
+                    setAppliedVouchers([]);
+                    loadCart();
+                    barcodeRef.current?.focus();
                 });
             })
-            .catch((err) => {
-                // console.log(err.response.data.message);
-                // Swal.showValidationMessage(err.response.data.message);
-                setErrorMessage(err.response.data.message);
-            });
+            .catch((error) => setErrorMessage(error.response?.data?.message || "Transaksi hold tidak dapat dimuat."));
     };
 
-    // Add an onClick event handler to the "OK" button in the modal footer
-    // $("#checkout").on("click", handleSubmit);
+    const addVoucher = (voucher) => {
+        if (appliedVouchers.some((item) => item.code === voucher.code)) {
+            setErrorMessage("Voucher tersebut sudah ada di transaksi.");
+            return;
+        }
+        setAppliedVouchers((current) => [...current, voucher]);
+        setErrorMessage("");
+    };
+
+    const removeVoucher = (code) => {
+        setAppliedVouchers((current) => current.filter((voucher) => voucher.code !== code));
+    };
+
+    const handleSubmit = () => {
+        setErrorMessage("");
+        axios.post("/penjualan", {
+            outlet_id: outlet.id,
+            customer_id: customerId || null,
+            paid_amount: parseIdNumber(paidAmount || grandTotal),
+            payment_method_id: paymentMethodId || null,
+            payment_method_name: paymentMethods.find((method) => String(method.id) === String(paymentMethodId))?.name || "Tunai",
+            voucher_codes: appliedVouchers.map((voucher) => voucher.code),
+        }).then((response) => {
+            Swal.fire("Success!", "Pesanan berhasil dibuat", "success").then(() => {
+                window.localStorage.setItem("last-pos-sale", response.data.order.id);
+                window.location.href = response.data.redirect;
+            });
+        }).catch((error) => {
+            setErrorMessage(error.response?.data?.message || "Checkout gagal.");
+        });
+    };
+
+    useEffect(() => {
+        const shortcut = (event) => {
+            const typing = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName);
+            if (event.key === "F3") { event.preventDefault(); barcodeRef.current?.focus(); }
+            if (event.key === "F2") { event.preventDefault(); searchRef.current?.focus(); }
+            if (event.key === "F4") { event.preventDefault(); customerRef.current?.focus(); }
+            if (event.key === "F5") { event.preventDefault(); cartTableRef.current?.focusFirstRow(); }
+            if (event.key === "F7") { event.preventDefault(); paymentMethodRef.current?.focus(); }
+            if (event.key === "F8") { event.preventDefault(); voucherRef.current?.focus(); }
+            if (event.key === "F9") { event.preventDefault(); paidRef.current?.focus(); }
+            if (event.key === "F10") { event.preventDefault(); if (cart.length && parseIdNumber(paidAmount) >= grandTotal) handleSubmit(); }
+            if (event.ctrlKey && event.key.toLowerCase() === "h") { event.preventDefault(); holdTransaction(); }
+            if (event.ctrlKey && event.key.toLowerCase() === "l") { event.preventDefault(); recallTransaction(); }
+            if (event.ctrlKey && event.key.toLowerCase() === "p") {
+                const lastSale = window.localStorage.getItem("last-pos-sale");
+                if (lastSale) { event.preventDefault(); window.location.href = "/penjualan/" + lastSale + "/print"; }
+            }
+            if (event.ctrlKey && ["Backspace", "Delete"].includes(event.key) && !typing && cart.length) {
+                event.preventDefault();
+                deleteCartItem(cart[cart.length - 1].id);
+            }
+            if (!typing && event.key === "+" && selectedCartProductId) {
+                const item = cart.find((value) => value.id === selectedCartProductId);
+                if (item) updateCart(item.id, Number(item.pivot.qty) + 1);
+            }
+            if (!typing && event.key === "-" && selectedCartProductId) {
+                const item = cart.find((value) => value.id === selectedCartProductId);
+                if (item) item.pivot.qty > 1 ? updateCart(item.id, Number(item.pivot.qty) - 1) : deleteCartItem(item.id);
+            }
+            if (!typing && event.key === "Delete" && selectedCartProductId) deleteCartItem(selectedCartProductId);
+            if (event.key === "Escape") { setSerialModal(false); barcodeRef.current?.focus(); }
+        };
+        window.addEventListener("keydown", shortcut);
+        return () => window.removeEventListener("keydown", shortcut);
+    }, [cart, paidAmount, grandTotal, appliedVouchers, selectedCartProductId]);
 
     return (
         <div className="row">
@@ -491,79 +286,67 @@ const Cart = () => {
                 selectedSerial={selectedSerial}
                 setSelectedSerial={setSelectedSerial}
                 availableSerials={availableSerials}
-                handleSerialSelection={handleSerialSelection}
+                handleSerialSelection={() => {
+                    if (selectedSerial && selectedProduct) addToCart(selectedProduct.barcode, selectedSerial);
+                }}
             />
-            <div className="col-12 col-sm-12">
-                <Wishlist
-                    wishlist={wishlist}
-                    handleMoveToCart={handleMoveToCart}
-                />
-            </div>
             <div className="col-md-6 col-lg-5">
                 <Barcodes
                     barcode={barcode}
                     handleScanBarcode={handleScanBarcode}
-                    handleOnChangeBarcode={handleOnChangeBarcode}
+                    handleOnChangeBarcode={(event) => setBarcode(event.target.value)}
+                    inputRef={barcodeRef}
                 />
                 <Vouchers
-                    key={voucherId}
-                    vouchers={vouchers}
-                    voucherId={voucherId}
-                    setVoucherId={setVoucherId}
-                    setVoucherDiscount={setVoucherDiscount}
+                    appliedVouchers={appliedVouchers}
+                    onAddVoucher={addVoucher}
+                    onRemoveVoucher={removeVoucher}
+                    inputRef={voucherRef}
+                    outletId={outlet.id}
                 />
-                {/* <Customers
-                    key={customerId}
+                <CartTable
+                    cart={cart}
+                    getSubtotal={getSubtotal}
+                    voucherBreakdown={voucherBreakdown}
+                    voucherTotal={voucherTotal}
+                    grandTotal={grandTotal}
                     customers={customers}
                     customerId={customerId}
                     setCustomerId={setCustomerId}
-                /> */}
-                <CartTable
-                    cart={cart}
-                    discount={discount}
-                    voucherDiscount={voucherDiscount}
-                    handleChangeQty={handleChangeQty}
-                    handleClickIncrease={handleClickIncrease}
-                    handleClickDecrease={handleClickDecrease}
-                    handleClickDelete={handleClickDelete}
-                    handleDiscountChange={handleDiscountChange}
-                    getTotal={getTotal}
-                    handleEmptyCart={handleEmptyCart}
-                    handleClickWishlist={handleClickWishlist}
+                    customerInputRef={customerRef}
+                    paidAmount={paidAmount}
+                    setPaidAmount={setPaidAmount}
+                    paymentMethods={paymentMethods}
+                    paymentMethodId={paymentMethodId}
+                    setPaymentMethodId={setPaymentMethodId}
+                    paymentMethodInputRef={paymentMethodRef}
+                    paidInputRef={paidRef}
+                    handleChangeQty={(productId, value) => {
+                        const qty = Number.parseInt(value, 10);
+                        if (Number.isInteger(qty) && qty >= 1) updateCart(productId, qty);
+                    }}
+                    handleClickIncrease={(productId) => {
+                        const item = cart.find((value) => value.id === productId);
+                        if (item) updateCart(productId, Number(item.pivot.qty) + 1);
+                    }}
+                    handleClickDecrease={(productId) => {
+                        const item = cart.find((value) => value.id === productId);
+                        if (item && Number(item.pivot.qty) > 1) updateCart(productId, Number(item.pivot.qty) - 1);
+                        else deleteCartItem(productId);
+                    }}
+                    handleClickDelete={deleteCartItem}
+                    handleEmptyCart={emptyCart}
                     handleSubmit={handleSubmit}
-                    handleChangeTotal={handleChangeTotal}
-                    limitDiscount={limitDiscount}
-                    total={total}
                     errorMessage={errorMessage}
-                    // kas={kas}
-                    // kasId={kasId}
-                    // setKasId={setKasId}
-                    salesmans={salesmans}
-                    salesmanId={salesmanId}
-                    setSalesmanId={setSalesmanId}
-                    kasir={kasir}
-                    kasirId={kasirId}
-                    setKasirId={setKasirId}
+                    selectedCartProductId={selectedCartProductId}
+                    setSelectedCartProductId={setSelectedCartProductId}
+                    cartTableRef={cartTableRef}
                 />
-                <hr />
-                {/* <Kas kas={kas} kasId={kasId} setKasId={setKasId} /> */}
             </div>
-            <hr />
             <div className="col-md-6 col-lg-7">
-                <div className="form-group">
-                    <input
-                        type="text"
-                        className="form-control"
-                        placeholder="Cari Product..."
-                        onChange={handleChangeSearch}
-                        onKeyDown={handleSeach}
-                    />
-                    <br />
-                    <Gallery
-                        products={products}
-                        addProductToCart={addProductToCart}
-                    />
-                </div>
+                <input ref={searchRef} type="text" className="form-control" placeholder="Cari produk lalu tekan Enter (F2)" value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") loadProducts(search); }} />
+                <br />
+                <Gallery products={products} addProductToCart={(value) => addToCart(value)} />
             </div>
         </div>
     );

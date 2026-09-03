@@ -15,6 +15,7 @@ use App\Models\Product;
 use App\Models\ProductImport;
 use App\Models\Stock;
 use App\Models\Supplier;
+use App\Support\OutletAccess;
 use Illuminate\Bus\Batch;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Bus;
@@ -26,6 +27,9 @@ class ProductController extends Controller
 {
     public function index(Request $request)
     {
+        if (in_array($request->user()?->role, ['staff-outlet', 'kasir'], true)) {
+            $request->merge(['outlet_id' => OutletAccess::id($request)]);
+        }
         $statusFilter = $request->input('status_produk', 'sudah');
         $products = Product::query();
 
@@ -45,7 +49,13 @@ class ProductController extends Controller
         }
 
         if ($request->filled('outlet_id')) {
-            $products = $products->where('outlet_id', $request->outlet_id);
+            $products = $products->whereHas('ownerStocks', function ($query) use ($request) {
+                $query->where('owner_id', $request->outlet_id)
+                    ->where('qty', '>', 0)
+                    ->where(function ($expiryQuery) {
+                        $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                    });
+            });
         }
 
         if ($request->filled('category_id')) {
@@ -62,11 +72,30 @@ class ProductController extends Controller
 
         if (request()->wantsJson()) {
             $products = $products
-                ->with(['category', 'stocks' => function ($query) {
-                    $query->where('qty', '>', 0)
-                        ->orderBy('status')
-                        ->orderBy('serial_number');
-                }])
+                ->with([
+                    'category',
+                    'stocks' => function ($query) {
+                        $query->where('qty', '>', 0)
+                            ->orderBy('status')
+                            ->orderBy('serial_number');
+                    },
+                    'ownerStocks' => function ($query) use ($request) {
+                        if ($request->filled('outlet_id')) {
+                            $query->where('owner_id', $request->outlet_id);
+                        }
+                        $query->where('qty', '>', 0)
+                            ->where(function ($expiryQuery) {
+                                $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                            })
+                            ->with('stock');
+                    },
+                    'outletPrices' => function ($query) use ($request) {
+                        if ($request->filled('outlet_id')) {
+                            $query->where('outlet_id', $request->outlet_id);
+                        }
+                        $query->currentlyActive();
+                    },
+                ])
                 ->latest()
                 ->paginate(10);
 
