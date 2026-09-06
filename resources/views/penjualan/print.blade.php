@@ -153,16 +153,16 @@
                     <td style="text-align:left; width:130px; padding-bottom: 10px" valign="top"> {{ $item->product->name }}</td>
                     <td style="text-align:center; width:50px;" valign="top">{{ $item->qty }}</td>
                     <td style="text-align:center; width:50px;" valign="top">@currency($item->price)</td>
-                    <td style="text-align:right; width:70px;" valign="top">@currency($item->qty * $item->price)</td>
+                    <td style="text-align:right; width:70px;" valign="top">@currency($item->subtotal ?? ($item->qty * $item->price))</td>
                 </tr>
-            @php $totalCost += $item->qty * $item->price; @endphp
+            @php $totalCost += $item->subtotal ?? ($item->qty * $item->price); @endphp
             @endforeach
             <tr style="border-top: 1px solid #000; border-collapse: collapse;">
                 <td style="text-align:center; width:30px;" valign="top">{{ $penjualan->items->count() }}</td>
                 <td style="text-align:left; width:130px; padding-bottom: 10px" valign="top"></td>
                 <td style="text-align:center; width:50px;" valign="top">{{ $penjualan->items->sum('qty') }}</td>
                 <td style="text-align:center; width:50px;" valign="top">-</td>
-                <td style="text-align:right; width:70px;" valign="top">@currency($penjualan->items->reduce(function ($carry, $item) { return $carry + $item->qty * $item->price; }, 0))</td>
+                <td style="text-align:right; width:70px;" valign="top">@currency($penjualan->items->reduce(function ($carry, $item) { return $carry + ($item->subtotal ?? ($item->qty * $item->price)); }, 0))</td>
             </tr>
         </tbody>
     </table>
@@ -175,6 +175,15 @@
                 <td style="text-align:left; padding-left:1.5%;"></td>
                 <td style="text-align:right;font-weight:bold;">@currency($totalCost)</td>
             </tr>
+
+            @if (($penjualan->promotion_total ?? 0) > 0)
+                <tr>
+                    <td style="text-align:left; padding-top: 5px;"></td>
+                    <td style="text-align:right; padding-right:1.5%; border-right: 1px solid #000;font-weight:bold;"></td>
+                    <td style="text-align:left; padding-left:1.5%;">Promo Flash Sale / Bundling</td>
+                    <td style="text-align:right;font-weight:bold;">-@currency($penjualan->promotion_total)</td>
+                </tr>
+            @endif
 
             <tr>
                 <td style="text-align:left; padding-top: 5px;"></td>
@@ -197,6 +206,13 @@
                 <tr>
                     <td colspan="2" style="text-align:left; padding-top:5px;">Kode Voucher</td>
                     <td colspan="2" style="text-align:right; padding-top:5px;">{{ $penjualan->vouchers->pluck('code')->join(', ') }}</td>
+                </tr>
+            @endif
+
+            @if ($penjualan->promotionApplications->isNotEmpty())
+                <tr>
+                    <td colspan="2" style="text-align:left; padding-top:5px;">Promo</td>
+                    <td colspan="2" style="text-align:right; padding-top:5px;">{{ $penjualan->promotionApplications->pluck('name')->join(', ') }}</td>
                 </tr>
             @endif
 

@@ -16,7 +16,8 @@ class CashierSaleService
 {
     public function __construct(
         private readonly PriceCalculator $calculator,
-        private readonly OutletStockService $stockService
+        private readonly OutletStockService $stockService,
+        private readonly PromotionService $promotionService
     )
     {
     }
@@ -77,6 +78,28 @@ class CashierSaleService
                 }
             }
 
+            $promotionCodes = collect($data['promotion_codes'] ?? [])
+                ->map(fn ($code) => strtoupper(trim((string) $code)))
+                ->filter()
+                ->unique()
+                ->values()
+                ->all();
+            $promotions = $this->promotionService->selectedForOutlet($outletId, $promotionCodes, now(), true);
+            if ($promotions->count() !== count($promotionCodes)) {
+                throw new RuntimeException('Satu atau lebih kode flash sale atau bundling tidak ditemukan atau sudah tidak aktif.');
+            }
+
+            $promotionResult = $this->promotionService->apply($allocations, $promotions, true);
+            $appliedPromotionCodes = collect($promotionResult['applications'])->pluck('code')->all();
+            foreach ($promotionCodes as $promotionCode) {
+                if (! in_array($promotionCode, $appliedPromotionCodes, true)) {
+                    throw new RuntimeException("Promo {$promotionCode} tidak memenuhi syarat item transaksi.");
+                }
+            }
+            $allocations = $promotionResult['allocations'];
+            $subtotal = (int) $promotionResult['subtotal'];
+            $promotionTotal = (int) $promotionResult['promotion_total'];
+
             $vouchers = $this->lockedVouchers($data['voucher_codes'] ?? [], $outletId);
             $voucherAmounts = [];
             $lineBalances = collect($allocations)->mapWithKeys(fn ($allocation, $index) => [
@@ -127,6 +150,7 @@ class CashierSaleService
                 'total' => $grandTotal,
                 'subtotal' => $subtotal,
                 'discount_total' => $discountTotal,
+                'promotion_total' => $promotionTotal,
                 'voucher_total' => $voucherTotal,
                 'grand_total' => $grandTotal,
                 'paid_amount' => $paidAmount,
@@ -143,14 +167,18 @@ class CashierSaleService
                 $price = $allocation['price'];
 
                 $order->items()->create([
+                    ...$price,
                     'product_id' => $product->id,
                     'stock_id' => $ownerStock->stock_id,
                     'owner_stock_id' => $ownerStock->id,
                     'qty' => $qty,
-                    'price' => $price['price'],
-                    'subtotal' => $price['price'] * $qty,
+                    'price' => $this->calculator->money($allocation['line_total'] / max(1, $qty)),
+                    'subtotal' => $allocation['line_total'],
+                    'base_price' => $this->calculator->money($allocation['base_line_total'] / max(1, $qty)),
+                    'base_subtotal' => $allocation['base_line_total'],
+                    'promotion_discount' => $allocation['promotion_discount'],
+                    'promotion_details' => $allocation['promotion_details'],
                     'serial_number' => $ownerStock->stock?->serial_number ?? $product->pivot->serial_number,
-                    ...$price,
                 ]);
 
                 $this->stockService->issue(
@@ -161,6 +189,10 @@ class CashierSaleService
                     $user,
                     "Penjualan {$order->code} - {$product->name}"
                 );
+            }
+
+            foreach ($promotionResult['applications'] as $application) {
+                $order->promotionApplications()->create($application);
             }
 
             foreach ($vouchers as $voucher) {
@@ -187,7 +219,7 @@ class CashierSaleService
 
             $user->cart()->wherePivot('outlet_id', (string) $outletId)->detach();
 
-            return $order->load(['items.product', 'vouchers', 'paymentMethod']);
+            return $order->load(['items.product', 'vouchers', 'promotionApplications.promotion', 'paymentMethod']);
         });
     }
 

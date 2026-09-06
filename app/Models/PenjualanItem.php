@@ -17,6 +17,10 @@ class PenjualanItem extends Model
         'qty',
         'price',
         'subtotal',
+        'base_price',
+        'base_subtotal',
+        'promotion_discount',
+        'promotion_details',
         'serial_number',
         'hpp',
         'harga_akhir',
@@ -42,6 +46,10 @@ class PenjualanItem extends Model
         'harga_aktif' => 'float',
         'disc_toko_value' => 'float',
         'disc_toko_amount' => 'float',
+        'base_price' => 'float',
+        'base_subtotal' => 'float',
+        'promotion_discount' => 'float',
+        'promotion_details' => 'array',
     ];
 
     public function penjualan()

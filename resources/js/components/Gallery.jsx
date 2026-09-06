@@ -10,10 +10,9 @@ const Gallery = ({ products, addProductToCart }) => {
                     <tr>
                         <th className="w-10 text-center">Image</th>
                         <th className="w-15">Kode</th>
-                        <th className="w-25">Nama</th>
-                        <th className="w-10">Total Stock</th>
-                        <th className="w-30">Serials</th>
-                        <th className="w-10 text-right">Harga Jual</th>
+                        <th className="w-35">Nama</th>
+                        <th className="w-20">Total Stock</th>
+                        <th className="w-20 text-right">Harga Jual</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -38,14 +37,6 @@ const Gallery = ({ products, addProductToCart }) => {
                             <td>{p.barcode}</td>
                             <td>{p.name}</td>
                             <td>{p.total_stock}</td>
-                            <td>
-                                {p.owner_stocks
-                                    .filter(
-                                        (s) => s.available && s.serial_number
-                                    )
-                                    .map((s) => s.serial_number)
-                                    .join(", ") || "N/A"}
-                            </td>
                             <td className="text-right">
                                 {formatRupiah(p.harga_jual)}
                             </td>

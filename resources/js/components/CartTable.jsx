@@ -1,10 +1,14 @@
 import React from "react";
 import { formatIdNumber, formatRupiah, parseIdNumber } from "../utils";
 import CartTableBody from "./CartTableBody";
+import ReactSelectField from "./ReactSelectField";
+import Vouchers from "./Vouchers";
 
 const CartTable = ({
     cart,
+    getBaseSubtotal,
     getSubtotal,
+    promotionTotal,
     voucherBreakdown,
     voucherTotal,
     grandTotal,
@@ -19,6 +23,17 @@ const CartTable = ({
     setPaymentMethodId,
     paymentMethodInputRef,
     paidInputRef,
+    voucherInputRef,
+    outletId,
+    appliedVouchers,
+    onAddVoucher,
+    onRemoveVoucher,
+    appliedPromotions,
+    onAddPromotion,
+    onRemovePromotion,
+    selectedProducts,
+    appliedPromotionNames,
+    promotionTableRef,
     handleChangeQty,
     handleClickIncrease,
     handleClickDecrease,
@@ -34,9 +49,9 @@ const CartTable = ({
 
     return (
         <>
-            <div className="table-responsive text-nowrap">
+            <div className="table-responsive text-nowrap" style={{ maxHeight: "45vh", overflowY: "auto", border: "1px solid #ddd" }}>
                 <table className="table table-sm table-bordered">
-                    <thead>
+                    <thead style={{ position: "sticky", top: 0, zIndex: 1, background: "#fff" }}>
                         <tr>
                             <th className="w-40">Produk</th>
                             <th className="w-10">Qty</th>
@@ -46,6 +61,7 @@ const CartTable = ({
                         </tr>
                     </thead>
                     <tbody>
+                        {!cart.length && <tr><td colSpan="5" className="text-center text-muted" style={{ padding: "28px 8px" }}>Belum ada item. Scan barcode atau pilih produk.</td></tr>}
                         <CartTableBody
                             ref={cartTableRef}
                             cart={cart}
@@ -56,8 +72,22 @@ const CartTable = ({
                             selectedCartProductId={selectedCartProductId}
                             setSelectedCartProductId={setSelectedCartProductId}
                         />
+                    </tbody>
+                </table>
+            </div>
+            <div className="table-responsive text-nowrap" style={{ marginTop: 0 }}>
+                <table className="table table-sm table-bordered" style={{ marginBottom: 0 }}>
+                    <tbody>
                         <tr>
                             <td colSpan="4">Subtotal setelah Disc Toko</td>
+                            <td className="text-right">{formatRupiah(getBaseSubtotal(cart))}</td>
+                        </tr>
+                        {promotionTotal > 0 && <tr>
+                            <td colSpan="4">Potongan promo flash sale / bundling</td>
+                            <td className="text-right text-danger">-{formatRupiah(promotionTotal)}</td>
+                        </tr>}
+                        <tr>
+                            <td colSpan="4">Subtotal setelah promo</td>
                             <td className="text-right">{formatRupiah(getSubtotal(cart))}</td>
                         </tr>
                         {voucherBreakdown.map((voucher) => (
@@ -77,31 +107,61 @@ const CartTable = ({
                     </tbody>
                 </table>
             </div>
+            <Vouchers
+                appliedVouchers={appliedVouchers}
+                onAddVoucher={onAddVoucher}
+                onRemoveVoucher={onRemoveVoucher}
+                inputRef={voucherInputRef}
+                outletId={outletId}
+                appliedPromotionNames={appliedPromotionNames}
+                appliedPromotions={appliedPromotions}
+                onAddPromotion={onAddPromotion}
+                onRemovePromotion={onRemovePromotion}
+                selectedProducts={selectedProducts}
+                promotionTableRef={promotionTableRef}
+            />
             <div className="row">
                 <div className="col-md-6">
                     <label>Customer <small>(F4)</small></label>
-                    <select ref={customerInputRef} className="form-control input-sm" value={customerId} onChange={(event) => setCustomerId(event.target.value)}>
-                        <option value="">Umum</option>
-                        {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}{customer.no_telp ? ` — ${customer.no_telp}` : ""}</option>)}
-                    </select>
+                    <ReactSelectField
+                        ref={customerInputRef}
+                        value={customerId}
+                        onChange={setCustomerId}
+                        placeholder="Pilih customer"
+                        isClearable={false}
+                        options={[
+                            { value: "", label: "Umum" },
+                            ...customers.map((customer) => ({
+                                value: customer.id,
+                                label: `${customer.name}${customer.no_telp ? ` — ${customer.no_telp}` : ""}`,
+                            })),
+                        ]}
+                    />
                 </div>
                 <div className="col-md-6">
                     <label>Metode Pembayaran <small>(F7)</small></label>
-                    <select ref={paymentMethodInputRef} className="form-control input-sm" value={paymentMethodId} onChange={(event) => setPaymentMethodId(event.target.value)}>
-                        <option value="">Tunai / belum dipilih</option>
-                        {paymentMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}
-                    </select>
+                    <ReactSelectField
+                        ref={paymentMethodInputRef}
+                        value={paymentMethodId}
+                        onChange={setPaymentMethodId}
+                        placeholder="Pilih metode pembayaran"
+                        isClearable={false}
+                        options={[
+                            { value: "", label: "Tunai / belum dipilih" },
+                            ...paymentMethods.map((method) => ({ value: method.id, label: method.name })),
+                        ]}
+                    />
                 </div>
                 <div className="col-md-6">
                     <label>Uang Diterima <small>(F9)</small></label>
                     <div className="input-group input-group-sm">
-                        <span className="input-group-addon">Rp</span>
                         <input
                             ref={paidInputRef}
                             type="text"
                             inputMode="numeric"
                             autoComplete="off"
                             className="form-control"
+                            style={{ height: "40px", fontSize: "16px" }}
                             placeholder={formatIdNumber(grandTotal)}
                             value={paidAmount}
                             onChange={(event) => {
@@ -114,7 +174,7 @@ const CartTable = ({
                 </div>
             </div>
             <p className="text-muted small" style={{ marginTop: 10, marginBottom: 0 }}>
-                <i className="fa fa-keyboard-o"></i> F3 Scan barcode &nbsp;|&nbsp; F5 Fokus tabel item &nbsp;|&nbsp; F7 Metode pembayaran &nbsp;|&nbsp; Tab/Shift+Tab pindah item &nbsp;|&nbsp; Alt+↑/↓ pilih item &nbsp;|&nbsp; Ctrl+Backspace/Ctrl+Delete hapus item terakhir
+                <i className="fa fa-keyboard-o"></i> F2 Cari produk &nbsp;|&nbsp; F3 Scan &nbsp;|&nbsp; F4 Customer &nbsp;|&nbsp; F5 Item &nbsp;|&nbsp; F6 Promo dipilih &nbsp;|&nbsp; F7 Pembayaran &nbsp;|&nbsp; F8 Voucher/promo &nbsp;|&nbsp; F9 Uang &nbsp;|&nbsp; F10 Proses &nbsp;|&nbsp; Delete hapus baris terpilih
             </p>
             <div className="text-right" style={{ marginTop: 8 }}>
                 <strong>Kembalian: {formatRupiah(change)}</strong>

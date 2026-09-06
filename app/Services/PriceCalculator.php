@@ -35,7 +35,7 @@ class PriceCalculator
 
         $brandAmount = $this->discountAmount($hpp, $rule->disc_brand_type, $rule->disc_brand_value);
         $hargaAkhir = max(0, $hpp - $brandAmount);
-        $marginAmount = $rule->margin_type === 'percentage'
+        $marginAmount = $this->isPercentage($rule->margin_type)
             ? $this->money($hargaAkhir * ((float) $rule->margin_value / 100))
             : $this->money($rule->margin_value);
         $hargaAktif = $this->money($hargaAkhir + $marginAmount);
@@ -79,12 +79,17 @@ class PriceCalculator
         $base = $this->money($base);
         $value = max(0, (float) $value);
 
-        if ($type === 'percentage') {
+        if ($this->isPercentage($type)) {
             $value = min(100, $value);
             return min($base, $this->money($base * $value / 100));
         }
 
         return min($base, $this->money($value));
+    }
+
+    private function isPercentage(?string $type): bool
+    {
+        return strtolower(trim((string) $type)) === 'percentage';
     }
 
     public function money(float|int|null $value): float

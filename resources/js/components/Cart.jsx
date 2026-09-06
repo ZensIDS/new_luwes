@@ -6,7 +6,6 @@ import Barcodes from "./Barcodes.jsx";
 import CartTable from "./CartTable";
 import Gallery from "./Gallery";
 import SerialSelectionModal from "./SerialSelectionModal.jsx";
-import Vouchers from "./Vouchers.jsx";
 import { formatIdNumber, parseIdNumber } from "../utils";
 
 const Cart = () => {
@@ -18,6 +17,7 @@ const Cart = () => {
     const [paymentMethods, setPaymentMethods] = useState([]);
     const [paymentMethodId, setPaymentMethodId] = useState("");
     const [appliedVouchers, setAppliedVouchers] = useState([]);
+    const [appliedPromotions, setAppliedPromotions] = useState([]);
     const [barcode, setBarcode] = useState("");
     const [search, setSearch] = useState("");
     const [paidAmount, setPaidAmount] = useState("");
@@ -34,14 +34,28 @@ const Cart = () => {
     const customerRef = useRef(null);
     const paymentMethodRef = useRef(null);
     const cartTableRef = useRef(null);
+    const promotionTableRef = useRef(null);
+
+    const getBaseSubtotal = (items = cart) => items.reduce(
+        (sum, item) => sum + Number(item.cashier_base_subtotal ?? item.cashier_subtotal ?? (Number(item.pivot.qty || 0) * Number(item.harga_jual || 0))), 0
+    );
 
     const getSubtotal = (items = cart) => items.reduce(
         (sum, item) => sum + Number(item.cashier_subtotal ?? (Number(item.pivot.qty || 0) * Number(item.harga_jual || 0))), 0
     );
 
+    const getPromotionTotal = (items = cart) => items.reduce(
+        (sum, item) => sum + Number(item.cashier_promotion_discount || 0), 0
+    );
+
+    const getAppliedPromotionNames = (items = cart) => [...new Set(
+        items.flatMap((item) => item.cashier_promotions || [])
+    )];
+
     const discountAmount = (base, voucher) => {
         if (base < Number(voucher.min_purchase || 0)) return 0;
-        let amount = voucher.type === "percentage"
+        const type = String(voucher.type || "").trim().toLowerCase();
+        let amount = type === "percentage"
             ? Math.round(base * Math.min(100, Number(voucher.value || 0)) / 100)
             : Math.round(Number(voucher.value || 0));
         if (voucher.max_discount_amount !== null && voucher.max_discount_amount !== undefined) {
@@ -74,8 +88,10 @@ const Cart = () => {
     const voucherTotal = voucherBreakdown.reduce((sum, voucher) => sum + voucher.amount, 0);
     const grandTotal = Math.max(0, getSubtotal() - voucherTotal);
 
-    const loadCart = () => {
-        axios.get("/cart?outlet_id=" + outlet.id).then((response) => {
+    const loadCart = (promotionCodes = appliedPromotions.map((promotion) => promotion.code)) => {
+        const params = new URLSearchParams({ outlet_id: outlet.id });
+        promotionCodes.forEach((code) => params.append("promotion_codes[]", code));
+        axios.get("/cart?" + params.toString()).then((response) => {
             setCart(response.data || []);
             setPaidAmount((current) => current === "" ? "" : current);
         }).catch((error) => setErrorMessage(error.response?.data?.message || "Gagal memuat keranjang."));
@@ -174,6 +190,7 @@ const Cart = () => {
         }).then(() => {
             setCart([]);
             setAppliedVouchers([]);
+            setAppliedPromotions([]);
             setErrorMessage("");
             barcodeRef.current?.focus();
         }).catch((error) => setErrorMessage(error.response?.data?.message || "Transaksi tidak dapat di-hold."));
@@ -202,7 +219,8 @@ const Cart = () => {
                 }).then(() => {
                     setCustomerId(customer || "");
                     setAppliedVouchers([]);
-                    loadCart();
+                    setAppliedPromotions([]);
+                    loadCart([]);
                     barcodeRef.current?.focus();
                 });
             })
@@ -222,6 +240,24 @@ const Cart = () => {
         setAppliedVouchers((current) => current.filter((voucher) => voucher.code !== code));
     };
 
+    const addPromotion = (promotion) => {
+        if (appliedPromotions.some((item) => item.code === promotion.code)) {
+            setErrorMessage("Promo tersebut sudah dipilih di transaksi.");
+            return;
+        }
+        const nextPromotions = [...appliedPromotions, promotion];
+        setAppliedPromotions(nextPromotions);
+        setErrorMessage("");
+        loadCart(nextPromotions.map((item) => item.code));
+    };
+
+    const removePromotion = (code) => {
+        const nextPromotions = appliedPromotions.filter((promotion) => promotion.code !== code);
+        setAppliedPromotions(nextPromotions);
+        setErrorMessage("");
+        loadCart(nextPromotions.map((item) => item.code));
+    };
+
     const handleSubmit = () => {
         setErrorMessage("");
         axios.post("/penjualan", {
@@ -231,6 +267,7 @@ const Cart = () => {
             payment_method_id: paymentMethodId || null,
             payment_method_name: paymentMethods.find((method) => String(method.id) === String(paymentMethodId))?.name || "Tunai",
             voucher_codes: appliedVouchers.map((voucher) => voucher.code),
+            promotion_codes: appliedPromotions.map((promotion) => promotion.code),
         }).then((response) => {
             Swal.fire("Success!", "Pesanan berhasil dibuat", "success").then(() => {
                 window.localStorage.setItem("last-pos-sale", response.data.order.id);
@@ -248,6 +285,7 @@ const Cart = () => {
             if (event.key === "F2") { event.preventDefault(); searchRef.current?.focus(); }
             if (event.key === "F4") { event.preventDefault(); customerRef.current?.focus(); }
             if (event.key === "F5") { event.preventDefault(); cartTableRef.current?.focusFirstRow(); }
+            if (event.key === "F6") { event.preventDefault(); promotionTableRef.current?.focusFirstRow(); }
             if (event.key === "F7") { event.preventDefault(); paymentMethodRef.current?.focus(); }
             if (event.key === "F8") { event.preventDefault(); voucherRef.current?.focus(); }
             if (event.key === "F9") { event.preventDefault(); paidRef.current?.focus(); }
@@ -275,7 +313,7 @@ const Cart = () => {
         };
         window.addEventListener("keydown", shortcut);
         return () => window.removeEventListener("keydown", shortcut);
-    }, [cart, paidAmount, grandTotal, appliedVouchers, selectedCartProductId]);
+    }, [cart, paidAmount, grandTotal, appliedVouchers, appliedPromotions, selectedCartProductId]);
 
     return (
         <div className="row">
@@ -290,23 +328,18 @@ const Cart = () => {
                     if (selectedSerial && selectedProduct) addToCart(selectedProduct.barcode, selectedSerial);
                 }}
             />
-            <div className="col-md-6 col-lg-5">
+            <div className="col-md-6 col-lg-6">
                 <Barcodes
                     barcode={barcode}
                     handleScanBarcode={handleScanBarcode}
                     handleOnChangeBarcode={(event) => setBarcode(event.target.value)}
                     inputRef={barcodeRef}
                 />
-                <Vouchers
-                    appliedVouchers={appliedVouchers}
-                    onAddVoucher={addVoucher}
-                    onRemoveVoucher={removeVoucher}
-                    inputRef={voucherRef}
-                    outletId={outlet.id}
-                />
                 <CartTable
                     cart={cart}
+                    getBaseSubtotal={getBaseSubtotal}
                     getSubtotal={getSubtotal}
+                    promotionTotal={getPromotionTotal()}
                     voucherBreakdown={voucherBreakdown}
                     voucherTotal={voucherTotal}
                     grandTotal={grandTotal}
@@ -321,6 +354,21 @@ const Cart = () => {
                     setPaymentMethodId={setPaymentMethodId}
                     paymentMethodInputRef={paymentMethodRef}
                     paidInputRef={paidRef}
+                    voucherInputRef={voucherRef}
+                    outletId={outlet.id}
+                    appliedVouchers={appliedVouchers}
+                    onAddVoucher={addVoucher}
+                    onRemoveVoucher={removeVoucher}
+                    appliedPromotions={appliedPromotions}
+                    onAddPromotion={addPromotion}
+                    onRemovePromotion={removePromotion}
+                    selectedProducts={cart.map((item) => ({
+                        id: item.id,
+                        qty: Number(item.pivot?.qty || 0),
+                        baseSubtotal: Number(item.cashier_base_subtotal || 0),
+                    }))}
+                    appliedPromotionNames={getAppliedPromotionNames()}
+                    promotionTableRef={promotionTableRef}
                     handleChangeQty={(productId, value) => {
                         const qty = Number.parseInt(value, 10);
                         if (Number.isInteger(qty) && qty >= 1) updateCart(productId, qty);
@@ -343,8 +391,8 @@ const Cart = () => {
                     cartTableRef={cartTableRef}
                 />
             </div>
-            <div className="col-md-6 col-lg-7">
-                <input ref={searchRef} type="text" className="form-control" placeholder="Cari produk lalu tekan Enter (F2)" value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") loadProducts(search); }} />
+            <div className="col-md-6 col-lg-6">
+                <input ref={searchRef} type="text" className="form-control" style={{ height: "42px", fontSize: "16px" }} placeholder="Cari produk lalu tekan Enter (F2)" value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") loadProducts(search); }} />
                 <br />
                 <Gallery products={products} addProductToCart={(value) => addToCart(value)} />
             </div>

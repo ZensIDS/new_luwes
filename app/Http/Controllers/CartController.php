@@ -6,13 +6,14 @@ use App\Models\OwnerStock;
 use App\Models\OutletPrice;
 use App\Models\Product;
 use App\Services\PriceCalculator;
+use App\Services\PromotionService;
 use App\Support\OutletAccess;
 use Exception;
 use Illuminate\Http\Request;
 
 class CartController extends Controller
 {
-    public function index(Request $request, PriceCalculator $calculator)
+    public function index(Request $request, PriceCalculator $calculator, PromotionService $promotionService)
     {
         $outletId = OutletAccess::id($request);
         $cart = $request->user()->cart()
@@ -20,7 +21,8 @@ class CartController extends Controller
             ->withPivot('qty', 'serial_number', 'stock_id', 'owner_stock_id', 'outlet_id')
             ->get();
 
-        foreach ($cart as $item) {
+        $allocations = [];
+        foreach ($cart as $cartIndex => $item) {
             $ownerStocks = $item->ownerStocks()
                 ->where('owner_id', $outletId)
                 ->where('qty', '>', 0)
@@ -58,7 +60,6 @@ class CartController extends Controller
                 ->currentlyActive()
                 ->first();
             $remainingQty = max(1, (int) $item->pivot->qty);
-            $cashierSubtotal = 0;
             $firstPrice = null;
             foreach ($ownerStocks as $ownerStock) {
                 if ($remainingQty <= 0) {
@@ -70,17 +71,47 @@ class CartController extends Controller
                     $item
                 );
                 $allocatedQty = $item->is_serialized ? 1 : min($remainingQty, (int) $ownerStock->qty);
-                $cashierSubtotal += (int) ($price['price'] * $allocatedQty);
                 $firstPrice ??= $price;
+                $allocations[] = [
+                    'cart_index' => $cartIndex,
+                    'product' => $item,
+                    'ownerStock' => $ownerStock,
+                    'qty' => $allocatedQty,
+                    'price' => $price,
+                    'base_line_total' => (int) ($price['price'] * $allocatedQty),
+                    'line_total' => (int) ($price['price'] * $allocatedQty),
+                ];
                 $remainingQty -= $allocatedQty;
             }
+        }
+
+        $promotionCodes = collect($request->input('promotion_codes', []))
+            ->map(fn ($code) => strtoupper(trim((string) $code)))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+        $promotionResult = $promotionService->calculate($allocations, $outletId, null, false, $promotionCodes);
+        $allocationsByCartItem = collect($promotionResult['allocations'])->groupBy('cart_index');
+        foreach ($cart as $cartIndex => $item) {
+            $itemAllocations = $allocationsByCartItem->get($cartIndex, collect());
+            $baseSubtotal = (int) $itemAllocations->sum('base_line_total');
+            $cashierSubtotal = (int) $itemAllocations->sum('line_total');
+            $promotionDiscount = (int) $itemAllocations->sum('promotion_discount');
+            $firstAllocation = $itemAllocations->first();
+            $firstPrice = $firstAllocation['price'] ?? null;
+
             $item->cashierPrice = $firstPrice;
+            $item->cashier_base_subtotal = $baseSubtotal;
+            $item->cashier_unit_price = $calculator->money($baseSubtotal / max(1, (int) $item->pivot->qty));
             $item->cashier_subtotal = $cashierSubtotal;
-            if ($firstPrice) {
-                $item->harga_jual = $remainingQty > 0
-                    ? $firstPrice['price']
-                    : $calculator->money($cashierSubtotal / max(1, (int) $item->pivot->qty));
-            }
+            $item->cashier_promotion_discount = $promotionDiscount;
+            $item->cashier_promotions = $itemAllocations
+                ->flatMap(fn ($allocation) => collect($allocation['promotion_details'] ?? []))
+                ->pluck('promotion_name')
+                ->unique()
+                ->values()
+                ->all();
         }
 
         return response($cart);

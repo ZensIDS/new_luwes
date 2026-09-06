@@ -21,6 +21,7 @@ class Penjualan extends Model
         'total',
         'subtotal',
         'discount_total',
+        'promotion_total',
         'voucher_total',
         'grand_total',
         'paid_amount',
@@ -34,6 +35,7 @@ class Penjualan extends Model
         'created_at' => 'datetime',
         'subtotal' => 'float',
         'discount_total' => 'float',
+        'promotion_total' => 'float',
         'voucher_total' => 'float',
         'grand_total' => 'float',
         'paid_amount' => 'float',
@@ -85,6 +87,11 @@ class Penjualan extends Model
         return $this->belongsToMany(Voucher::class, 'voucher_redemptions')
             ->withPivot('outlet_id', 'cashier_id', 'code', 'type', 'value', 'amount')
             ->withTimestamps();
+    }
+
+    public function promotionApplications()
+    {
+        return $this->hasMany(PromotionApplication::class);
     }
 
     public function paymentMethod()

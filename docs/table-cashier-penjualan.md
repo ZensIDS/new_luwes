@@ -4,6 +4,27 @@ Dokumen ini menjadi contoh perhitungan yang harus disepakati sebelum halaman
 Harga Jual dan POS diimplementasikan. Semua angka menggunakan Rupiah (Rp),
 tanpa pajak atau biaya layanan.
 
+## Hasil pengecekan dua contoh yang sudah ada
+
+Kedua contoh di bawah sudah konsisten secara aritmetika. `Total (referensi
+harga/unit)` bukan total transaksi karena belum dikalikan quantity; angka yang
+dipakai untuk pembayaran adalah subtotal pada tingkat transaksi.
+
+| Contoh | Subtotal sebelum voucher | Voucher | Grand Total | Status |
+|---|---:|---:|---:|---|
+| Versi 1 — persentase | Rp375.210 | 10% = Rp37.521 | **Rp337.689** | Benar |
+| Versi 2 — nominal | Rp376.000 | Rp50.000 | **Rp326.000** | Benar |
+
+Kontrol silangnya juga benar:
+
+- Versi 1: HPP efektif Rp318.000, sehingga margin sebelum voucher Rp57.210
+  dan sesudah voucher Rp19.689.
+- Versi 2: HPP efektif Rp318.000, sehingga margin sebelum voucher Rp58.000
+  dan sesudah voucher Rp8.000.
+
+Contoh tersebut sudah diuji melalui `PriceCalculatorTest`. Tiga pengujian
+untuk harga persentase, harga nominal, dan voucher bertingkat berhasil.
+
 ## Urutan perhitungan
 
 Harga dan diskon harus dihitung dalam urutan berikut. `Disc Brand` bukan
@@ -38,6 +59,35 @@ margin penjualan tidak berkurang karena diskon brand.
   membuat Grand Total menjadi negatif.
 - Backend harus menghitung ulang seluruh nilai dari item dan konfigurasi harga.
   Nilai total dari browser hanya dipakai sebagai tampilan dan tidak dipercaya.
+
+## Gambaran alur harga dan promo
+
+Alur dasar yang dipakai dua contoh di bawah ini adalah:
+
+    HPP batch
+      -> Disc Brand
+      -> Harga Akhir
+      -> Margin
+      -> Harga Aktif
+      -> Disc Toko
+      -> Harga Netto Item
+      -> Subtotal Penjualan
+      -> Voucher
+      -> Grand Total
+
+Perluasan promo menambahkan dua lapisan sebelum Grand Total:
+
+    Harga Netto Item
+      -> Promo item: flash sale atau harga bertingkat
+      -> Subtotal item promo
+      -> Promo keranjang: bundling atau minimal belanja
+      -> Voucher yang eligible
+      -> Grand Total
+
+Promo item dan promo keranjang tidak boleh mengurangi basis yang sama dua kali.
+Setiap potongan harus menyimpan `source`, produk/baris yang terkena, basis,
+prioritas, dan nominal aktualnya agar kasir serta laporan dapat melihat asal
+potongan.
 
 ## Versi 1 — seluruh diskon dan voucher menggunakan persentase
 
@@ -163,6 +213,239 @@ Kontrol margin untuk laporan:
     Margin terealisasi sebelum voucher = Rp376.000 - Rp318.000 = Rp58.000
     Margin terealisasi setelah voucher  = Rp326.000 - Rp318.000 = Rp8.000
 
+## Kasus promo tambahan — usulan sebelum implementasi
+
+Bagian ini menerjemahkan pembicaraan tentang flash sale, bundling, harga
+bertingkat, dan event menjadi contoh angka. Semua ini masih aturan bisnis yang
+perlu disepakati; belum mengubah kode.
+
+### 1. Flash sale berdasarkan waktu
+
+Produk Minyak Sanco memiliki Harga Netto Item reguler Rp20.000. Flash sale
+aktif pukul 09.00–12.00 pada 9 September 2026 dengan diskon 15% dan maksimum
+100 unit.
+
+| Komponen | Perhitungan | Nilai |
+|---|---|---:|
+| Qty | 2 pcs | 2 |
+| Harga reguler | 2 × Rp20.000 | Rp40.000 |
+| Diskon flash sale | 2 × (Rp20.000 × 15%) | -Rp6.000 |
+| **Subtotal item promo** | `Rp40.000 - Rp6.000` | **Rp34.000** |
+
+Harga promo per unit adalah Rp17.000. Di luar periode 09.00–12.00, atau
+setelah kuota 100 unit habis, harga kembali ke Rp20.000. Waktu yang dipakai
+harus waktu server/outlet yang disepakati, bukan waktu dari browser kasir.
+
+### 2. Flash sale berdasarkan quantity
+
+Harga Netto Item reguler Minyak Sanco adalah Rp20.000. Promo memberi harga
+Rp17.000 untuk maksimal 10 pcs per transaksi.
+
+| Bagian quantity | Harga per unit | Subtotal |
+|---|---:|---:|
+| 10 pcs yang memenuhi promo | Rp17.000 | Rp170.000 |
+| 2 pcs sisanya | Rp20.000 | Rp40.000 |
+| **Total 12 pcs** |  | **Rp210.000** |
+
+Tanpa promo, 12 pcs bernilai Rp240.000, jadi penghematannya Rp30.000. Sistem
+harus memilih salah satu aturan berikut sebelum implementasi:
+
+1. `max_qty` berlaku per transaksi; quantity di atas batas tetap memakai harga
+   reguler seperti contoh.
+2. `max_qty` berlaku sebagai batas pembelian; kasir mendapat alert dan harus
+   mengurangi quantity agar checkout dapat dilanjutkan.
+
+Usulan default: gunakan pilihan pertama agar quantity tambahan tetap dapat
+   dijual dengan harga reguler dan perhitungan mudah diaudit.
+
+### 3. Bundling beli quantity tertentu
+
+Aturan: beli 2 pcs Minyak Sanco dalam satu bundle mendapat potongan
+Rp35.000. Harga reguler adalah Rp20.000 per pcs.
+
+| Qty | Perhitungan | Total |
+|---:|---|---:|
+| 2 | `Rp40.000 - Rp35.000 potongan` | Rp5.000 |
+| 4 | `Rp80.000 - 2 × Rp35.000 potongan` | Rp10.000 |
+| 5 | `Rp100.000 - 2 × Rp35.000 potongan` | Rp30.000 |
+
+Untuk bundle lintas produk, misalnya Produk B dan Produk C, aturan perlu
+menyimpan quantity minimum setiap produk. Baris yang sudah dipakai untuk satu
+bundle tidak boleh dipakai lagi untuk bundle lain atau voucher produk yang
+overlap, kecuali aturan promo memang menyatakan boleh.
+
+### 4. Harga bertingkat pcs/karton dengan konfirmasi
+
+Produk A memiliki harga pcs Rp20.000 dan harga karton (12 pcs) Rp210.000.
+Ketika quantity mencapai 12 pcs, halaman pesanan menampilkan konfirmasi:
+
+    "Quantity 12 pcs memenuhi harga khusus 1 karton Rp210.000.
+     Gunakan harga karton? [Gunakan] [Tetap harga pcs]"
+
+| Pilihan kasir | Perhitungan 12 pcs | Total | Penghematan |
+|---|---|---:|---:|
+| Tetap harga pcs | `12 × Rp20.000` | Rp240.000 | Rp0 |
+| Gunakan harga karton | `1 × Rp210.000` | **Rp210.000** | **Rp30.000** |
+
+Konfirmasi harus terekam pada transaksi. Untuk 24 pcs, sistem dapat menawarkan
+`2 karton = Rp420.000` dan untuk quantity sisa di luar kelipatan karton dapat
+menggunakan harga pcs. Harga karton tidak boleh diterapkan diam-diam karena
+perubahan satuan dapat memengaruhi stok, margin, dan ekspektasi pelanggan.
+
+### 5. Minimal belanja
+
+Aturan event: belanja minimal Rp100.000 mendapat potongan Rp10.000.
+
+| Kondisi | Basis | Potongan | Total setelah promo |
+|---|---:|---:|---:|
+| Total belanja Rp99.000 | Rp99.000 | Rp0 | Rp99.000 |
+| Total belanja Rp100.000 | Rp100.000 | -Rp10.000 | **Rp90.000** |
+
+Minimum belanja dihitung setelah promo item (flash sale/harga bertingkat) dan
+sebelum voucher keranjang. Dengan begitu pelanggan tidak kehilangan kelayakan
+karena nominal voucher yang baru diterapkan.
+
+### 6. Beli X gratis Y
+
+Aturan event: beli 2 pcs Minyak Sanco, gratis 1 pcs. Harga reguler adalah
+Rp20.000 per pcs.
+
+| Qty diambil dari stok | Qty dibayar | Perhitungan | Total |
+|---:|---:|---|---:|
+| 3 pcs | 2 pcs | `2 × Rp20.000`, 1 pcs gratis | **Rp40.000** |
+| 6 pcs | 4 pcs | `4 × Rp20.000`, 2 pcs gratis | **Rp80.000** |
+
+Barang gratis tetap mengurangi stok dan HPP. Karena itu POS perlu menyimpan
+quantity yang diambil, quantity yang dibayar, serta nominal diskon gratisnya;
+jangan hanya menyimpan quantity dibayar agar kartu stok dan margin tetap benar.
+
+## Perbaikan voucher dan kombinasi promo
+
+### Contoh gabungan promo flash sale dan voucher
+
+Contoh berikut menunjukkan bahwa voucher dihitung setelah harga flash sale,
+bukan dari harga reguler. Promo flash sale aktif pukul 09.00–12.00.
+
+#### 1. Flash sale berdasarkan waktu + voucher toko
+
+Minyak Sanco mendapat flash sale 15% untuk 2 pcs. Produk B tidak mengikuti
+flash sale. Voucher `TOKO-NATAL` bernilai Rp15.000 dengan minimum pembelian
+Rp100.000.
+
+| Komponen | Perhitungan | Harga reguler | Potongan promo/voucher | Nilai setelah potongan |
+|---|---|---:|---:|---:|
+| Minyak Sanco, 2 pcs | `2 × Rp20.000` | Rp40.000 | Flash sale 15% = -Rp6.000 | Rp34.000 |
+| Produk B, 2 pcs | `2 × Rp35.000` | Rp70.000 |  | Rp70.000 |
+| **Subtotal setelah flash sale** | `Rp34.000 + Rp70.000` | **Rp110.000** |  | **Rp104.000** |
+| Voucher `TOKO-NATAL` | minimum terpenuhi |  | -Rp15.000 | -Rp15.000 |
+| **Grand Total** | `Rp104.000 - Rp15.000` |  |  | **Rp89.000** |
+
+Total penghematan adalah Rp21.000: Rp6.000 dari flash sale dan Rp15.000 dari
+voucher. Jika transaksi dibuat di luar periode flash sale, basis voucher menjadi
+Rp110.000 dan Grand Total menjadi Rp95.000.
+
+#### 2. Flash sale berdasarkan quantity + dua voucher
+
+Minyak Sanco memiliki harga reguler Rp20.000. Maksimal 10 pcs mendapat harga
+flash sale Rp17.000; 2 pcs berikutnya kembali ke harga reguler. Setelah itu,
+voucher marketplace 10% diterapkan lebih dahulu, lalu voucher toko nominal
+Rp15.000. Voucher toko memiliki minimum pembelian Rp180.000.
+
+| Komponen | Perhitungan | Nilai |
+|---|---|---:|
+| 10 pcs flash sale | `10 × Rp17.000` | Rp170.000 |
+| 2 pcs harga reguler | `2 × Rp20.000` | Rp40.000 |
+| **Subtotal setelah flash sale** | `Rp170.000 + Rp40.000` | **Rp210.000** |
+| Voucher marketplace `TOPED-9.9` | `Rp210.000 × 10%` | -Rp21.000 |
+| Sisa basis setelah voucher marketplace | `Rp210.000 - Rp21.000` | Rp189.000 |
+| Voucher toko `TOKO-NATAL` | minimum Rp180.000 terpenuhi | -Rp15.000 |
+| **Grand Total** | `Rp210.000 - Rp21.000 - Rp15.000` | **Rp174.000** |
+
+Tanpa flash sale dan voucher, 12 pcs bernilai Rp240.000. Pada contoh ini,
+flash sale menghemat Rp30.000 dan dua voucher menghemat Rp36.000, sehingga
+total penghematan adalah Rp66.000.
+
+### Voucher marketplace + voucher toko
+
+Contoh dari pembicaraan: total belanja Rp100.000 mendapat voucher marketplace
+Rp10.000 dan voucher toko Rp15.000.
+
+| Komponen | Perhitungan | Nilai |
+|---|---|---:|
+| Subtotal setelah promo item |  | Rp100.000 |
+| Voucher marketplace `TOPED-9.9` | nominal | -Rp10.000 |
+| Voucher toko `TOKO-NATAL` | nominal | -Rp15.000 |
+| **Grand Total** | `Rp100.000 - Rp10.000 - Rp15.000` | **Rp75.000** |
+
+Contoh ini menghasilkan Rp75.000 karena kedua voucher nominal. Untuk voucher
+persentase, urutan harus ditentukan oleh sistem dan ditampilkan kepada kasir;
+misalnya 10% lalu 15% menghasilkan `Rp100.000 - Rp10.000 - Rp13.500 =
+Rp76.500`, bukan Rp75.000.
+
+### Voucher produk + voucher bundling
+
+Contoh lain: Produk A mendapat voucher Rp15.000, sedangkan Produk B dan C yang
+memenuhi bundling mendapat voucher Rp20.000.
+
+| Kelompok item | Nilai awal | Voucher/promo | Nilai setelah potongan |
+|---|---:|---:|---:|
+| Produk A | Rp30.000 | -Rp15.000 | Rp15.000 |
+| Produk B + C | Rp70.000 | -Rp20.000 | Rp50.000 |
+| **Total** | **Rp100.000** | **-Rp35.000** | **Rp65.000** |
+
+Aturan validasinya:
+
+- Voucher produk hanya memakai subtotal produk yang ditentukan.
+- Voucher bundling hanya aktif jika seluruh syarat bundle terpenuhi.
+- Basis dua promo tidak boleh overlap. Jika overlap memang diizinkan, harus ada
+  `priority` atau pilihan `best discount`; backend tidak boleh bergantung pada
+  urutan kode yang dipindai.
+- Nominal setiap potongan, basisnya, dan sisa basis setelah potongan dicatat
+  pada detail transaksi.
+
+### Event sebagai wadah promo
+
+Event seperti `Natal 2026` dapat menjadi wadah untuk beberapa aturan sekaligus:
+
+| Pengaturan event | Contoh |
+|---|---|
+| Nama dan periode | Natal 2026, 1–31 Desember 2026 |
+| Outlet/channel | Outlet A dan penjualan marketplace |
+| Produk yang ikut | Minyak Sanco, Produk B, Produk C |
+| Kuota | 100 bundle atau 500 unit flash sale |
+| Aturan | flash sale, bundling, minimal belanja, beli X gratis Y |
+| Kombinasi | dapat digabung dengan voucher toko atau tidak |
+| Prioritas | urutan penerapan jika beberapa aturan aktif |
+
+Event sebaiknya hanya menjadi pengelompokan dan periode. Perhitungan tetap
+dilakukan oleh aturan promo di dalamnya, sehingga satu event dapat memiliki
+flash sale berbasis waktu, bundling, dan minimal belanja tanpa membuat satu
+rumus besar yang sulit diaudit.
+
+### Perbedaan voucher dan promo
+
+| Aspek | Voucher | Flash sale / bundling |
+|---|---|---|
+| Cara aktif | Kasir memilih atau scan/input kode | Kasir memilih kode setelah produk yang sesuai ada di keranjang |
+| Contoh | `TOKO-NATAL`, `TOPED-9.9` | `FLASH-9.9-2026`, `BUNDLE-9.9-A-C` |
+| Batas penggunaan | kode, limit, redemption | kuota, periode, quantity, produk yang dipilih |
+| Audit | voucher dan redemption | rule/event dan promo application |
+| Tampilan kasir | kode, syarat, nominal potongan | pilihan yang cocok dengan item, syarat, dan detail potongan |
+
+Secara perhitungan, keduanya dapat menggunakan mekanisme `discount
+application` yang sama, tetapi sumbernya harus dibedakan. Voucher tetap
+memiliki `voucher_redemptions`; promo menyimpan rule/event yang memicunya.
+
+### Alert yang perlu muncul di halaman pesanan
+
+- `Flash sale berakhir pukul 12.00` dan sisa kuota jika ada.
+- `Tambah 1 pcs Produk C untuk mendapatkan bundle`.
+- `Quantity sudah memenuhi harga 1 karton`; tampilkan dialog konfirmasi.
+- `Voucher TOKO-NATAL aktif`, minimum belanja, basis yang memenuhi, dan nominal
+  potongannya.
+- Jika dua promo bertabrakan, jelaskan promo yang dipilih dan promo yang tidak
+  dipakai beserta alasannya.
+
 ## Bentuk data yang dibutuhkan POS
 
 Setiap baris penjualan sebaiknya menyimpan snapshot perhitungan pada saat
@@ -175,6 +458,9 @@ checkout, bukan hanya `product_id` dan harga akhir. Minimal:
 | Diskon item | `disc_brand_type`, `disc_brand_value`, `disc_brand_amount`, `disc_toko_type`, `disc_toko_value`, `disc_toko_amount` | Audit dan laporan margin |
 | Penjualan | `qty`, `price`, `subtotal` | `price` sebaiknya adalah Harga Netto yang benar-benar dijual |
 | Voucher | `voucher_id`, `voucher_code`, `voucher_type`, `voucher_value`, `voucher_amount` | Nilai voucher pada transaksi, bukan nilai voucher terkini |
+| Event/promo | `event_id`, `promotion_id`, `promotion_type`, `source`, `start_at`, `end_at` | Wadah event dan jenis aturan: flash sale, bundle, tier, minimal belanja, atau beli X gratis Y |
+| Target promo | `product_ids`, `outlet_ids`, `min_qty`, `max_qty`, `min_purchase`, `quota` | Syarat dan cakupan promo; bundle perlu menyimpan kebutuhan tiap produk |
+| Penerapan promo | `promotion_application_id`, `line_id`, `basis_amount`, `amount`, `priority`, `confirmation` | Snapshot promo yang benar-benar dipakai dan baris yang terkena |
 | Pembayaran | `grand_total`, `paid_amount`, `change_amount`, `payment_method_id` | Dibutuhkan untuk proses kasir dan tutup kas |
 
 Jika satu produk mengambil stok dari beberapa batch dengan HPP berbeda, POS
@@ -195,3 +481,50 @@ agar HPP dan kartu stok tetap dapat direkonsiliasi.
    dan nominal potongan untuk laporan margin.
 6. Voucher dapat berlaku global atau dibatasi ke satu produk melalui
    `product_id`, dan dapat dibatasi ke outlet melalui `outlet_id`.
+
+## Keputusan yang masih perlu disepakati untuk promo
+
+1. `max_qty` flash sale berlaku sebagai kuota harga promo dengan sisa quantity
+   memakai harga reguler (usulan default), atau sebagai batas quantity transaksi.
+2. Jika flash sale dan harga bertingkat sama-sama aktif, apakah salah satu
+   dipilih berdasarkan prioritas atau keduanya boleh ditumpuk.
+3. Jika dua promo menargetkan baris yang sama, gunakan `priority` tetap atau
+   otomatis memilih potongan terbesar.
+4. Apakah bundling boleh digabung dengan voucher toko, dan apakah baris bundle
+   boleh menerima voucher produk sekaligus.
+5. Minimum belanja dihitung setelah promo item dan sebelum voucher (usulan
+   default pada contoh), atau memakai subtotal sebelum promo.
+6. Sumber dana voucher perlu dibedakan, minimal `marketplace`, `toko`, dan
+   `brand`, agar beban diskon dan margin dapat dilaporkan dengan benar.
+
+## Cara mencoba data demo 9.9
+
+Migration dan data demo dibuat oleh `DemoDataSeeder`. Untuk instalasi yang
+belum memiliki tabel promo, jalankan:
+
+    php artisan migrate
+    php artisan db:seed --class=DemoDataSeeder
+
+Login kasir demo: `demo.kasir1@example.test` dengan password `password`, lalu
+buka `Kasir POS` pada `Outlet Demo 1`. Data promo aktif pada 1–9 September 2026
+(timezone `Asia/Jakarta`).
+
+Voucher yang dapat discan pada POS:
+
+| Kode | Jenis | Syarat |
+|---|---|---|
+| `TOPED-9.9` | 10% maksimal Rp50.000 | Minimum Rp100.000 |
+| `TOKO-9.9` | Potongan Rp15.000 | Minimum Rp100.000 |
+| `PRODUK-A-9.9` | Potongan Rp15.000 | Khusus Produk Demo A |
+
+Promo yang dapat dipilih setelah item yang sesuai ada di keranjang:
+
+- `FLASH-9.9-2026`: Produk Demo A dan B, diskon 9,9%, maksimal 10 pcs per
+  produk per transaksi.
+- `BUNDLE-9.9-C-2PCS`: 2 Produk Demo C, potongan bundle Rp165.000.
+- `BUNDLE-9.9-A-C`: 1 Produk Demo A + 1 Produk Demo C, potongan bundle Rp185.000.
+
+Menu pengaturan promo tersedia di `POS & Harga > Flash Sale & Bundle` untuk
+membuat atau mengubah produk, periode, nilai diskon, quantity, prioritas, dan
+potongan bundle. Nilai bundling adalah nominal potongan per bundle, bukan
+harga akhir yang harus dibayar pelanggan.

@@ -44,7 +44,7 @@ class PenjualanController extends Controller
     public function index(Request $request)
     {
         $outletId = OutletAccess::id($request, false);
-        $query = Penjualan::with(['items.product', 'outlet', 'kasir', 'vouchers'])
+        $query = Penjualan::with(['items.product', 'outlet', 'kasir', 'vouchers', 'promotionApplications'])
             ->orderBy('created_at', 'desc');
         if ($outletId) {
             $query->where('outlet_id', $outletId);
@@ -78,6 +78,8 @@ class PenjualanController extends Controller
             'salesman_id' => 'nullable|integer|exists:salesmen,id',
             'voucher_codes' => 'nullable|array',
             'voucher_codes.*' => 'string|max:100',
+            'promotion_codes' => 'nullable|array',
+            'promotion_codes.*' => 'string|max:100',
         ]);
 
         try {
@@ -101,7 +103,7 @@ class PenjualanController extends Controller
     {
         $this->ensureSaleAccess($penjualan);
         return view('penjualan.show', [
-            'penjualan' => $penjualan->load(['kasir', 'customer', 'outlet', 'items.product', 'vouchers', 'paymentMethod']),
+            'penjualan' => $penjualan->load(['kasir', 'customer', 'outlet', 'items.product', 'vouchers', 'promotionApplications.promotion', 'paymentMethod']),
         ]);
     }
 
@@ -109,7 +111,7 @@ class PenjualanController extends Controller
     {
         $this->ensureSaleAccess($penjualan);
         return view('penjualan.print', [
-            'penjualan' => $penjualan->load(['kasir', 'customer', 'outlet', 'items.product', 'vouchers', 'paymentMethod']),
+            'penjualan' => $penjualan->load(['kasir', 'customer', 'outlet', 'items.product', 'vouchers', 'promotionApplications.promotion', 'paymentMethod']),
         ]);
     }
 

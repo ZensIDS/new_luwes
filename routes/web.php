@@ -14,6 +14,7 @@ use App\Http\Controllers\PaymentMethodController;
 use App\Http\Controllers\PembelianController;
 use App\Http\Controllers\PengeluaranController;
 use App\Http\Controllers\PenjualanController;
+use App\Http\Controllers\PromotionController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProductMinimumAdjustmentController;
 use App\Http\Controllers\ProfileController;
@@ -84,7 +85,9 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/owner-stock-opname/data', [App\Http\Controllers\OwnerStockController::class, 'getOpnameData'])->name('owner-stock-opname.data');
     Route::post('/owner-stock-opname/save', [App\Http\Controllers\OwnerStockController::class, 'saveOpname'])->name('owner-stock-opname.save');
     Route::get('/voucher/lookup', [VoucherController::class, 'lookup'])->name('voucher.lookup');
+    Route::get('/voucher/options', [VoucherController::class, 'options'])->name('voucher.options');
     Route::resource('/voucher', VoucherController::class);
+    Route::resource('/promotion', PromotionController::class)->except(['show']);
     Route::resource('/slider', SliderController::class);
 
     Route::resource('/pengeluaran', PengeluaranController::class);

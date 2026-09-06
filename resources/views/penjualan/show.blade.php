@@ -54,13 +54,19 @@
                                         <td>{{ $item->serial_number ? $item->serial_number : $item->product?->code }} - {{ $item->product->name }}</td>
                                         <td>{{ $item->qty }}</td>
                                         <td>@currency($item->price)</td>
-                                        <td>@currency($item->qty * $item->price)</td>
+                                        <td>@currency($item->subtotal ?? ($item->qty * $item->price))</td>
                                     </tr>
-                                    @php $totalCost += $item->qty * $item->price; @endphp
+                                    @php $totalCost += $item->subtotal ?? ($item->qty * $item->price); @endphp
                                 @endforeach
                                 @php $grandTotal = $penjualan->grand_total ?? ($totalCost - $penjualan->discount - $penjualan->voucher?->value); @endphp
                                 <tr>
-                                    <th colspan="4" class="text-sm text-right">Sub Total : @currency($totalCost)</th>
+                                    <th colspan="4" class="text-sm text-right">Subtotal setelah Disc Toko : @currency(($penjualan->subtotal ?? $totalCost) + ($penjualan->promotion_total ?? 0))</th>
+                                </tr>
+                                <tr>
+                                    <th colspan="4" class="text-sm text-right">Promo Flash Sale / Bundling : -@currency($penjualan->promotion_total ?? 0)</th>
+                                </tr>
+                                <tr>
+                                    <th colspan="4" class="text-sm text-right">Subtotal setelah promo : @currency($penjualan->subtotal ?? $totalCost)</th>
                                 </tr>
                                 <tr>
                                     <th colspan="4" class="text-sm text-right">Disc Toko : -@currency($penjualan->discount_total ?? $penjualan->discount)</th>
@@ -68,6 +74,11 @@
                                 <tr>
                                     <th colspan="4" class="text-sm text-right">Voucher : -@currency($penjualan->voucher_total ?? 0)</th>
                                 </tr>
+                                @if ($penjualan->promotionApplications->isNotEmpty())
+                                    <tr>
+                                        <th colspan="4" class="text-sm text-right">Promo: {{ $penjualan->promotionApplications->map(fn ($application) => $application->name)->join(', ') }}</th>
+                                    </tr>
+                                @endif
                                 @if ($penjualan->vouchers->isNotEmpty())
                                     <tr>
                                         <th colspan="4" class="text-sm text-right">Kode Voucher: {{ $penjualan->vouchers->pluck('code')->join(', ') }}</th>

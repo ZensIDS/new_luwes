@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\VoucherRequest;
 use App\Models\Product;
+use App\Models\Promotion;
 use App\Models\User;
 use App\Models\Voucher;
 use App\Support\OutletAccess;
@@ -51,22 +52,58 @@ class VoucherController extends Controller
             ->first();
 
         if (! $voucher || ! $voucher->isActive() || $voucher->redemptions()->exists()) {
-            return response()->json(['message' => 'Voucher tidak ditemukan, sudah digunakan, atau tidak aktif.'], 404);
+            $promotion = Promotion::with('promotionProducts.product')
+                ->where('code', strtoupper(trim($request->code)))
+                ->when($outletId, fn ($query) => $query->where(function ($scopeQuery) use ($outletId) {
+                    $scopeQuery->whereNull('outlet_id')->orWhere('outlet_id', $outletId);
+                }))
+                ->first();
+
+            if ($promotion && $promotion->isActive()) {
+                return response()->json($this->promotionPayload($promotion));
+            }
+
+            return response()->json(['message' => 'Voucher atau promo tidak ditemukan, sudah digunakan, atau tidak aktif.'], 404);
         }
 
+        return response()->json($this->voucherPayload($voucher));
+    }
+
+    public function options(Request $request)
+    {
+        $outletId = OutletAccess::id($request, false);
+        $now = now();
+
+        $vouchers = Voucher::with('product')
+            ->whereDoesntHave('redemptions')
+            ->when($outletId, fn ($query) => $query->where(function ($scopeQuery) use ($outletId) {
+                $scopeQuery->whereNull('outlet_id')->orWhere('outlet_id', $outletId);
+            }))
+            ->where(function ($query) use ($now) {
+                $query->whereNull('start_at')->orWhere('start_at', '<=', $now);
+            })
+            ->where(function ($query) use ($now) {
+                $query->whereNull('end_at')->orWhere('end_at', '>=', $now);
+            })
+            ->orderBy('code')
+            ->get()
+            ->filter(fn (Voucher $voucher) => $voucher->isActive($now))
+            ->values()
+            ->map(fn (Voucher $voucher) => $this->voucherPayload($voucher))
+            ->all();
+
+        $promotions = $outletId
+            ? Promotion::with('promotionProducts.product')
+                ->activeFor($outletId, $now)
+                ->get()
+                ->map(fn (Promotion $promotion) => $this->promotionPayload($promotion))
+                ->values()
+                ->all()
+            : [];
+
         return response()->json([
-            'id' => $voucher->id,
-            'name' => $voucher->name,
-            'code' => $voucher->code,
-            'type' => $voucher->type,
-            'value' => $voucher->value,
-            'min_purchase' => $voucher->min_purchase,
-            'max_discount_amount' => $voucher->max_discount_amount,
-            'outlet_id' => $voucher->outlet_id,
-            'product_id' => $voucher->product_id,
-            'product_name' => $voucher->product?->name,
-            'start_at' => $voucher->start_at,
-            'end_at' => $voucher->end_at,
+            'vouchers' => $vouchers,
+            'promotions' => $promotions,
         ]);
     }
 
@@ -201,5 +238,50 @@ class VoucherController extends Controller
     private function ensureManagementAccess(): void
     {
         abort_unless(in_array(auth()->user()?->role, ['superadmin', 'admin-gudang', 'owner'], true), 403);
+    }
+
+    private function voucherPayload(Voucher $voucher): array
+    {
+        return [
+            'kind' => 'voucher',
+            'id' => $voucher->id,
+            'name' => $voucher->name,
+            'code' => $voucher->code,
+            'type' => $voucher->type,
+            'value' => $voucher->value,
+            'min_purchase' => $voucher->min_purchase,
+            'max_discount_amount' => $voucher->max_discount_amount,
+            'outlet_id' => $voucher->outlet_id,
+            'product_id' => $voucher->product_id,
+            'product_name' => $voucher->product?->name,
+            'start_at' => $voucher->start_at,
+            'end_at' => $voucher->end_at,
+        ];
+    }
+
+    private function promotionPayload(Promotion $promotion): array
+    {
+        return [
+            'kind' => 'promotion',
+            'id' => $promotion->id,
+            'name' => $promotion->name,
+            'code' => $promotion->code,
+            'type' => $promotion->type,
+            'discount_type' => $promotion->discount_type,
+            'discount_value' => $promotion->discount_value,
+            'bundle_price' => $promotion->bundle_price,
+            'bundle_discount' => $promotion->bundle_price,
+            'max_qty' => $promotion->max_qty,
+            'quota_qty' => $promotion->quota_qty,
+            'min_purchase' => $promotion->min_purchase,
+            'outlet_id' => $promotion->outlet_id,
+            'start_at' => $promotion->start_at,
+            'end_at' => $promotion->end_at,
+            'products' => $promotion->promotionProducts->map(fn ($rule) => [
+                'id' => $rule->product_id,
+                'name' => $rule->product?->name,
+                'required_qty' => (float) $rule->required_qty,
+            ])->values()->all(),
+        ];
     }
 }

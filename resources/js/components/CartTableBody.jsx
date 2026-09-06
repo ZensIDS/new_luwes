@@ -76,14 +76,15 @@ const CartTableBody = forwardRef(({
                         <input
                             type="number"
                             className="form-control form-control-sm qty text-center"
-                            style={{ maxWidth: "60px" }}
+                            min="1"
+                            style={{ maxWidth: "90px", minWidth: "78px", height: "40px", fontSize: "18px", fontWeight: 600 }}
                             value={c.pivot.qty}
                             onChange={(event) =>
                                 handleChangeQty(c.id, event.target.value)
                             }
                         />
                     </td>
-                    <td>{formatRupiah(c.harga_jual)}</td>
+                    <td>{formatRupiah(c.cashier_unit_price ?? c.harga_jual)}</td>
                     <td>
                         <button
                             className="btn btn-sm"

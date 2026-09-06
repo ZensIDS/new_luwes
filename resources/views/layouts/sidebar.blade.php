@@ -102,11 +102,12 @@
         @endif
 
         @if (in_array($role, ['superadmin', 'admin-gudang', 'owner']))
-        <li class="treeview {{ request()->is('outlet-prices*') || request()->is('voucher*') ? 'active' : '' }}">
+        <li class="treeview {{ request()->is('outlet-prices*') || request()->is('voucher*') || request()->is('promotion*') ? 'active' : '' }}">
             <a href="#"><i class="fa fa-tags"></i><span>POS &amp; Harga</span><i class="fa fa-angle-left pull-right"></i></a>
             <ul class="treeview-menu">
                 <li class="{{ request()->is('outlet-prices*') ? 'active' : '' }}"><a href="{{ route('outlet-prices.index') }}"><i class="fa fa-money"></i><span>Master Harga Jual</span></a></li>
                 <li class="{{ request()->is('voucher*') ? 'active' : '' }}"><a href="{{ route('voucher.index') }}"><i class="fa fa-ticket"></i><span>Voucher</span></a></li>
+                <li class="{{ request()->is('promotion*') ? 'active' : '' }}"><a href="{{ route('promotion.index') }}"><i class="fa fa-bolt"></i><span>Flash Sale &amp; Bundle</span></a></li>
             </ul>
         </li>
         @endif

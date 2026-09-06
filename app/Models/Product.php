@@ -141,6 +141,13 @@ class Product extends Model
         return $this->hasMany(OutletPrice::class);
     }
 
+    public function promotions()
+    {
+        return $this->belongsToMany(Promotion::class, 'promotion_products')
+            ->withPivot('required_qty')
+            ->withTimestamps();
+    }
+
     public function movements()
     {
         return $this->hasMany(StockMovement::class);

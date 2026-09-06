@@ -9,6 +9,7 @@ const Barcodes = ({ barcode, handleScanBarcode, handleOnChangeBarcode, inputRef 
                 ref={inputRef}
                 type="text"
                 className="form-control form-control-sm"
+                style={{ height: "42px", fontSize: "18px" }}
                 placeholder="Scan barcode lalu tekan Enter"
                 autoComplete="off"
                 value={barcode}
