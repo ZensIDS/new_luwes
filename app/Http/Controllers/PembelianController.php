@@ -254,15 +254,159 @@ class PembelianController extends Controller
 
     public function create()
     {
-        $lastPembelian = Pembelian::latest('id')->first();
-        $nextNumber = $lastPembelian ? ((int) substr($lastPembelian->code, 4) + 1) : 1;
-        $code = 'PO' . str_pad($nextNumber, 5, '0', STR_PAD_LEFT);
+        if (auth()->user()->role === 'owner') {
+            abort(403);
+        }
 
-        return view('pembelians.create', [
-            'suppliers' => Supplier::get(),
-            'products' => collect(),
-            'code' => $code
+        // Langsung insert ke DB (draft), lalu redirect ke halaman edit — create dan edit
+        // jadi satu alur yang sama dengan autosave, meniru pola Request Order.
+        $pembelian = Pembelian::create([
+            'code' => null,
+            'supplier_id' => null,
+            'total' => 0,
+            'is_published' => false,
+            'owner_approval_status' => 'approved',
+            'owner_approved_by' => null,
+            'owner_approved_at' => null,
+            'owner_approval_note' => null,
         ]);
+
+        return redirect()->route('pembelian.edit', $pembelian);
+    }
+
+    public function autosaveHeader(Request $request, Pembelian $pembelian)
+    {
+        abort_unless($pembelian->canBeEditedBy(auth()->user()), 403);
+
+        $data = $request->validate([
+            'supplier_id' => 'nullable|exists:suppliers,id',
+        ]);
+
+        $updates = ['supplier_id' => $data['supplier_id'] ?? null];
+
+        // Kode PO mengikuti supplier — digenerate ulang tiap kali supplier berubah.
+        if (! empty($data['supplier_id']) && (int) $pembelian->supplier_id !== (int) $data['supplier_id']) {
+            $updates['code'] = $this->generatePoCode($data['supplier_id']);
+        } elseif (empty($data['supplier_id'])) {
+            $updates['code'] = null;
+        }
+
+        $pembelian->update($updates);
+
+        return response()->json([
+            'status'    => 'ok',
+            'code'      => $pembelian->code,
+            'saved_at'  => now()->toDateTimeString(),
+        ]);
+    }
+
+    public function autosaveItem(Request $request, Pembelian $pembelian)
+    {
+        abort_unless($pembelian->canBeEditedBy(auth()->user()), 403);
+
+        $data = $request->validate([
+            'id'             => 'nullable|integer|exists:pembelian_products,id',
+            'product_id'     => 'required|exists:products,id',
+            'qty'            => 'required|numeric|min:1',
+            'harga_beli'     => 'required|numeric|min:0',
+            'serial_numbers' => 'nullable|string',
+        ]);
+
+        $duplicate = $pembelian->pembelianProducts()
+            ->where('product_id', $data['product_id'])
+            ->when(!empty($data['id']), fn($q) => $q->where('id', '!=', $data['id']))
+            ->exists();
+
+        if ($duplicate) {
+            return response()->json(['status' => 'error', 'message' => 'Produk sudah ada di list.'], 422);
+        }
+
+        $product = Product::find($data['product_id']);
+
+        $serialNumbers = null;
+        if (! empty($data['serial_numbers'])) {
+            $serialNumbers = array_filter(array_map('trim', explode("\n", $data['serial_numbers'])));
+        }
+
+        $qty = $product->is_serialized && $serialNumbers ? count($serialNumbers) : (int) $data['qty'];
+        $hargaBeli = (int) $data['harga_beli'];
+        $subtotal = $qty * $hargaBeli;
+
+        $item = PembelianProduct::updateOrCreate(
+            ['id' => $data['id'] ?? null, 'pembelian_id' => $pembelian->id],
+            [
+                'product_id'     => $product->id,
+                'harga_beli'     => $hargaBeli,
+                'qty'            => $qty,
+                'subtotal'       => $subtotal,
+                'serial_numbers' => $serialNumbers,
+            ]
+        );
+
+        // Warehouse stock (StockPembelian) — sama seperti updateStock() untuk PO belum published
+        if ($product->is_serialized && $serialNumbers) {
+            foreach ($serialNumbers as $serial) {
+                StockPembelian::updateOrCreate(
+                    ['pembelian_id' => $pembelian->id, 'product_id' => $product->id, 'serial_number' => $serial],
+                    [
+                        'harga_beli' => $hargaBeli,
+                        'qty'        => 1,
+                        'subtotal'   => $hargaBeli,
+                        'condition'  => 'new',
+                        'status'     => 'available',
+                    ]
+                );
+            }
+        } else {
+            StockPembelian::updateOrCreate(
+                ['pembelian_id' => $pembelian->id, 'product_id' => $product->id],
+                [
+                    'harga_beli' => $hargaBeli,
+                    'qty'        => $qty,
+                    'subtotal'   => $subtotal,
+                    'condition'  => 'new',
+                    'status'     => 'available',
+                ]
+            );
+        }
+
+        $product->update(['harga_beli' => $hargaBeli]);
+
+        $pembelian->update(['total' => $pembelian->pembelianProducts()->sum('subtotal')]);
+
+        return response()->json([
+            'status'   => 'ok',
+            'item_id'  => $item->id,
+            'subtotal' => $subtotal,
+            'total'    => $pembelian->total,
+        ]);
+    }
+
+    public function destroyItem(Pembelian $pembelian, PembelianProduct $item)
+    {
+        abort_unless($item->pembelian_id == $pembelian->id, 404);
+        abort_unless($pembelian->canBeEditedBy(auth()->user()), 403);
+
+        $item->delete();
+
+        $pembelian->update(['total' => $pembelian->pembelianProducts()->sum('subtotal')]);
+
+        return response()->json(['status' => 'ok', 'total' => $pembelian->total]);
+    }
+
+    public function finish(Request $request, Pembelian $pembelian)
+    {
+        abort_unless($pembelian->canBeEditedBy(auth()->user()), 403);
+
+        if (empty($pembelian->supplier_id)) {
+            return back()->with('toast_error', 'Supplier harus dipilih.');
+        }
+
+        if ($pembelian->pembelianProducts()->count() === 0) {
+            return back()->with('toast_error', 'Minimal harus ada 1 item produk.');
+        }
+
+        return redirect()->route('pembelian.index')->with('toast_success', 'Berhasil Menyimpan Data!');
     }
 
     public function store(PembelianRequest $request)
@@ -317,6 +461,8 @@ class PembelianController extends Controller
             return redirect()->route('pembelian.index')
                 ->with('toast_error', 'PO ini belum bisa diedit. Admin gudang hanya bisa edit setelah ACC, sedangkan owner dan superadmin bisa edit kapan saja sebelum published.');
         }
+
+        $pembelian->load('pembelianProducts.product');
 
         return view('pembelians.edit', [
             'pembelian' => $pembelian,

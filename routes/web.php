@@ -74,6 +74,13 @@ Route::middleware(['role:admin-gudang|staff-outlet|owner|superadmin'])->group(fu
     Route::get('pembelian/data', [PembelianController::class, 'getIndexData'])->name('pembelian.index.data');
     Route::get('pembelian/penerimaan/data', [PembelianController::class, 'getPenerimaanIndexData'])->name('pembelian.penerimaan.index.data');
     Route::resource('/pembelian', PembelianController::class);
+    Route::prefix('pembelian/{pembelian}')->group(function () {
+        Route::post('autosave-header', [PembelianController::class, 'autosaveHeader'])->name('pembelian.autosave-header');
+        Route::post('items', [PembelianController::class, 'autosaveItem'])->name('pembelian.autosave-item');
+        Route::delete('items/{item}', [PembelianController::class, 'destroyItem'])->name('pembelian.destroy-item');
+        Route::post('finish', [PembelianController::class, 'finish'])->name('pembelian.finish');
+    });
+
     Route::post('/pembelian/{pembelian}/owner-approve', [PembelianController::class, 'approveOwner'])->name('pembelian.owner-approve');
     Route::post('/pembelian/{pembelian}/owner-reject', [PembelianController::class, 'rejectOwner'])->name('pembelian.owner-reject');
     Route::get('/pembelian/{pembelian}/pembayaran/edit', [PembelianController::class, 'editPembayaran'])->name('pembelian.pembayaran.edit');
