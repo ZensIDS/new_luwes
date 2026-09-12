@@ -72,6 +72,7 @@
                                     <tr>
                                         <td>Nama Product</td>
                                         <td>Qty</td>
+                                        <td>Konversi</td>
                                         <td>Harga Beli</td>
                                         <td>Sub Total</td>
                                         <td width="90">Status</td>
@@ -91,6 +92,7 @@
                                                     value="{{ $stock->product->is_serialized ? ($stock->serial_numbers ? count($stock->serial_numbers) : 1) : $stock->qty }}"
                                                     min="1" {{ $stock->product->is_serialized ? 'readonly' : '' }}>
                                             </td>
+                                            <td class="konversi-ratio text-center text-muted">-</td>
                                             <td>
                                                 <input type="text" class="form-control harga_beli numeral-mask"
                                                     required value="{{ $stock->harga_beli }}">
@@ -113,6 +115,7 @@
                                             <td>
                                                 <input type="number" class="form-control qty" required value="1" min="1">
                                             </td>
+                                            <td class="konversi-ratio text-center text-muted">-</td>
                                             <td>
                                                 <input type="text" class="form-control harga_beli numeral-mask" required value="0">
                                             </td>
@@ -173,6 +176,7 @@
                                                     <th>Nama Produk</th>
                                                     <th>Stok Saat Ini</th>
                                                     <th>Min Stok</th>
+                                                    <th>Konversi</th>
                                                     <th>Status</th>
                                                     <th width="90">Qty Order</th>
                                                 </tr>
@@ -252,6 +256,47 @@
         let supplierRequest = null;
         let selectedSupplierId = $('#supplier_id').val() || null;
 
+        //TODO use product's konversiDisplay instead
+        function konversiDisplay(qty, konversiQty, satuanBesar, satuan) {
+            satuan = satuan || 'PCS';
+            qty = parseInt(qty) || 0;
+            if (!konversiQty || !satuanBesar) return null;
+            var boxes = Math.floor(qty / konversiQty);
+            var rem = qty % konversiQty;
+            if (rem === 0) return boxes + ' ' + satuanBesar;
+            if (boxes > 0) return boxes + ' ' + satuanBesar + ' ' + rem + ' ' + satuan;
+            return qty + ' ' + satuan;
+        }
+        function fmtQtyK(qty, p) {
+            if (!p) return qty;
+            var k = konversiDisplay(qty, p.konversi_qty, p.satuan_besar, p.satuan);
+            return qty + (k ? ' <span class="label label-info">' + k + '</span>' : '');
+        }
+
+        function fmtKonversiRatio(p) {
+            if (!p || !p.konversi_qty || !p.satuan_besar) {
+                return '<span class="text-muted">-</span>';
+            }
+            var satuanKecil = p.satuan || 'PCS';
+            return '1 ' + p.satuan_besar + ' = ' + p.konversi_qty + ' ' + satuanKecil;
+        }
+
+        function updateKonversiDisplay($row) {
+            if (!currentProducts) return;
+            let productId = $row.find('.product').val();
+            let qty = parseInt($row.find('.qty').val()) || 0;
+            let prod = currentProducts.find(function(p) { return p.id == productId; });
+            let k = prod ? konversiDisplay(qty, prod.konversi_qty, prod.satuan_besar, prod.satuan) : null;
+            $row.find('.konversi-display').html(k ? '<span class="label label-info">' + k + '</span>' : '');
+
+            let $ratio = $row.find('.konversi-ratio');
+            if (prod && prod.konversi_qty && prod.satuan_besar) {
+                $ratio.removeClass('text-muted').html(fmtKonversiRatio(prod));
+            } else {
+                $ratio.addClass('text-muted').text('-');
+            }
+        }
+
         function buildProductRow() {
             return `
                 <tr>
@@ -264,6 +309,7 @@
                         <input type="number" required value="1" min="1" class="form-control qty">
                         <span class="konversi-display"></span>
                     </td>
+                    <td class="konversi-ratio text-center text-muted">-</td>
                     <td><input type="text" required value="0" class="form-control harga_beli numeral-mask"></td>
                     <td><input type="text" required class="form-control subtotal" readonly></td>
                     <td class="text-center row-status"><span class="label label-default">Belum tersimpan</span></td>
@@ -279,6 +325,7 @@
                 populateProductSelects(currentProducts, $row.find('.product'));
             }
 
+            updateKonversiDisplay($row);
             updateRowSubtotal($row);
         }
 
@@ -344,6 +391,10 @@
 
                     currentProducts = products;
                     populateProductSelects(products);
+
+                    $('#product-repeater tr').each(function() {
+                        updateKonversiDisplay($(this));
+                    });
                 })
                 .fail(function() {
                     alert('Gagal memuat daftar produk supplier. Silakan refresh halaman.');
@@ -453,11 +504,13 @@
                 $row.find('.harga_beli').val(hargaFromOption || 0).trigger('input');
             }
 
+            updateKonversiDisplay($row);
             autosaveRow($row);
         });
 
         $(document).on('input', '.qty, .harga_beli', function() {
             let $row = $(this).closest('tr');
+            updateKonversiDisplay($row);
             updateRowSubtotal($row);
             clearTimeout(rowDebounce);
             rowDebounce = setTimeout(function() {
@@ -565,8 +618,9 @@
                     $checkTd,
                     $('<td>').text(p.code),
                     $('<td>').text(p.name),
-                    $('<td>').addClass('text-center').text(p.stock_count || 0),
-                    $('<td>').addClass('text-center').text(p.effective_min || p.min_stock || 0),
+                    $('<td>').addClass('text-center').html(fmtQtyK(p.stock_count || 0, p)),
+                    $('<td>').addClass('text-center').html(fmtQtyK(p.effective_min || p.min_stock || 0, p)),
+                    $('<td>').addClass('text-center').html(fmtKonversiRatio(p)),
                     $('<td>').addClass('text-center').append($statusBadge),
                     $('<td>').append($qtyInput)
                 );
@@ -583,7 +637,7 @@
                 pageLength: 10,
                 order: [],
                 columnDefs: [
-                    { orderable: false, targets: [0, 6] }
+                    { orderable: false, targets: [0, 7] }
                 ],
                 language: {
                     search: "Cari:",
@@ -659,6 +713,7 @@
                 $hargaInput.val(item.harga).trigger('input');
                 $qtyInput.val(item.qty);
 
+                updateKonversiDisplay($newRow);
                 autosaveRow($newRow);
             });
 
