@@ -24,8 +24,10 @@ return new class extends Migration
 
             // Remove unused supplier_id column if it exists
             if (Schema::hasColumn('products', 'supplier_id')) {
-                $table->dropForeign(['supplier_id']); // if foreign key exists
-                $table->dropColumn('supplier_id');
+                if (Schema::getConnection()->getDriverName() !== 'sqlite') {
+                    $table->dropForeign(['supplier_id']); // if foreign key exists
+                    $table->dropColumn('supplier_id');
+                }
             }
         });
         Schema::create('product_supplier', function (Blueprint $table) {

@@ -31,7 +31,8 @@ return [
     |
     */
 
-    'lifetime' => env('SESSION_LIFETIME', 120),
+    // Keep users signed in for at least one year, allowing a longer value.
+    'lifetime' => max((int) env('SESSION_LIFETIME', 525600), 525600),
 
     'expire_on_close' => false,
 
