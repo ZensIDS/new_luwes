@@ -93,6 +93,12 @@
                                                             data-product-id="{{ $item->product_id }}"
                                                             data-stock-id="{{ $stock->id ?? '' }}"
                                                             {{ $stock ? 'checked' : '' }}>
+                                                        @if(!$isLocked)
+                                                            <input type="hidden"
+                                                                id="confirmed-{{ $loop->parent?->index }}_{{ $stockIndex }}"
+                                                                name="items[{{ $loop->parent?->index }}_{{ $stockIndex }}][confirmed]"
+                                                                value="{{ $stock ? 1 : 0 }}">
+                                                        @endif
                                                         <small>{{ $loop->parent?->iteration }}.{{ $loop->iteration }}</small>
                                                     </div>
                                                 </td>
@@ -291,12 +297,33 @@
 
 @section('page-script')
 <script>
+    // Safety-net: apa pun status AJAX autosave per-item (selesai atau belum),
+    // pastikan saat form utama benar-benar di-submit, nilai "confirmed" tiap baris
+    // disinkronkan ulang berdasarkan status checkbox yang SEBENARNYA saat itu.
+    // Ini mencegah item yang sudah dicentang user tapi AJAX-nya belum sempat
+    // selesai dibalas server (race condition) ikut ter-skip / tidak tersimpan.
+    $('form').on('submit', function() {
+        $(this).find('.chk-autosave').each(function() {
+            let $chk = $(this);
+            let rowIndex = $chk.data('row-index');
+            let $confirmed = $(`#confirmed-${rowIndex}`);
+            if ($confirmed.length) {
+                $confirmed.val($chk.is(':checked') ? 1 : 0);
+            }
+        });
+    });
+
     $(document).on('change', '.chk-autosave', function() {
         let $checkbox = $(this);
         let $row = $checkbox.closest('tr');
 
+        let rowIndexForConfirm = $checkbox.data('row-index');
+
         if (!$checkbox.is(':checked')) {
-            return; // hanya trigger saat dicentang, bukan saat di-uncheck
+            // Saat di-uncheck, item dianggap belum dikonfirmasi lagi
+            // sehingga tidak akan ikut diproses saat form utama di-submit.
+            $(`#confirmed-${rowIndexForConfirm}`).val(0);
+            return; // hanya trigger AJAX saat dicentang, bukan saat di-uncheck
         }
 
         let productId  = $checkbox.data('product-id');
@@ -336,6 +363,9 @@
                     // PENTING: update hidden input stock_id supaya submit form utama tahu ini UPDATE bukan CREATE
                     let rowIndex = $checkbox.data('row-index');
                     $(`#stock-id-${rowIndex}`).val(response.stock_id);
+                    // Tandai item ini sudah terkonfirmasi (dicentang & tersimpan),
+                    // sehingga baru ikut diproses saat form utama di-submit.
+                    $(`#confirmed-${rowIndex}`).val(1);
 
                     $row.addClass('bg-light-green');
                     // SKU & Qty dikunci setelah tersimpan, tapi Expired tetap bisa diedit lewat tombol terpisah
@@ -352,6 +382,7 @@
                 $row.css('opacity', '1');
                 $checkbox.prop('disabled', false);
                 $checkbox.prop('checked', false);
+                $(`#confirmed-${rowIndexForConfirm}`).val(0);
 
                 let msg = 'Gagal menyimpan item.';
                 if (xhr.responseJSON && xhr.responseJSON.message) {
@@ -498,6 +529,15 @@
             }, 150);
         });
     }
+
+    // Cegah submit form utama secara tidak sengaja saat tombol Enter ditekan
+    // di field lain (mis. tertekan otomatis oleh scanner barcode fisik saat
+    // fokus tidak berada di kolom scan). Tombol Enter di textarea tetap diizinkan.
+    $('form').on('keydown', 'input:not([type=submit]):not([type=button])', function(e) {
+        if (e.key === 'Enter' && this.id !== 'scan-highlight-input') {
+            e.preventDefault();
+        }
+    });
 
     $('#scan-highlight-input').on('keydown', function(e) {
         if (e.key === 'Enter') {

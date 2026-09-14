@@ -785,6 +785,7 @@ class PembelianController extends Controller
             'items.*.sku' => 'required|string',
             'items.*.qty_diterima' => 'required|integer',
             'items.*.expired_at' => 'nullable|date',
+            'items.*.confirmed' => 'nullable|boolean',
         ], [
             'receipt_date.date' => 'Tanggal penerimaan harus berupa tanggal yang valid.',
             'receipt_pic.string' => 'PIC penerimaan harus berupa teks.',
@@ -823,6 +824,14 @@ class PembelianController extends Controller
             ]);
 
             foreach ($request->items as $itemData) {
+                // Hanya proses item yang benar-benar sudah dicentang/dikonfirmasi
+                // oleh user (lewat checkbox penerimaan per-item). Ini mencegah
+                // seluruh item ikut "selesai" saat form utama (info header) di-submit
+                // padahal belum semuanya diverifikasi/dicentang.
+                if (empty($itemData['confirmed'])) {
+                    continue;
+                }
+
                 $qtyDiterima = (int) $itemData['qty_diterima'];
                 $sku = trim($itemData['sku']);
                 $expiredAt = ! empty($itemData['expired_at']) ? $itemData['expired_at'] : null;
