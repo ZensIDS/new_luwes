@@ -67,8 +67,16 @@ const Cart = () => {
     const getVoucherBreakdown = () => {
         const lineBalances = cart.map((item) => Number(item.cashier_subtotal ?? (Number(item.pivot.qty || 0) * Number(item.harga_jual || 0))));
         return appliedVouchers.map((voucher) => {
+            const scopedProductIds = Array.isArray(voucher.product_ids) && voucher.product_ids.length
+                ? voucher.product_ids.map(Number)
+                : null;
             const eligibleIndexes = cart.map((item, index) => ({ item, index }))
-                .filter(({ item, index }) => (voucher.product_id === null || voucher.product_id === undefined || Number(voucher.product_id) === Number(item.id)) && lineBalances[index] > 0)
+                .filter(({ item, index }) => {
+                    const productAllowed = scopedProductIds
+                        ? scopedProductIds.includes(Number(item.id))
+                        : (voucher.product_id === null || voucher.product_id === undefined || Number(voucher.product_id) === Number(item.id));
+                    return productAllowed && lineBalances[index] > 0;
+                })
                 .map(({ index }) => index);
             const base = eligibleIndexes.reduce((sum, index) => sum + lineBalances[index], 0);
             const amount = discountAmount(base, voucher);

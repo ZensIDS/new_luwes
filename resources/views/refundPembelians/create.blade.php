@@ -521,6 +521,7 @@
                             ${item.product_name}
                             <input type="hidden" name="product[${i}][product_id]" value="${item.product_id}">
                             <input type="hidden" name="product[${i}][stock_id]" value="${item.stock_id}">
+                            <input type="hidden" name="product[${i}][owner_stock_id]" value="${item.owner_stock_id}">
                             <input type="hidden" name="product[${i}][sku]" value="${item.sku}">
                         </td>
                         <td><span class="label label-default">${item.sku}</span></td>
@@ -617,6 +618,7 @@
                             ${item.product_name}
                             <input type="hidden" name="product[${i}][product_id]" value="${item.product_id}">
                             <input type="hidden" name="product[${i}][stock_id]" value="${item.stock_id}">
+                            <input type="hidden" name="product[${i}][owner_stock_id]" value="${item.owner_stock_id}">
                         </td>
                         <td><span class="label label-default">${item.sku}</span></td>
                         <td><small class="text-muted">${item.do_code}</small></td>

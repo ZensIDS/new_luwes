@@ -17,7 +17,7 @@ class PromotionController extends Controller
         $this->ensureManagementAccess();
 
         return view('promotions.index', [
-            'promotions' => Promotion::with(['outlet', 'products'])
+            'promotions' => Promotion::with(['outlet', 'outlets', 'products', 'bonuses'])
                 ->latest()
                 ->paginate(50),
         ]);
@@ -33,7 +33,6 @@ class PromotionController extends Controller
             'discount_value' => 0,
             'is_active' => true,
             'stackable' => false,
-            'priority' => 100,
         ]), false));
     }
 
@@ -43,9 +42,17 @@ class PromotionController extends Controller
         $data = $request->validated();
         [$startAt, $endAt] = $this->parseDateRange($request->input('daterange'));
 
+        if (empty($data['code'])) {
+            do {
+                $data['code'] = 'PROMO-' . now()->format('YmdHis') . '-' . strtoupper(bin2hex(random_bytes(2)));
+            } while (Promotion::where('code', $data['code'])->exists());
+        }
+
         DB::transaction(function () use ($data, $startAt, $endAt) {
             $promotion = Promotion::create($this->promotionData($data, $startAt, $endAt));
             $this->syncProducts($promotion, $data['products']);
+            $this->syncOutlets($promotion, $data['outlet_ids'] ?? []);
+            $this->syncBonuses($promotion, $data['bonuses'] ?? []);
         });
 
         return redirect()->route('promotion.index')->with('toast_success', 'Promo berhasil dibuat.');
@@ -55,7 +62,7 @@ class PromotionController extends Controller
     {
         $this->ensureManagementAccess();
 
-        return view('promotions.form', $this->formData($promotion->load('promotionProducts'), true));
+        return view('promotions.form', $this->formData($promotion->load(['promotionProducts', 'bonuses', 'outlets']), true));
     }
 
     public function update(PromotionRequest $request, Promotion $promotion)
@@ -64,9 +71,15 @@ class PromotionController extends Controller
         $data = $request->validated();
         [$startAt, $endAt] = $this->parseDateRange($request->input('daterange'));
 
+        if (empty($data['code'])) {
+            $data['code'] = $promotion->code ?: 'PROMO-' . now()->format('YmdHis') . '-' . strtoupper(bin2hex(random_bytes(2)));
+        }
+
         DB::transaction(function () use ($data, $startAt, $endAt, $promotion) {
             $promotion->update($this->promotionData($data, $startAt, $endAt));
             $this->syncProducts($promotion, $data['products']);
+            $this->syncOutlets($promotion, $data['outlet_ids'] ?? []);
+            $this->syncBonuses($promotion, $data['bonuses'] ?? []);
         });
 
         return redirect()->route('promotion.index')->with('toast_success', 'Promo berhasil diperbarui.');
@@ -93,6 +106,8 @@ class PromotionController extends Controller
         return [
             'promotion' => $promotion,
             'selectedProducts' => $selectedProducts,
+            'selectedOutlets' => $promotion->relationLoaded('outlets') ? $promotion->outlets->pluck('id')->all() : [],
+            'bonuses' => $promotion->relationLoaded('bonuses') ? $promotion->bonuses : collect(),
             'products' => Product::orderBy('name')->get(['id', 'code', 'name']),
             'outlets' => OutletAccess::outlets(),
             'isEdit' => $isEdit,
@@ -105,16 +120,16 @@ class PromotionController extends Controller
             'name' => $data['name'],
             'code' => $data['code'] ?? null,
             'type' => $data['type'],
-            'discount_type' => $data['type'] === 'bundle' ? 'nominal' : $data['discount_type'],
+            'discount_type' => $data['type'] === 'bundle' ? 'nominal' : ($data['discount_type'] ?? 'percentage'),
             'discount_value' => $data['type'] === 'bundle' ? ($data['bundle_price'] ?? 0) : ($data['discount_value'] ?? 0),
             'bundle_price' => $data['bundle_price'] ?? null,
             'max_qty' => $data['max_qty'] ?? null,
             'quota_qty' => $data['quota_qty'] ?? null,
             'min_purchase' => $data['min_purchase'] ?? 0,
-            'outlet_id' => $data['outlet_id'] ?? null,
+            'outlet_id' => empty($data['outlet_ids'] ?? []) ? ($data['outlet_id'] ?? null) : null,
             'start_at' => $startAt,
             'end_at' => $endAt,
-            'priority' => $data['priority'] ?? 100,
+            'priority' => 100,
             'is_active' => (bool) ($data['is_active'] ?? false),
             'stackable' => (bool) ($data['stackable'] ?? false),
             'desc' => $data['desc'] ?? null,
@@ -129,6 +144,22 @@ class PromotionController extends Controller
             $promotion->promotionProducts()->create([
                 'product_id' => (int) $productId,
                 'required_qty' => $requiredQty,
+            ]);
+        }
+    }
+
+    private function syncOutlets(Promotion $promotion, array $outlets): void
+    {
+        $promotion->outlets()->sync($outlets);
+    }
+
+    private function syncBonuses(Promotion $promotion, array $bonuses): void
+    {
+        $promotion->bonuses()->delete();
+        foreach ($bonuses as $bonus) {
+            $promotion->bonuses()->create([
+                'name' => $bonus['name'],
+                'qty' => $bonus['qty'],
             ]);
         }
     }

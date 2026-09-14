@@ -58,6 +58,7 @@ class RefundPembelianController extends Controller
                     ->first();
 
                 return [
+                    'owner_stock_id' => $ownerStock->id,
                     'stock_id'      => $ownerStock->stock_id,
                     'product_id'    => $ownerStock->product_id,
                     'product_name'  => $ownerStock->product->name,
@@ -150,7 +151,8 @@ class RefundPembelianController extends Controller
             'product.*.product_id' => 'required|exists:products,id',
             'product.*.qty'        => 'required|integer|min:1',
             'product.*.alasan'     => 'required|string',
-            'product.*.stock_id'   => 'required|exists:stocks,id',
+            'product.*.stock_id'   => 'required_if:type,gudang_ke_supplier|nullable|exists:stocks,id',
+            'product.*.owner_stock_id' => 'required_if:type,outlet_ke_gudang|exists:owner_stocks,id',
         ];
 
         if ($type === 'gudang_ke_supplier') {
@@ -214,7 +216,7 @@ class RefundPembelianController extends Controller
                     StockMovement::create([
                         'product_id'     => $product['product_id'],
                         'user_id'        => auth()->id(),
-                        'type'           => 'retur_ke_supplier',
+                        'type'           => 'out',
                         'reference_type' => RefundPembelian::class,
                         'reference_id'   => $refundPembelian->id,
                         'qty_in'         => 0,
@@ -234,16 +236,34 @@ class RefundPembelianController extends Controller
                     ]);
                 } else {
                     // ── Outlet ke Gudang ─────────────────────────────────────────
-                    $stock      = Stock::findOrFail($product['stock_id']);
-                    $ownerStock = $stock->ownerStock;
+                    $ownerStock = OwnerStock::with('stock')
+                        ->whereKey($product['owner_stock_id'] ?? null)
+                        ->where('owner_id', $request->outlet_id)
+                        ->lockForUpdate()
+                        ->first();
+                    $stock = $ownerStock?->stock;
 
-                    if (! $ownerStock || $ownerStock->qty < $product['qty']) {
-                        throw new \Exception("Stok outlet tidak mencukupi untuk: {$stock->product->name}");
+                    if (! $ownerStock || ! $stock || $ownerStock->qty < $product['qty']) {
+                        throw new \Exception('Stok outlet tidak mencukupi.');
                     }
 
                     // Reduce outlet stock
                     $ownerStock->qty -= $product['qty'];
                     $ownerStock->save();
+
+                    StockMovement::create([
+                        'product_id'     => $ownerStock->product_id,
+                        'owner_id'       => $ownerStock->owner_id,
+                        'owner_stock_id' => $ownerStock->id,
+                        'user_id'        => auth()->id(),
+                        'type'           => 'out',
+                        'reference_type' => RefundPembelian::class,
+                        'reference_id'   => $refundPembelian->id,
+                        'qty_in'         => 0,
+                        'qty_out'        => $product['qty'],
+                        'balance'        => $ownerStock->qty,
+                        'notes'          => "Retur outlet ke gudang - {$refundPembelian->code} - SKU: {$ownerStock->sku} - Alasan: {$product['alasan']}",
+                    ]);
 
                     // Restore warehouse stock
                     $stock->qty += $product['qty'];
@@ -252,13 +272,13 @@ class RefundPembelianController extends Controller
                     StockMovement::create([
                         'product_id'     => $product['product_id'],
                         'user_id'        => auth()->id(),
-                        'type'           => 'retur_dari_outlet',
+                        'type'           => 'in',
                         'reference_type' => RefundPembelian::class,
                         'reference_id'   => $refundPembelian->id,
                         'qty_in'         => $product['qty'],
                         'qty_out'        => 0,
                         'balance'        => $stock->qty,
-                        'notes'          => "Retur outlet ke gudang - {$refundPembelian->code} - SKU: {$stock->sku} - Alasan: {$product['alasan']}",
+                        'notes'          => "Penerimaan retur dari outlet - {$refundPembelian->code} - SKU: {$stock->sku} - Alasan: {$product['alasan']}",
                     ]);
 
                     RefundPembelianItem::create([
@@ -419,7 +439,7 @@ class RefundPembelianController extends Controller
                 StockMovement::create([
                     'product_id'     => $item->product_id,
                     'user_id'        => auth()->id(),
-                    'type'           => 'penerimaan_retur',
+                    'type'           => 'in',
                     'reference_type' => RefundPembelian::class,
                     'reference_id'   => $refundPembelian->id,
                     'qty_in'         => $item->qty,

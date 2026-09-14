@@ -20,20 +20,24 @@ class PromotionRequest extends FormRequest
             'name' => 'required|string|max:255',
             'code' => ['nullable', 'string', 'max:100', Rule::unique('promotions', 'code')->ignore($this->route('promotion'))],
             'type' => ['required', Rule::in(['flash_sale', 'bundle'])],
-            'discount_type' => ['required', Rule::in(['percentage', 'nominal', 'fixed_price'])],
-            'discount_value' => 'required|numeric|min:0',
+            'discount_type' => ['nullable', Rule::in(['percentage', 'nominal'])],
+            'discount_value' => 'nullable|numeric|min:0',
             'bundle_price' => 'nullable|numeric|min:0',
             'max_qty' => 'nullable|integer|min:1',
             'quota_qty' => 'nullable|integer|min:1',
             'min_purchase' => 'nullable|numeric|min:0',
             'outlet_id' => 'nullable|integer|exists:outlets,id',
+            'outlet_ids' => 'nullable|array',
+            'outlet_ids.*' => 'integer|exists:outlets,id',
             'daterange' => 'nullable|string',
-            'priority' => 'nullable|integer|min:0|max:9999',
             'is_active' => 'nullable|boolean',
             'stackable' => 'nullable|boolean',
             'desc' => 'nullable|string',
             'products' => 'required|array|min:1',
             'products.*' => 'numeric|min:0.01',
+            'bonuses' => 'nullable|array',
+            'bonuses.*.name' => 'required|string|max:255',
+            'bonuses.*.qty' => 'required|integer|min:1|max:999999',
         ];
     }
 
@@ -57,8 +61,10 @@ class PromotionRequest extends FormRequest
                 && (float) $this->input('discount_value', 0) > 100) {
                 $validator->errors()->add('discount_value', 'Nilai percentage maksimal 100%.');
             }
-            if ($this->input('type') === 'bundle' && $this->input('bundle_price') === null) {
-                $validator->errors()->add('bundle_price', 'Potongan bundle wajib diisi untuk promo bundling.');
+            if ($this->input('type') === 'bundle'
+                && (float) $this->input('bundle_price', 0) <= 0
+                && empty($this->input('bonuses', []))) {
+                $validator->errors()->add('bundle_price', 'Isi potongan bundle atau tambahkan minimal satu barang bonus.');
             }
         });
     }

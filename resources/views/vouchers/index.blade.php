@@ -26,6 +26,7 @@
                                     <td>Nama</td>
                                     <td>Kode</td>
                                     <td>Outlet</td>
+                                    <td>Product scope</td>
                                     <td>Tipe / Nilai</td>
                                     <td>Status</td>
                                     <td>Aksi</td>
@@ -36,7 +37,8 @@
                                     <td>{{ $loop->iteration }}</td>
                                     <td>{{ $value->name }}</td>
                                     <td>{{ $value->code }}</td>
-                                    <td>{{ $value->outlet?->name ?? 'Semua outlet' }}</td>
+                                    <td>{{ $value->outlets->isNotEmpty() ? $value->outlets->pluck('name')->join(', ') : ($value->outlet?->name ?? 'All outlets') }}</td>
+                                    <td>{{ $value->products->isNotEmpty() ? $value->products->pluck('name')->join(', ') : ($value->product?->name ?? 'All products') }}<br><small>Min. @currency($value->min_purchase)</small></td>
                                     <td>
                                         @if ($value->type == 'percentage')
                                             {{ $value->value }}%
@@ -44,7 +46,7 @@
                                             @currency($value->value)
                                         @endif
                                     </td>
-                                    <td>{{ $value->redemptions_count ? 'Sudah digunakan' : ($value->isActive() ? 'Tersedia' : 'Tidak aktif') }}</td>
+                                    <td>{{ $value->redemptions_count ? 'Used' : ($value->isActive() ? 'Available' : 'Inactive') }}</td>
                                     <td>
                                         <a class="btn btn-warning" href="{{ route('voucher.edit', $value->id) }}">Edit</a>
                                         <a class="btn btn-info" href="{{ route('voucher.show', $value->id) }}">Lihat</a>

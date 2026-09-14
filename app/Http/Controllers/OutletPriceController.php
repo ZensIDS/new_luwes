@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\OutletPriceRequest;
 use App\Models\OutletPrice;
+use App\Models\OwnerStock;
 use App\Models\Product;
 use App\Support\OutletAccess;
 use Illuminate\Http\Request;
@@ -34,6 +35,8 @@ class OutletPriceController extends Controller
         return view('outlet-prices.form', [
             'price' => new OutletPrice([
                 'disc_brand_type' => 'nominal',
+                'disc_tambahan_type' => 'nominal',
+                'disc_tambahan_value' => 0,
                 'margin_type' => 'percentage',
                 'disc_toko_type' => 'nominal',
                 'is_active' => true,
@@ -42,6 +45,7 @@ class OutletPriceController extends Controller
             'products' => Product::orderBy('name')->get(['id', 'code', 'name']),
             'method' => 'POST',
             'action' => route('outlet-prices.store'),
+            'previewHpp' => null,
         ]);
     }
 
@@ -73,7 +77,28 @@ class OutletPriceController extends Controller
             'products' => Product::orderBy('name')->get(['id', 'code', 'name']),
             'method' => 'PUT',
             'action' => route('outlet-prices.update', $outletPrice),
+            'previewHpp' => OwnerStock::where('owner_id', $outletPrice->outlet_id)
+                ->where('product_id', $outletPrice->product_id)
+                ->latest('created_at')
+                ->value('hpp') ?? Product::find($outletPrice->product_id)?->harga_beli,
         ]);
+    }
+
+    public function previewHpp(Request $request)
+    {
+        $this->ensureManagementAccess();
+        $request->validate([
+            'outlet_id' => 'required|integer|exists:outlets,id',
+            'product_id' => 'required|integer|exists:products,id',
+        ]);
+
+        $product = Product::findOrFail($request->product_id);
+        $hpp = OwnerStock::where('owner_id', $request->outlet_id)
+            ->where('product_id', $request->product_id)
+            ->latest('created_at')
+            ->value('hpp');
+
+        return response()->json(['hpp' => (float) ($hpp ?? $product->harga_beli ?? 0)]);
     }
 
     public function update(OutletPriceRequest $request, OutletPrice $outletPrice)

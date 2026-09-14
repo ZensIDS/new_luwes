@@ -63,6 +63,16 @@ class Promotion extends Model
         return $this->belongsTo(Outlet::class);
     }
 
+    public function outlets()
+    {
+        return $this->belongsToMany(Outlet::class, 'promotion_outlets');
+    }
+
+    public function bonuses()
+    {
+        return $this->hasMany(PromotionBonus::class);
+    }
+
     public function creator()
     {
         return $this->belongsTo(User::class, 'created_by');
@@ -90,7 +100,10 @@ class Promotion extends Model
         return $query
             ->where('is_active', true)
             ->where(function (Builder $scope) use ($outletId) {
-                $scope->whereNull('outlet_id')->orWhere('outlet_id', $outletId);
+                $scope->where(function (Builder $legacy) use ($outletId) {
+                    $legacy->whereNull('outlet_id')->orWhere('outlet_id', $outletId);
+                })->whereDoesntHave('outlets')
+                    ->orWhereHas('outlets', fn (Builder $outlets) => $outlets->whereKey($outletId));
             })
             ->where(function (Builder $scope) use ($at) {
                 $scope->whereNull('start_at')->orWhere('start_at', '<=', $at);
@@ -101,7 +114,6 @@ class Promotion extends Model
             ->where(function (Builder $scope) {
                 $scope->whereNull('quota_qty')->orWhereColumn('used_qty', '<', 'quota_qty');
             })
-            ->orderBy('priority')
             ->orderBy('id');
     }
 }

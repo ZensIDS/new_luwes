@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Exports\StockOpnameTemplateExport;
 use App\Models\Product;
+use App\Models\OwnerStock;
 use App\Models\RefundPembelian;
 use App\Models\RefundPembelianItem;
 use App\Models\Stock;
@@ -29,9 +30,20 @@ class StockController extends Controller
             ->orderBy('lokasi')
             ->pluck('lokasi');
 
+        $supplierOptions = \App\Models\Supplier::whereHas('pembelians.stocks')
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
+        $statusOptions = Stock::whereNotNull('status')
+            ->distinct()
+            ->orderBy('status')
+            ->pluck('status');
+
         return view('stocks.index', [
             'kategoriOptions' => $kategoriOptions,
             'lokasiOptions'   => $lokasiOptions,
+            'supplierOptions' => $supplierOptions,
+            'statusOptions'   => $statusOptions,
         ]);
     }
 
@@ -44,6 +56,8 @@ class StockController extends Controller
         $searchValue = trim((string) ($request->input('search.value', '')));
         $kategori    = $request->input('kategori');
         $lokasi      = $request->input('lokasi');
+        $supplier    = $request->input('supplier_id');
+        $status      = $request->input('status');
 
         $orderColIndex = (int) $request->input('order.0.column', 3);
         $orderDir      = strtolower($request->input('order.0.dir', 'asc')) === 'desc' ? 'desc' : 'asc';
@@ -97,6 +111,14 @@ class StockController extends Controller
 
         if ($lokasi) {
             $base->where('products.lokasi', $lokasi);
+        }
+
+        if ($supplier) {
+            $base->where('pembelians.supplier_id', $supplier);
+        }
+
+        if ($status) {
+            $base->where('s.status', $status);
         }
 
         // ==== SEARCH: meniru "smart search" DataTables, tapi tetap ringan ====
@@ -169,13 +191,14 @@ class StockController extends Controller
 
         // Data yang belum ikut di-join di atas (ownerStock.owner):
         // ambil terpisah, tapi HANYA untuk baris di halaman ini (max 100 row), bukan semua data.
-        $stockIds = $rows->pluck('stock_id')->all();
-
-        $ownerStockMap = Stock::whereIn('id', $stockIds)
-            ->with('ownerStock.owner')
-            ->get()
-            ->keyBy('id')
-            ->map(fn($s) => $s->ownerStock?->qty ?? 0);
+        $ownerStockMap = OwnerStock::whereIn('product_id', $rows->pluck('product_id'))
+            ->where('qty', '>', 0)
+            ->where(function ($query) {
+                $query->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+            })
+            ->selectRaw('product_id, SUM(qty) as total_qty')
+            ->groupBy('product_id')
+            ->pluck('total_qty', 'product_id');
 
         $pembelianIds = $rows->pluck('pembelian_id')->filter()->unique()->all();
         $supplierMap = \App\Models\Pembelian::whereIn('id', $pembelianIds)
@@ -201,7 +224,7 @@ class StockController extends Controller
                 return "{$qty} {$satuan}";
             };
 
-            $stockOutlet = $ownerStockMap->get($row->stock_id, 0);
+            $stockOutlet = $ownerStockMap->get($row->product_id, 0);
 
             return [
                 'product_id'     => $row->product_id,
@@ -284,6 +307,8 @@ class StockController extends Controller
             });
 
         $movements = StockMovement::where('product_id', $stock->product_id)
+            ->whereNull('owner_id')
+            ->with('user')
             ->orderBy('created_at', 'asc')
             ->get()
             ->map(function ($movement) {
@@ -305,17 +330,42 @@ class StockController extends Controller
     //kartu
     public function kartu(Request $request)
     {
-        return view('stocks.kartu');
+        $kategoriOptions = \App\Models\Category::orderBy('name')->pluck('name');
+        $lokasiOptions = Product::whereNotNull('lokasi')
+            ->where('lokasi', '!=', '')
+            ->distinct()
+            ->orderBy('lokasi')
+            ->pluck('lokasi');
+        $supplierOptions = \App\Models\Supplier::whereHas('pembelians.stocks', fn ($query) => $query->whereNotNull('sku'))
+            ->orderBy('name')
+            ->get(['id', 'name']);
+
+        return view('stocks.kartu', compact('kategoriOptions', 'lokasiOptions', 'supplierOptions'));
     }
 
     public function searchStock(Request $request)
     {
         $search = trim((string) $request->get('q', ''));
+        $kategori = $request->get('kategori');
+        $lokasi = $request->get('lokasi');
+        $supplier = $request->get('supplier_id');
         $page = max((int) $request->get('page', 1), 1);
         $perPage = 20;
 
         $query = Product::query()
             ->whereHas('stocks', fn($q) => $q->whereNotNull('sku'));
+
+        if ($kategori) {
+            $query->whereHas('category', fn ($q) => $q->where('name', $kategori));
+        }
+
+        if ($lokasi) {
+            $query->where('lokasi', $lokasi);
+        }
+
+        if ($supplier) {
+            $query->whereHas('stocks.pembelian', fn ($q) => $q->where('supplier_id', $supplier));
+        }
 
         if ($search !== '') {
             $query->where(function ($q) use ($search) {
@@ -393,6 +443,7 @@ class StockController extends Controller
 
         foreach ($stocks as $stock) {
             $movements = StockMovement::where('product_id', $product->id)
+                ->whereNull('owner_id')
                 ->where(function ($q) use ($stock) {
                     $q->where('notes', 'like', "%SKU: {$stock->sku}%")
                         ->orWhere(function ($q2) use ($stock) {
@@ -557,6 +608,7 @@ class StockController extends Controller
     //opname
     public function opname(Request $request)
     {
+        $kategoriOptions = \App\Models\Category::orderBy('name')->pluck('name');
         $lokasiOptions = Product::whereNotNull('lokasi')
             ->where('lokasi', '!=', '')
             ->distinct()
@@ -568,6 +620,7 @@ class StockController extends Controller
             ->get(['id', 'name']);
 
         return view('stocks.opname', [
+            'kategoriOptions' => $kategoriOptions,
             'lokasiOptions'   => $lokasiOptions,
             'supplierOptions' => $supplierOptions,
         ]);
@@ -576,7 +629,9 @@ class StockController extends Controller
     public function getOpnameData(Request $request)
     {
         $request->validate([
-            'supplier_id' => 'required|integer|exists:suppliers,id',
+            'supplier_id' => 'nullable|integer|exists:suppliers,id',
+            'kategori' => 'nullable|string',
+            'lokasi' => 'nullable|string',
         ]);
 
         $query = Stock::with('product', 'pembelian.supplier')
@@ -585,10 +640,16 @@ class StockController extends Controller
             ->orderBy('product_id')
             ->orderBy('sku');
 
-        $query->whereHas('pembelian', fn($q) => $q->where('supplier_id', $request->input('supplier_id')));
+        if ($supplierId = $request->input('supplier_id')) {
+            $query->whereHas('pembelian', fn($q) => $q->where('supplier_id', $supplierId));
+        }
 
         if ($lokasi = $request->input('lokasi')) {
             $query->whereHas('product', fn($q) => $q->where('lokasi', $lokasi));
+        }
+
+        if ($kategori = $request->input('kategori')) {
+            $query->whereHas('product.category', fn($q) => $q->where('name', $kategori));
         }
 
         $stocks = $query->get()
@@ -606,6 +667,8 @@ class StockController extends Controller
                     'qty_available' => $stock->qty_available,
                     'keterangan'    => $stock->adjustment?->keterangan ?? '',
                     'supplier'      => $stock->pembelian?->supplier?->name ?? '-',
+                    'kategori'      => $stock->product->category?->name ?? '-',
+                    'lokasi'        => $stock->product->lokasi ?? '-',
                 ];
             });
 
@@ -731,6 +794,10 @@ class StockController extends Controller
 
         if ($supplierId = $request->input('supplier_id')) {
             $query->whereHas('pembelian', fn($q) => $q->where('supplier_id', $supplierId));
+        }
+
+        if ($kategori = $request->input('kategori')) {
+            $query->whereHas('product.category', fn($q) => $q->where('name', $kategori));
         }
 
         // Konversi ke collection Stock-like agar kompatibel dengan StockOpnameTemplateExport

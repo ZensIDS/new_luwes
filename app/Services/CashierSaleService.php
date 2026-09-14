@@ -35,7 +35,7 @@ class CashierSaleService
         }
 
         return DB::transaction(function () use ($user, $data, $cart, $outletId) {
-            $rules = OutletPrice::where('outlet_id', $outletId)
+            $rules = OutletPrice::with('outlet')->where('outlet_id', $outletId)
                 ->currentlyActive()
                 ->get()
                 ->keyBy('product_id');
@@ -108,8 +108,7 @@ class CashierSaleService
             foreach ($vouchers as $voucher) {
                 $eligibleIndexes = collect($allocations)
                     ->keys()
-                    ->filter(fn ($index) => $voucher->product_id === null
-                        || (int) $allocations[$index]['product']->id === (int) $voucher->product_id)
+                    ->filter(fn ($index) => $voucher->appliesToProduct((int) $allocations[$index]['product']->id))
                     ->filter(fn ($index) => $lineBalances[$index] > 0)
                     ->values()
                     ->all();
@@ -252,9 +251,13 @@ class CashierSaleService
             return collect();
         }
 
-        $vouchers = Voucher::whereIn('code', $codes)
+        $vouchers = Voucher::with(['products', 'outlets'])
+            ->whereIn('code', $codes)
             ->where(function ($query) use ($outletId) {
-                $query->whereNull('outlet_id')->orWhere('outlet_id', $outletId);
+                $query->where(function ($legacy) use ($outletId) {
+                    $legacy->whereNull('outlet_id')->orWhere('outlet_id', $outletId);
+                })->whereDoesntHave('outlets')
+                    ->orWhereHas('outlets', fn ($outlets) => $outlets->whereKey($outletId));
             })
             ->lockForUpdate()
             ->get()

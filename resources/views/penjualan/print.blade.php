@@ -7,9 +7,11 @@
     <meta http-equiv="X-UA-Compatible" content="ie=edge">
     <title>Sale No : {{ $penjualan->code }}</title>
 </head>
+@php($paperWidth = request('paper') === '80' ? '80mm' : '58mm')
 <style type="text/css" media="all">
     body {
-        max-width: 400px;
+        width: {{ $paperWidth }};
+        max-width: {{ $paperWidth }};
         margin: 0 auto;
         text-align: center;
         color: #000;
@@ -75,6 +77,7 @@
     }
 
     @media print {
+        @page { size: {{ $paperWidth }} auto; margin: 0; }
         body {
             text-transform: uppercase;
         }
@@ -84,7 +87,7 @@
         }
 
         #wrapper {
-            width: 100%;
+            width: {{ $paperWidth }};
             margin: 0;
             font-size: 9px;
         }
@@ -260,11 +263,23 @@
     <div id="bkpos_wrp">
         <button type="button" onClick="window.print();return false;"
             style="width:101%; cursor:pointer; font-size:12px; background-color:#FFA93C; color:#000; text-align: center; border:1px solid #FFA93C; padding: 10px 0px; font-weight:bold;">
-            Print Small
+            Print 58mm
         </button>
+        <a href="{{ route('penjualan.print', [$penjualan, 'paper' => '80']) }}" style="display:block; margin-top:5px; font-size:12px;">Print 80mm</a>
     </div>
 
     </div>
 </body>
+
+@if (request('auto'))
+<script>
+window.addEventListener('load', function () {
+    setTimeout(function () { window.print(); }, 250);
+});
+window.addEventListener('afterprint', function () {
+    window.location.href = @json(route('outlet.show', $penjualan->outlet_id));
+});
+</script>
+@endif
 
 </html>

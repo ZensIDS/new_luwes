@@ -57,9 +57,11 @@ const describePromotion = (promotion, selectedProducts = []) => {
 
     if (normalizedType(promotion.type) === "bundle") {
         const discount = bundleDiscountAmount(promotion, selectedProducts);
+        const bonuses = (promotion.bonuses || []).map((bonus) => `${bonus.qty}x ${bonus.name}`).join(", ");
+        const bonusText = bonuses ? ` — bonus: ${bonuses}` : "";
         return discount === null
-            ? `${products || "Produk pilihan"} — potongan bundle ${money(configuredBundleDiscount(promotion))}`
-            : `${products || "Produk pilihan"} — hemat ${money(discount)}`;
+            ? `${products || "Qualifying products"} — save ${money(configuredBundleDiscount(promotion))}${bonusText}`
+            : `${products || "Qualifying products"} — save ${money(discount)}${bonusText}`;
     }
 
     const discount = normalizedType(promotion.discount_type) === "percentage"
@@ -100,7 +102,7 @@ const AppliedDiscountTable = forwardRef(({ promotions, vouchers, appliedPromotio
             kind: "Promo",
             code: promotion.code,
             detail: `${promotion.name} — ${describePromotion(promotion, selectedProducts)}`,
-            status: appliedPromotionNames.includes(promotion.name) ? "Berlaku" : "Menunggu syarat",
+            status: appliedPromotionNames.includes(promotion.name) ? "Ready" : "Waiting for qualifying items",
             remove: () => onRemovePromotion(promotion.code),
         })),
         ...vouchers.map((voucher) => ({
@@ -108,7 +110,9 @@ const AppliedDiscountTable = forwardRef(({ promotions, vouchers, appliedPromotio
             kind: "Voucher",
             code: voucher.code,
             detail: `${voucher.name || "Voucher"} — ${describeVoucher(voucher)}`,
-            status: "Dipilih",
+            status: Number(voucher.min_purchase || 0) > selectedProducts.reduce((sum, item) => sum + Number(item.baseSubtotal || 0), 0)
+                ? `Minimum ${money(voucher.min_purchase)} not reached`
+                : "Ready",
             remove: () => onRemoveVoucher(voucher.code),
         })),
     ];
@@ -204,41 +208,21 @@ const Vouchers = ({
     promotionTableRef,
 }) => {
     const selectRef = useRef(null);
-    const [availableVouchers, setAvailableVouchers] = useState([]);
+    const voucherCodeRef = useRef(null);
     const [availablePromotions, setAvailablePromotions] = useState([]);
     const [error, setError] = useState("");
     const [info, setInfo] = useState("");
 
-    const eligiblePromotions = availablePromotions.filter((promotion) => promotionMatchesCart(promotion, selectedProducts));
-    const options = [
-        availableVouchers.length > 0 && {
-            label: "Voucher yang tersedia",
-            options: availableVouchers.map((voucher) => ({
-                value: voucher.code,
-                label: `${voucher.code} — ${describeVoucher(voucher)}`,
-                kind: "voucher",
-                item: voucher,
-            })),
-        },
-        eligiblePromotions.length > 0 && {
-            label: "Flash sale & bundling untuk item terpilih",
-            options: eligiblePromotions.map((promotion) => ({
-                value: promotion.code,
-                label: `${promotion.code} — ${promotion.name} — ${describePromotion(promotion, selectedProducts)}`,
-                kind: "promotion",
-                item: promotion,
-            })),
-        },
-    ].filter(Boolean);
-
+    const cartBase = selectedProducts.reduce((sum, item) => sum + Number(item.baseSubtotal || 0), 0);
+    const eligiblePromotions = availablePromotions.filter((promotion) => promotionMatchesCart(promotion, selectedProducts)
+        && cartBase >= Number(promotion.min_purchase || 0));
     useImperativeHandle(inputRef, () => ({
-        focus: () => selectRef.current?.focus(),
+        focus: () => voucherCodeRef.current?.focus(),
     }), []);
 
     useEffect(() => {
         axios.get("/voucher/options?outlet_id=" + encodeURIComponent(outletId || ""))
             .then((response) => {
-                setAvailableVouchers(response.data.vouchers || []);
                 setAvailablePromotions(response.data.promotions || []);
             })
             .catch(() => setError("Daftar voucher dan promo tidak dapat dimuat."));
@@ -284,43 +268,38 @@ const Vouchers = ({
 
     return (
         <div className="form-group" style={{ marginTop: 12 }}>
-            <label style={{ marginBottom: 5 }}>
-                Voucher / Flash Sale <small>(F8)</small>
-            </label>
+            <label style={{ marginBottom: 5 }}>Voucher barcode <small>(F8 · scan only)</small></label>
+            <div className="input-group">
+                <input ref={voucherCodeRef} type="text" className="form-control" placeholder="Scan voucher barcode and press Enter" onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); lookupCode(event.currentTarget.value); event.currentTarget.value = ""; } }} />
+                <span className="input-group-btn"><button type="button" className="btn btn-primary" onClick={() => { const value = voucherCodeRef.current?.value || ""; lookupCode(value); if (voucherCodeRef.current) voucherCodeRef.current.value = ""; }}>Apply</button></span>
+            </div>
+            <small className="text-muted">Voucher is separate from Rafaksi and bundle promotions. Scan the voucher code to apply it.</small>
+
+            <label style={{ marginTop: 14, marginBottom: 5 }}>Active promotions</label>
+            <div className="well well-sm" style={{ marginBottom: 6 }}>
+                {eligiblePromotions.length === 0 && <span className="text-muted">Add qualifying products to see selectable promotions.</span>}
+                {eligiblePromotions.map((promotion) => <button type="button" key={`choose-${promotion.code}`} className="btn btn-warning btn-sm" style={{ margin: 3 }} onClick={() => { onAddPromotion(promotion); setInfo(`Promotion ${promotion.code} selected.`); }}><i className="fa fa-check"></i> {promotion.name}</button>)}
+            </div>
             <CreatableSelect
                 ref={selectRef}
-                options={options}
+                options={eligiblePromotions.length ? [{ label: "Select another promotion", options: eligiblePromotions.map((promotion) => ({ value: promotion.code, label: `${promotion.code} — ${promotion.name} — ${describePromotion(promotion, selectedProducts)}`, kind: "promotion", item: promotion })) }] : []}
                 value={null}
                 onChange={handleChange}
                 onCreateOption={lookupCode}
                 isClearable
                 isSearchable
-                formatCreateLabel={(value) => `Pakai kode “${value}”`}
-                placeholder="Pilih voucher/promo atau ketik kode lalu Enter"
+                formatCreateLabel={(value) => `Use promotion code “${value}”`}
+                placeholder="Optional: type a promotion code"
                 styles={{
                     ...selectStyles,
                     control: (base, state) => ({ ...selectStyles.control(base, state), minHeight: 42, fontSize: 14 }),
                 }}
                 menuPortalTarget={document.body}
                 menuPosition="fixed"
-                noOptionsMessage={() => "Tidak ada promo yang sesuai item terpilih"}
+                noOptionsMessage={() => "No qualifying promotion found"}
             />
-            <small className="text-muted">Promo hanya ditampilkan jika produk dan quantity di keranjang memenuhi target. Voucher tetap bisa diketik lalu Enter.</small>
             {error && <div><small className="text-danger">{error}</small></div>}
             {info && <div><small className="text-success">{info}</small></div>}
-
-            {eligiblePromotions.length > 0 && (
-                <div className="well well-sm" style={{ marginTop: 8, marginBottom: 6, padding: 8 }}>
-                    <strong><i className="fa fa-bolt text-yellow"></i> Promo aktif untuk item terpilih:</strong>
-                    <ul style={{ margin: "4px 0 0 18px", padding: 0 }}>
-                        {eligiblePromotions.map((promotion) => (
-                            <li key={`active-${promotion.code}`}>
-                                <strong>{promotion.code}</strong> — {promotion.name}: {describePromotion(promotion, selectedProducts)}
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            )}
 
             <AppliedDiscountTable
                 ref={promotionTableRef}

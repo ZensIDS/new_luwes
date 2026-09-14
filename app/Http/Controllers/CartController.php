@@ -55,7 +55,7 @@ class CartController extends Controller
                     ])
                     ->toArray();
             }
-            $rule = OutletPrice::where('outlet_id', $outletId)
+            $rule = OutletPrice::with('outlet')->where('outlet_id', $outletId)
                 ->where('product_id', $item->id)
                 ->currentlyActive()
                 ->first();

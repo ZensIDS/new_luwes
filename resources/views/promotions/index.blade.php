@@ -35,16 +35,16 @@
                                 @if ($promotion->code)<br><small>{{ $promotion->code }}</small>@endif
                             </td>
                             <td>
-                                {{ $promotion->type === 'flash_sale' ? 'Flash sale' : 'Bundling' }}
+                                {{ $promotion->type === 'flash_sale' ? 'Rafaksi' : 'Bundle / bonus' }}
                                 @if ($promotion->type === 'flash_sale')
                                     <br><small>{{ $promotion->discount_type === 'percentage' ? $promotion->discount_value.'%' : ($promotion->discount_type === 'fixed_price' ? 'Harga Rp'.number_format($promotion->discount_value, 0, ',', '.') : '-Rp'.number_format($promotion->discount_value, 0, ',', '.')) }}</small>
                                 @else
-                                    <br><small>Potongan bundle Rp{{ number_format($promotion->bundle_price, 0, ',', '.') }}</small>
+                                    <br><small>{{ $promotion->bundle_price > 0 ? 'Hemat Rp'.number_format($promotion->bundle_price, 0, ',', '.') : 'Bonus: '.$promotion->bonuses->pluck('name')->join(', ') }}</small>
                                 @endif
                             </td>
                             <td>{{ $promotion->products->pluck('name')->join(', ') }}</td>
                             <td>{{ $promotion->start_at?->format('d/m/Y H:i') ?? '-' }}<br>{{ $promotion->end_at?->format('d/m/Y H:i') ?? '-' }}</td>
-                            <td>{{ $promotion->outlet?->name ?? 'Semua outlet' }}</td>
+                            <td>{{ $promotion->outlets->isNotEmpty() ? $promotion->outlets->pluck('name')->join(', ') : ($promotion->outlet?->name ?? 'All outlets') }}</td>
                             <td>{{ $status }}<br><small>Terpakai: {{ $promotion->used_qty }}{{ $promotion->quota_qty ? '/'.$promotion->quota_qty : '' }}</small></td>
                             <td class="text-nowrap">
                                 <a class="btn btn-warning btn-sm" href="{{ route('promotion.edit', $promotion) }}">Edit</a>

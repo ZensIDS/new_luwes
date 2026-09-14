@@ -20,10 +20,12 @@ class OutletPriceRequest extends FormRequest
             'product_id' => 'required|exists:products,id',
             'disc_brand_type' => ['required', Rule::in(['nominal', 'percentage'])],
             'disc_brand_value' => 'required|numeric|min:0',
+            'disc_tambahan_type' => ['nullable', Rule::in(['nominal', 'percentage'])],
+            'disc_tambahan_value' => 'nullable|numeric|min:0',
             'margin_type' => ['required', Rule::in(['nominal', 'percentage'])],
             'margin_value' => 'required|numeric|min:0',
-            'disc_toko_type' => ['required', Rule::in(['nominal', 'percentage'])],
-            'disc_toko_value' => 'required|numeric|min:0',
+            'disc_toko_type' => ['nullable', Rule::in(['nominal', 'percentage'])],
+            'disc_toko_value' => 'nullable|numeric|min:0',
             'effective_from' => 'nullable|date',
             'effective_until' => 'nullable|date|after_or_equal:effective_from',
             'is_active' => 'nullable|boolean',
@@ -34,6 +36,7 @@ class OutletPriceRequest extends FormRequest
     {
         $this->merge([
             'disc_brand_value' => IndonesianNumber::parse($this->input('disc_brand_value')),
+            'disc_tambahan_value' => IndonesianNumber::parse($this->input('disc_tambahan_value')),
             'margin_value' => IndonesianNumber::parse($this->input('margin_value')),
             'disc_toko_value' => IndonesianNumber::parse($this->input('disc_toko_value')),
         ]);

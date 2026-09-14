@@ -89,7 +89,7 @@ class PenjualanController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Pesanan berhasil dibuat.',
-                'redirect' => route('penjualan.show', $order),
+                'redirect' => route('penjualan.print', ['penjualan' => $order, 'paper' => '58', 'auto' => 1]),
                 'order' => $order,
             ], 201);
         } catch (Throwable $e) {

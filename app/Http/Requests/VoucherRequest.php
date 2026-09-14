@@ -16,15 +16,19 @@ class VoucherRequest extends FormRequest
     {
         return [
             'name' => 'required|string|max:255',
-            'code' => 'required|string|max:100',
+            'code' => 'nullable|string|max:100',
             'type' => 'required|in:nominal,percentage',
             'value' => 'required|numeric|min:0',
             'min_purchase' => 'nullable|numeric|min:0',
             'max_discount_amount' => 'nullable|numeric|min:0',
             'outlet_id' => 'nullable|integer|exists:outlets,id',
+            'outlet_ids' => 'nullable|array',
+            'outlet_ids.*' => 'integer|exists:outlets,id',
             'daterange' => 'nullable|string',
             'desc' => 'nullable|string',
             'product_id' => 'nullable|exists:products,id',
+            'product_ids' => 'nullable|array',
+            'product_ids.*' => 'integer|exists:products,id',
             'kasir_id' => 'nullable|exists:users,id',
             'quantity' => 'nullable|integer|min:1|max:500',
         ];

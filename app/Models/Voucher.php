@@ -44,6 +44,16 @@ class Voucher extends Model
         return $this->belongsTo(Outlet::class);
     }
 
+    public function outlets()
+    {
+        return $this->belongsToMany(Outlet::class, 'voucher_outlets');
+    }
+
+    public function products()
+    {
+        return $this->belongsToMany(Product::class, 'voucher_products');
+    }
+
     public function kasir()
     {
         return $this->belongsTo(User::class, 'kasir_id'); //user role kasir
@@ -64,5 +74,33 @@ class Voucher extends Model
         return (! $this->start_at || $this->start_at <= $at)
             && (! $this->end_at || $this->end_at >= $at)
             && $limitAvailable;
+    }
+
+    public function appliesToOutlet(?int $outletId): bool
+    {
+        if (! $outletId) {
+            return true;
+        }
+
+        if ($this->outlet_id && (int) $this->outlet_id === $outletId) {
+            return true;
+        }
+
+        return $this->outlet_id === null
+            && (! $this->relationLoaded('outlets') || $this->outlets->isEmpty() || $this->outlets->contains('id', $outletId));
+    }
+
+    public function appliesToProduct(?int $productId): bool
+    {
+        if (! $productId) {
+            return true;
+        }
+
+        if ($this->product_id && (int) $this->product_id === $productId) {
+            return true;
+        }
+
+        return $this->product_id === null
+            && (! $this->relationLoaded('products') || $this->products->isEmpty() || $this->products->contains('id', $productId));
     }
 }

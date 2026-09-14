@@ -13,7 +13,9 @@ class ProductResource extends JsonResource
         $ownerStocks = $this->relationLoaded('ownerStocks')
             ? $this->ownerStocks->where('qty', '>', 0)->values()
             : collect();
-        $isOutletContext = $this->relationLoaded('ownerStocks') && $ownerStocks->isNotEmpty();
+        // The relation being loaded is the context signal. An outlet with zero
+        // stock must return zero, not fall back to warehouse stock.
+        $isOutletContext = $this->relationLoaded('ownerStocks');
         $priceRule = $this->relationLoaded('outletPrices') ? $this->outletPrices->first() : null;
         $displayPrice = $this->harga_jual;
         if ($isOutletContext && $ownerStocks->first()) {
@@ -38,6 +40,8 @@ class ProductResource extends JsonResource
             'price_rule' => $priceRule ? [
                 'disc_brand_type' => $priceRule->disc_brand_type,
                 'disc_brand_value' => $priceRule->disc_brand_value,
+                'disc_tambahan_type' => $priceRule->disc_tambahan_type,
+                'disc_tambahan_value' => $priceRule->disc_tambahan_value,
                 'margin_type' => $priceRule->margin_type,
                 'margin_value' => $priceRule->margin_value,
                 'disc_toko_type' => $priceRule->disc_toko_type,

@@ -93,7 +93,7 @@ class ProductController extends Controller
                         if ($request->filled('outlet_id')) {
                             $query->where('outlet_id', $request->outlet_id);
                         }
-                        $query->currentlyActive();
+                        $query->with('outlet')->currentlyActive();
                     },
                 ])
                 ->latest()
@@ -102,9 +102,20 @@ class ProductController extends Controller
             return ProductResource::collection($products);
         }
 
+        $ownerStockScope = function ($query) use ($request) {
+            if ($request->filled('outlet_id')) {
+                $query->where('owner_id', $request->outlet_id);
+            }
+
+            $query->where('qty', '>', 0)
+                ->where(function ($expiryQuery) {
+                    $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                });
+        };
+
         $products = $products
             ->with('category:id,name')
-            ->withSum('ownerStocks as owner_stock_qty', 'qty')
+            ->withSum(['ownerStocks as owner_stock_qty' => $ownerStockScope], 'qty')
             ->withSum('stocks as reserved_stock_qty', 'qty_reserved')
             ->withSum('stocks as available_stock_qty', 'qty_available')
             ->withSum([

@@ -27,6 +27,9 @@ class PenjualanItem extends Model
         'disc_brand_type',
         'disc_brand_value',
         'disc_brand_amount',
+        'disc_tambahan_type',
+        'disc_tambahan_value',
+        'disc_tambahan_amount',
         'margin_type',
         'margin_value',
         'margin_amount',
@@ -34,6 +37,7 @@ class PenjualanItem extends Model
         'disc_toko_type',
         'disc_toko_value',
         'disc_toko_amount',
+        'outlet_surcharge',
     ];
 
     protected $casts = [
@@ -41,11 +45,14 @@ class PenjualanItem extends Model
         'harga_akhir' => 'float',
         'disc_brand_value' => 'float',
         'disc_brand_amount' => 'float',
+        'disc_tambahan_value' => 'float',
+        'disc_tambahan_amount' => 'float',
         'margin_value' => 'float',
         'margin_amount' => 'float',
         'harga_aktif' => 'float',
         'disc_toko_value' => 'float',
         'disc_toko_amount' => 'float',
+        'outlet_surcharge' => 'float',
         'base_price' => 'float',
         'base_subtotal' => 'float',
         'promotion_discount' => 'float',

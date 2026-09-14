@@ -22,6 +22,9 @@ class PriceCalculator
                 'disc_brand_type' => 'nominal',
                 'disc_brand_value' => 0,
                 'disc_brand_amount' => 0,
+                'disc_tambahan_type' => 'nominal',
+                'disc_tambahan_value' => 0,
+                'disc_tambahan_amount' => 0,
                 'margin_type' => 'nominal',
                 'margin_value' => $margin,
                 'margin_amount' => $margin,
@@ -35,11 +38,33 @@ class PriceCalculator
 
         $brandAmount = $this->discountAmount($hpp, $rule->disc_brand_type, $rule->disc_brand_value);
         $hargaAkhir = max(0, $hpp - $brandAmount);
+
+        // New price rules use the additional discount before margin. The
+        // legacy disc_toko fields are still supported for old rules so old
+        // price snapshots continue to calculate exactly as before.
+        $hasAdditionalDiscount = $rule->disc_tambahan_type !== null;
+        $additionalType = $hasAdditionalDiscount
+            ? $rule->disc_tambahan_type
+            : 'nominal';
+        $additionalValue = $hasAdditionalDiscount
+            ? (float) ($rule->disc_tambahan_value ?? 0)
+            : 0;
+        $additionalAmount = $hasAdditionalDiscount
+            ? $this->discountAmount($hargaAkhir, $additionalType, $additionalValue)
+            : 0;
+        $marginBase = max(0, $hargaAkhir - $additionalAmount);
         $marginAmount = $this->isPercentage($rule->margin_type)
-            ? $this->money($hargaAkhir * ((float) $rule->margin_value / 100))
+            ? $this->money($marginBase * ((float) $rule->margin_value / 100))
             : $this->money($rule->margin_value);
-        $hargaAktif = $this->money($hargaAkhir + $marginAmount);
-        $storeDiscount = $this->discountAmount($hargaAktif, $rule->disc_toko_type, $rule->disc_toko_value);
+        $hargaAktif = $this->money($marginBase + $marginAmount);
+
+        $legacyStoreDiscount = $hasAdditionalDiscount
+            ? 0
+            : $this->discountAmount($hargaAktif, $rule->disc_toko_type, $rule->disc_toko_value);
+        $beautySurcharge = $this->isBeautyOutlet($rule)
+            ? 100
+            : 0;
+        $hargaJual = $this->money($hargaAktif - $legacyStoreDiscount + $beautySurcharge);
 
         return [
             'hpp' => $hpp,
@@ -47,15 +72,25 @@ class PriceCalculator
             'disc_brand_type' => $rule->disc_brand_type,
             'disc_brand_value' => (float) $rule->disc_brand_value,
             'disc_brand_amount' => $brandAmount,
+            'disc_tambahan_type' => $additionalType,
+            'disc_tambahan_value' => $additionalValue,
+            'disc_tambahan_amount' => $additionalAmount,
             'margin_type' => $rule->margin_type,
             'margin_value' => (float) $rule->margin_value,
             'margin_amount' => $marginAmount,
             'harga_aktif' => $hargaAktif,
             'disc_toko_type' => $rule->disc_toko_type,
             'disc_toko_value' => (float) $rule->disc_toko_value,
-            'disc_toko_amount' => $storeDiscount,
-            'price' => max(0, $hargaAktif - $storeDiscount),
+            'disc_toko_amount' => $legacyStoreDiscount,
+            'outlet_surcharge' => $beautySurcharge,
+            'price' => max(0, $hargaJual),
         ];
+    }
+
+    private function isBeautyOutlet(OutletPrice $rule): bool
+    {
+        return $rule->relationLoaded('outlet')
+            && strtolower(trim((string) $rule->outlet?->jenis_outlet)) === 'beauty';
     }
 
     public function voucherAmount(Voucher $voucher, float $base): float

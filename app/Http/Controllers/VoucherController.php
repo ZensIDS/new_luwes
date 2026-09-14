@@ -18,7 +18,7 @@ class VoucherController extends Controller
     public function index(Request $request)
     {
         $this->ensureManagementAccess();
-        $query = Voucher::withCount('redemptions')->with('product')->latest();
+        $query = Voucher::withCount('redemptions')->with(['product', 'products', 'outlets'])->latest();
         if ($request->wantsJson()) {
             $vouchers = $query
                 ->whereDoesntHave('redemptions')
@@ -45,19 +45,23 @@ class VoucherController extends Controller
             'outlet_id' => 'nullable|integer|exists:outlets,id',
         ]);
         $outletId = $request->filled('outlet_id') ? OutletAccess::id($request, false) : null;
-        $voucher = Voucher::where('code', strtoupper(trim($request->code)))
+        $voucher = Voucher::with(['product', 'products', 'outlets'])
+            ->where('code', strtoupper(trim($request->code)))
             ->when($outletId, fn ($query) => $query->where(function ($scopeQuery) use ($outletId) {
-                $scopeQuery->whereNull('outlet_id')->orWhere('outlet_id', $outletId);
+                $scopeQuery->where(function ($legacy) use ($outletId) {
+                    $legacy->whereNull('outlet_id')->orWhere('outlet_id', $outletId);
+                })->whereDoesntHave('outlets')
+                    ->orWhereHas('outlets', fn ($outlets) => $outlets->whereKey($outletId));
             }))
             ->first();
 
         if (! $voucher || ! $voucher->isActive() || $voucher->redemptions()->exists()) {
-            $promotion = Promotion::with('promotionProducts.product')
-                ->where('code', strtoupper(trim($request->code)))
-                ->when($outletId, fn ($query) => $query->where(function ($scopeQuery) use ($outletId) {
-                    $scopeQuery->whereNull('outlet_id')->orWhere('outlet_id', $outletId);
-                }))
-                ->first();
+            $promotionQuery = Promotion::with(['promotionProducts.product', 'bonuses', 'outlets'])
+                ->where('code', strtoupper(trim($request->code)));
+            if ($outletId) {
+                $promotionQuery->activeFor($outletId);
+            }
+            $promotion = $promotionQuery->first();
 
             if ($promotion && $promotion->isActive()) {
                 return response()->json($this->promotionPayload($promotion));
@@ -74,10 +78,13 @@ class VoucherController extends Controller
         $outletId = OutletAccess::id($request, false);
         $now = now();
 
-        $vouchers = Voucher::with('product')
+        $vouchers = Voucher::with(['product', 'products', 'outlets'])
             ->whereDoesntHave('redemptions')
             ->when($outletId, fn ($query) => $query->where(function ($scopeQuery) use ($outletId) {
-                $scopeQuery->whereNull('outlet_id')->orWhere('outlet_id', $outletId);
+                $scopeQuery->where(function ($legacy) use ($outletId) {
+                    $legacy->whereNull('outlet_id')->orWhere('outlet_id', $outletId);
+                })->whereDoesntHave('outlets')
+                    ->orWhereHas('outlets', fn ($outlets) => $outlets->whereKey($outletId));
             }))
             ->where(function ($query) use ($now) {
                 $query->whereNull('start_at')->orWhere('start_at', '<=', $now);
@@ -93,7 +100,7 @@ class VoucherController extends Controller
             ->all();
 
         $promotions = $outletId
-            ? Promotion::with('promotionProducts.product')
+            ? Promotion::with(['promotionProducts.product', 'bonuses', 'outlets'])
                 ->activeFor($outletId, $now)
                 ->get()
                 ->map(fn (Promotion $promotion) => $this->promotionPayload($promotion))
@@ -123,7 +130,12 @@ class VoucherController extends Controller
     {
         $data = $request->validated();
         [$startAt, $endAt] = $this->parseDateRange($request->input('daterange'));
-        $baseCode = strtoupper(trim($data['code']));
+        $baseCode = strtoupper(trim((string) ($data['code'] ?? '')));
+        if ($baseCode === '') {
+            do {
+                $baseCode = 'VCR-' . now()->format('YmdHis') . '-' . strtoupper(bin2hex(random_bytes(2)));
+            } while (Voucher::where('code', $baseCode)->exists());
+        }
         $quantity = (int) ($data['quantity'] ?? 1);
         $codes = $this->generatedCodes($baseCode, $quantity);
 
@@ -133,7 +145,7 @@ class VoucherController extends Controller
 
         DB::transaction(function () use ($data, $codes, $startAt, $endAt) {
             foreach ($codes as $code) {
-                Voucher::create([
+                $voucher = Voucher::create([
                     'name' => $data['name'],
                     'code' => $code,
                     'type' => $data['type'],
@@ -145,10 +157,13 @@ class VoucherController extends Controller
                     'start_at' => $startAt,
                     'end_at' => $endAt,
                     'desc' => $data['desc'] ?? null,
-                    'product_id' => $data['product_id'] ?? null,
-                'kasir_id' => $data['kasir_id'] ?? null,
-                    'outlet_id' => $data['outlet_id'] ?? null,
+                    'product_id' => empty($data['product_ids']) ? ($data['product_id'] ?? null) : null,
+                    'kasir_id' => $data['kasir_id'] ?? null,
+                    'outlet_id' => empty($data['outlet_ids']) ? ($data['outlet_id'] ?? null) : null,
                 ]);
+
+                $voucher->products()->sync($data['product_ids'] ?? []);
+                $voucher->outlets()->sync($data['outlet_ids'] ?? []);
             }
         });
 
@@ -165,7 +180,7 @@ class VoucherController extends Controller
     {
         $this->ensureManagementAccess();
         return view('vouchers.form', [
-            'voucher' => $voucher,
+            'voucher' => $voucher->load(['products', 'outlets']),
             'kasirs' => User::where('role', 'kasir')->get(),
             'products' => Product::orderBy('name')->get(),
             'outlets' => OutletAccess::outlets(),
@@ -176,7 +191,7 @@ class VoucherController extends Controller
     public function update(VoucherRequest $request, Voucher $voucher)
     {
         $data = $request->validated();
-        $code = strtoupper(trim($data['code']));
+        $code = strtoupper(trim((string) ($data['code'] ?? $voucher->code)));
         if (Voucher::where('code', $code)->where('id', '!=', $voucher->id)->exists()) {
             throw ValidationException::withMessages(['code' => 'Kode voucher sudah digunakan.']);
         }
@@ -192,10 +207,13 @@ class VoucherController extends Controller
             'start_at' => $startAt,
             'end_at' => $endAt,
             'desc' => $data['desc'] ?? null,
-            'product_id' => $data['product_id'] ?? null,
+            'product_id' => empty($data['product_ids']) ? ($data['product_id'] ?? null) : null,
             'kasir_id' => $data['kasir_id'] ?? null,
-            'outlet_id' => $data['outlet_id'] ?? null,
+            'outlet_id' => empty($data['outlet_ids']) ? ($data['outlet_id'] ?? null) : null,
         ]);
+
+        $voucher->products()->sync($data['product_ids'] ?? []);
+        $voucher->outlets()->sync($data['outlet_ids'] ?? []);
 
         return redirect()->route('voucher.index')->with('toast_success', 'Voucher berhasil diperbarui.');
     }
@@ -254,6 +272,10 @@ class VoucherController extends Controller
             'outlet_id' => $voucher->outlet_id,
             'product_id' => $voucher->product_id,
             'product_name' => $voucher->product?->name,
+            'outlet_ids' => $voucher->outlets->pluck('id')->values()->all(),
+            'outlet_names' => $voucher->outlets->pluck('name')->values()->all(),
+            'product_ids' => $voucher->products->pluck('id')->values()->all(),
+            'product_names' => $voucher->products->pluck('name')->values()->all(),
             'start_at' => $voucher->start_at,
             'end_at' => $voucher->end_at,
         ];
@@ -282,6 +304,12 @@ class VoucherController extends Controller
                 'name' => $rule->product?->name,
                 'required_qty' => (float) $rule->required_qty,
             ])->values()->all(),
+            'bonuses' => $promotion->bonuses->map(fn ($bonus) => [
+                'name' => $bonus->name,
+                'qty' => (int) $bonus->qty,
+            ])->values()->all(),
+            'outlet_ids' => $promotion->outlets->pluck('id')->values()->all(),
+            'outlet_names' => $promotion->outlets->pluck('name')->values()->all(),
         ];
     }
 }

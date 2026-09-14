@@ -15,6 +15,8 @@ class OutletPrice extends Model
         'product_id',
         'disc_brand_type',
         'disc_brand_value',
+        'disc_tambahan_type',
+        'disc_tambahan_value',
         'margin_type',
         'margin_value',
         'disc_toko_type',
@@ -27,6 +29,7 @@ class OutletPrice extends Model
 
     protected $casts = [
         'disc_brand_value' => 'float',
+        'disc_tambahan_value' => 'float',
         'margin_value' => 'float',
         'disc_toko_value' => 'float',
         'effective_from' => 'date',

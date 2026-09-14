@@ -10,7 +10,7 @@ class PromotionService
 {
     public function activeForOutlet(int $outletId, ?Carbon $at = null, bool $lock = false): Collection
     {
-        $query = Promotion::with('promotionProducts.product')
+        $query = Promotion::with(['promotionProducts.product', 'bonuses', 'outlets'])
             ->activeFor($outletId, $at);
 
         if ($lock) {
@@ -51,7 +51,7 @@ class PromotionService
             return collect();
         }
 
-        $query = Promotion::with('promotionProducts.product')
+        $query = Promotion::with(['promotionProducts.product', 'bonuses', 'outlets'])
             ->activeFor($outletId, $at)
             ->whereIn('code', $codes->all());
 
@@ -75,7 +75,11 @@ class PromotionService
         unset($allocation);
 
         $applications = [];
+        $transactionBase = array_sum(array_column($allocations, 'base_line_total'));
         foreach ($promotions as $promotion) {
+            if ($promotion->min_purchase && $transactionBase < $this->money($promotion->min_purchase)) {
+                continue;
+            }
             // Keep a local availability map so a stackable promotion can be
             // applied after another promotion without reusing units twice
             // inside the same promotion.
@@ -83,10 +87,10 @@ class PromotionService
             $result = match ($this->normalizedType($promotion->type)) {
                 'flash_sale' => $this->applyFlashSale($allocations, $promotionAvailableQty, $promotion),
                 'bundle' => $this->applyBundle($allocations, $promotionAvailableQty, $promotion),
-                default => ['amount' => 0, 'basis' => 0, 'quantity' => 0, 'details' => []],
+                default => ['amount' => 0, 'basis' => 0, 'quantity' => 0, 'details' => [], 'eligible' => false],
             };
 
-            if ($result['amount'] <= 0) {
+            if ($result['amount'] <= 0 && ! ($result['eligible'] ?? false)) {
                 continue;
             }
 
@@ -169,7 +173,13 @@ class PromotionService
             unset($allocation);
         }
 
-        return compact('amount', 'basis', 'quantity', 'details');
+        return [
+            'amount' => $amount,
+            'basis' => $basis,
+            'quantity' => $quantity,
+            'details' => $details,
+            'eligible' => $quantity > 0,
+        ];
     }
 
     private function applyBundle(array &$allocations, array &$availableQty, Promotion $promotion): array
@@ -218,7 +228,12 @@ class PromotionService
             // subtotal so a promotion can never produce a negative total.
             $bundleDiscount = min($bundleBasis, $this->money($promotion->bundle_price));
             $bundlePrice = max(0, $bundleBasis - $bundleDiscount);
-            if ($bundleDiscount <= 0 || $bundleBasis <= 0) {
+            // Unit-level callers may construct a Promotion without loading the
+            // optional bonus relation. Treat that as no bonus instead of
+            // triggering an unexpected database query.
+            $bonuses = $promotion->relationLoaded('bonuses') ? $promotion->bonuses : collect();
+            $hasBonus = $bonuses->isNotEmpty();
+            if (($bundleDiscount <= 0 && ! $hasBonus) || $bundleBasis <= 0) {
                 break;
             }
 
@@ -228,14 +243,18 @@ class PromotionService
                     ? $remainingDiscount
                     : (int) round($bundleDiscount * $line['base'] / $bundleBasis, 0, PHP_ROUND_HALF_UP);
                 $lineDiscount = min($line['base'], max(0, $lineDiscount));
-                $this->applyLineDiscount(
-                    $allocations[$line['index']],
-                    $availableQty,
-                    $line['index'],
-                    $line['qty'],
-                    $lineDiscount,
-                    $promotion
-                );
+                if ($lineDiscount > 0) {
+                    $this->applyLineDiscount(
+                        $allocations[$line['index']],
+                        $availableQty,
+                        $line['index'],
+                        $line['qty'],
+                        $lineDiscount,
+                        $promotion
+                    );
+                } else {
+                    $availableQty[$line['index']] = max(0, $availableQty[$line['index']] - $line['qty']);
+                }
                 $remainingDiscount -= $lineDiscount;
             }
 
@@ -252,10 +271,20 @@ class PromotionService
                 'bundle_discount' => $bundleDiscount,
                 'customer_total' => $bundlePrice,
                 'amount' => $bundleDiscount,
+                'bonuses' => $bonuses->map(fn ($bonus) => [
+                    'name' => $bonus->name,
+                    'qty' => (int) $bonus->qty,
+                ])->values()->all(),
             ];
         }
 
-        return compact('amount', 'basis', 'quantity', 'details');
+        return [
+            'amount' => $amount,
+            'basis' => $basis,
+            'quantity' => $quantity,
+            'details' => $details,
+            'eligible' => $quantity > 0,
+        ];
     }
 
     private function bundleCount(array $allocations, array $availableQty, Promotion $promotion): int
