@@ -3,11 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\PromotionRequest;
-use App\Models\Product;
 use App\Models\Promotion;
-use App\Support\OutletAccess;
 use Carbon\Carbon;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class PromotionController extends Controller
@@ -16,24 +13,14 @@ class PromotionController extends Controller
     {
         $this->ensureManagementAccess();
 
-        return view('promotions.index', [
-            'promotions' => Promotion::with(['outlet', 'outlets', 'products', 'bonuses'])
-                ->latest()
-                ->paginate(50),
-        ]);
+        return redirect()->route('voucher.index');
     }
 
     public function create()
     {
         $this->ensureManagementAccess();
 
-        return view('promotions.form', $this->formData(new Promotion([
-            'type' => 'flash_sale',
-            'discount_type' => 'percentage',
-            'discount_value' => 0,
-            'is_active' => true,
-            'stackable' => false,
-        ]), false));
+        return redirect()->route('campaign.create', ['type' => 'flash_sale']);
     }
 
     public function store(PromotionRequest $request)
@@ -44,7 +31,7 @@ class PromotionController extends Controller
 
         if (empty($data['code'])) {
             do {
-                $data['code'] = 'PROMO-' . now()->format('YmdHis') . '-' . strtoupper(bin2hex(random_bytes(2)));
+                $data['code'] = 'PROMO-'.now()->format('YmdHis').'-'.strtoupper(bin2hex(random_bytes(2)));
             } while (Promotion::where('code', $data['code'])->exists());
         }
 
@@ -55,14 +42,14 @@ class PromotionController extends Controller
             $this->syncBonuses($promotion, $data['bonuses'] ?? []);
         });
 
-        return redirect()->route('promotion.index')->with('toast_success', 'Promo berhasil dibuat.');
+        return redirect()->route('voucher.index')->with('toast_success', 'Promo berhasil dibuat.');
     }
 
     public function edit(Promotion $promotion)
     {
         $this->ensureManagementAccess();
 
-        return view('promotions.form', $this->formData($promotion->load(['promotionProducts', 'bonuses', 'outlets']), true));
+        return redirect()->route('campaign.edit', ['type' => 'promotion', 'id' => $promotion->id]);
     }
 
     public function update(PromotionRequest $request, Promotion $promotion)
@@ -72,7 +59,7 @@ class PromotionController extends Controller
         [$startAt, $endAt] = $this->parseDateRange($request->input('daterange'));
 
         if (empty($data['code'])) {
-            $data['code'] = $promotion->code ?: 'PROMO-' . now()->format('YmdHis') . '-' . strtoupper(bin2hex(random_bytes(2)));
+            $data['code'] = $promotion->code ?: 'PROMO-'.now()->format('YmdHis').'-'.strtoupper(bin2hex(random_bytes(2)));
         }
 
         DB::transaction(function () use ($data, $startAt, $endAt, $promotion) {
@@ -82,7 +69,7 @@ class PromotionController extends Controller
             $this->syncBonuses($promotion, $data['bonuses'] ?? []);
         });
 
-        return redirect()->route('promotion.index')->with('toast_success', 'Promo berhasil diperbarui.');
+        return redirect()->route('voucher.index')->with('toast_success', 'Promo berhasil diperbarui.');
     }
 
     public function destroy(Promotion $promotion)
@@ -94,24 +81,7 @@ class PromotionController extends Controller
 
         $promotion->delete();
 
-        return redirect()->route('promotion.index')->with('toast_success', 'Promo berhasil dihapus.');
-    }
-
-    private function formData(Promotion $promotion, bool $isEdit): array
-    {
-        $selectedProducts = $promotion->relationLoaded('promotionProducts')
-            ? $promotion->promotionProducts->pluck('required_qty', 'product_id')->all()
-            : [];
-
-        return [
-            'promotion' => $promotion,
-            'selectedProducts' => $selectedProducts,
-            'selectedOutlets' => $promotion->relationLoaded('outlets') ? $promotion->outlets->pluck('id')->all() : [],
-            'bonuses' => $promotion->relationLoaded('bonuses') ? $promotion->bonuses : collect(),
-            'products' => Product::orderBy('name')->get(['id', 'code', 'name']),
-            'outlets' => OutletAccess::outlets(),
-            'isEdit' => $isEdit,
-        ];
+        return redirect()->route('voucher.index')->with('toast_success', 'Promo berhasil dihapus.');
     }
 
     private function promotionData(array $data, ?Carbon $startAt, ?Carbon $endAt): array

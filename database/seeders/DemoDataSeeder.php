@@ -26,7 +26,6 @@ use App\Models\ProductImport;
 use App\Models\ProductImportFailure;
 use App\Models\ProductMinimumAdjustment;
 use App\Models\Promotion;
-use App\Models\PromotionProduct;
 use App\Models\RequestOrder;
 use App\Models\RequestOrderItem;
 use App\Models\RequestOrderNote;
@@ -469,13 +468,14 @@ class DemoDataSeeder extends Seeder
             $this->products['A']->id => 1,
             $this->products['B']->id => 1,
         ]);
+        $this->seedPromotionBonuses($flashSale, []);
 
         $bundleC = $this->upsert(Promotion::class, ['code' => 'BUNDLE-9.9-C-2PCS'], [
-            'name' => 'Bundle 9.9 — Produk C 2 pcs',
+            'name' => 'Beli 1 Produk Demo C, Gratis 1 Lagi',
             'type' => 'bundle',
             'discount_type' => 'nominal',
-            'discount_value' => 165000,
-            'bundle_price' => 165000,
+            'discount_value' => 0,
+            'bundle_price' => 0,
             'max_qty' => null,
             'quota_qty' => null,
             'min_purchase' => 0,
@@ -485,19 +485,22 @@ class DemoDataSeeder extends Seeder
             'is_active' => true,
             'stackable' => false,
             'priority' => 20,
-            'desc' => 'Beli 2 Produk Demo C, dapat potongan bundle Rp165.000.',
+            'desc' => 'Beli 1 Produk Demo C, dapat 1 Produk Demo C gratis sebagai bonus.',
             'created_by' => $this->users['owner']->id,
         ]);
         $this->seedPromotionProducts($bundleC, [
-            $this->products['C']->id => 2,
+            $this->products['C']->id => 1,
+        ]);
+        $this->seedPromotionBonuses($bundleC, [
+            ['name' => 'Produk Demo C', 'qty' => 1],
         ]);
 
         $bundleAC = $this->upsert(Promotion::class, ['code' => 'BUNDLE-9.9-A-C'], [
-            'name' => 'Bundle 9.9 — Produk A + C',
+            'name' => 'Beli 10 Produk Demo D, Dapat Mug Spesial',
             'type' => 'bundle',
             'discount_type' => 'nominal',
-            'discount_value' => 185000,
-            'bundle_price' => 185000,
+            'discount_value' => 0,
+            'bundle_price' => 0,
             'max_qty' => null,
             'quota_qty' => null,
             'min_purchase' => 0,
@@ -507,23 +510,37 @@ class DemoDataSeeder extends Seeder
             'is_active' => true,
             'stackable' => false,
             'priority' => 10,
-            'desc' => 'Beli Produk Demo A dan C, dapat potongan bundle Rp185.000.',
+            'desc' => 'Beli 10 Produk Demo D, dapat 1 Mug Spesial sebagai bonus.',
             'created_by' => $this->users['owner']->id,
         ]);
         $this->seedPromotionProducts($bundleAC, [
-            $this->products['A']->id => 1,
-            $this->products['C']->id => 1,
+            $this->products['D']->id => 10,
+        ]);
+        $this->seedPromotionBonuses($bundleAC, [
+            ['name' => 'Mug Spesial', 'qty' => 1],
         ]);
     }
 
     private function seedPromotionProducts(Promotion $promotion, array $products): void
     {
+        $promotion->promotionProducts()->delete();
+
         foreach ($products as $productId => $requiredQty) {
-            $this->upsert(PromotionProduct::class, [
-                'promotion_id' => $promotion->id,
+            $promotion->promotionProducts()->create([
                 'product_id' => $productId,
-            ], [
                 'required_qty' => $requiredQty,
+            ]);
+        }
+    }
+
+    private function seedPromotionBonuses(Promotion $promotion, array $bonuses): void
+    {
+        $promotion->bonuses()->delete();
+
+        foreach ($bonuses as $bonus) {
+            $promotion->bonuses()->create([
+                'name' => $bonus['name'],
+                'qty' => $bonus['qty'],
             ]);
         }
     }

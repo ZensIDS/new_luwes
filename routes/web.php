@@ -3,6 +3,7 @@
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\CartUserController;
+use App\Http\Controllers\CampaignController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DashboardController;
@@ -90,6 +91,14 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::post('/owner-stock-opname/save', [App\Http\Controllers\OwnerStockController::class, 'saveOpname'])->name('owner-stock-opname.save');
     Route::get('/voucher/lookup', [VoucherController::class, 'lookup'])->name('voucher.lookup');
     Route::get('/voucher/options', [VoucherController::class, 'options'])->name('voucher.options');
+    Route::get('/campaign/create', [CampaignController::class, 'create'])->name('campaign.create');
+    Route::post('/campaign', [CampaignController::class, 'store'])->name('campaign.store');
+    Route::get('/campaign/{type}/{id}/edit', [CampaignController::class, 'edit'])
+        ->whereIn('type', ['voucher', 'promotion'])
+        ->name('campaign.edit');
+    Route::put('/campaign/{type}/{id}', [CampaignController::class, 'update'])
+        ->whereIn('type', ['voucher', 'promotion'])
+        ->name('campaign.update');
     Route::resource('/voucher', VoucherController::class);
     Route::resource('/promotion', PromotionController::class)->except(['show']);
     Route::resource('/slider', SliderController::class);

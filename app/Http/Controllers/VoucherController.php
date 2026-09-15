@@ -3,9 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\VoucherRequest;
-use App\Models\Product;
 use App\Models\Promotion;
-use App\Models\User;
 use App\Models\Voucher;
 use App\Support\OutletAccess;
 use Carbon\Carbon;
@@ -35,7 +33,15 @@ class VoucherController extends Controller
             return response()->json($vouchers);
         }
 
-        return view('vouchers.index', ['vouchers' => $query->paginate(50)]);
+        $campaigns = $query->get()->each(fn (Voucher $voucher) => $voucher->setAttribute('campaign_kind', 'voucher'));
+        $campaigns = $campaigns->concat(
+            Promotion::with(['outlet', 'outlets', 'products', 'bonuses'])
+                ->latest()
+                ->get()
+                ->each(fn (Promotion $promotion) => $promotion->setAttribute('campaign_kind', 'promotion'))
+        )->sortByDesc('created_at')->values();
+
+        return view('vouchers.index', ['campaigns' => $campaigns]);
     }
 
     public function lookup(Request $request)
@@ -117,13 +123,8 @@ class VoucherController extends Controller
     public function create()
     {
         $this->ensureManagementAccess();
-        return view('vouchers.form', [
-            'voucher' => new Voucher(['type' => 'nominal']),
-            'kasirs' => User::where('role', 'kasir')->get(),
-            'products' => Product::orderBy('name')->get(),
-            'outlets' => OutletAccess::outlets(),
-            'isEdit' => false,
-        ]);
+
+        return redirect()->route('campaign.create', ['type' => 'voucher']);
     }
 
     public function store(VoucherRequest $request)
@@ -133,7 +134,7 @@ class VoucherController extends Controller
         $baseCode = strtoupper(trim((string) ($data['code'] ?? '')));
         if ($baseCode === '') {
             do {
-                $baseCode = 'VCR-' . now()->format('YmdHis') . '-' . strtoupper(bin2hex(random_bytes(2)));
+                $baseCode = 'VCR-'.now()->format('YmdHis').'-'.strtoupper(bin2hex(random_bytes(2)));
             } while (Voucher::where('code', $baseCode)->exists());
         }
         $quantity = (int) ($data['quantity'] ?? 1);
@@ -173,19 +174,15 @@ class VoucherController extends Controller
     public function show(Voucher $voucher)
     {
         $this->ensureManagementAccess();
+
         return view('vouchers.show', ['voucher' => $voucher->loadCount('redemptions')]);
     }
 
     public function edit(Voucher $voucher)
     {
         $this->ensureManagementAccess();
-        return view('vouchers.form', [
-            'voucher' => $voucher->load(['products', 'outlets']),
-            'kasirs' => User::where('role', 'kasir')->get(),
-            'products' => Product::orderBy('name')->get(),
-            'outlets' => OutletAccess::outlets(),
-            'isEdit' => true,
-        ]);
+
+        return redirect()->route('campaign.edit', ['type' => 'voucher', 'id' => $voucher->id]);
     }
 
     public function update(VoucherRequest $request, Voucher $voucher)
@@ -236,7 +233,7 @@ class VoucherController extends Controller
         }
 
         return collect(range(1, $quantity))
-            ->map(fn ($number) => $baseCode . '-' . str_pad((string) $number, 3, '0', STR_PAD_LEFT))
+            ->map(fn ($number) => $baseCode.'-'.str_pad((string) $number, 3, '0', STR_PAD_LEFT))
             ->all();
     }
 

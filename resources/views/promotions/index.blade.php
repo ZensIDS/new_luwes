@@ -7,7 +7,7 @@
 <section class="content">
     <div class="box">
         <div class="box-header">
-            <a href="{{ route('promotion.create') }}" class="btn btn-success"><i class="fa fa-plus"></i> Tambah Promo</a>
+            <a href="{{ route('campaign.create', ['type' => 'flash_sale']) }}" class="btn btn-success"><i class="fa fa-plus"></i> Buat voucher / promo</a>
         </div>
         <div class="box-body table-responsive">
             <table id="promotions-table" class="table table-bordered table-striped">
