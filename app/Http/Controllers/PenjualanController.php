@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Outlet;
+use App\Models\PaymentMethod;
 use App\Models\Penjualan;
 use App\Services\CashierSaleService;
 use App\Support\OutletAccess;
@@ -81,7 +82,22 @@ class PenjualanController extends Controller
             'voucher_codes.*' => 'string|max:100',
             'promotion_codes' => 'nullable|array',
             'promotion_codes.*' => 'string|max:100',
+        ], [
+            'paid_amount.required' => 'Uang Diterima (F9) wajib diisi.',
+            'paid_amount.numeric' => 'Uang Diterima (F9) harus berupa angka.',
         ]);
+
+        $paymentMethod = $request->filled('payment_method_id')
+            ? PaymentMethod::find($request->integer('payment_method_id'))
+            : null;
+        $paymentMethodName = $paymentMethod?->name ?? $request->input('payment_method_name', 'Tunai');
+        if ($request->filled('payment_method_id') && ! preg_match('/tunai|cash/i', (string) $paymentMethodName)) {
+            $request->validate([
+                'payment_reference' => 'required|string|max:150',
+            ], [
+                'payment_reference.required' => 'Nomor Referensi wajib diisi untuk metode pembayaran ini.',
+            ]);
+        }
 
         try {
             OutletAccess::id($request);
@@ -91,6 +107,7 @@ class PenjualanController extends Controller
                 'success' => true,
                 'message' => 'Pesanan berhasil dibuat.',
                 'redirect' => route('outlet.show', $order->outlet_id),
+                'print' => route('penjualan.print', [$order, 'auto' => 1]),
                 'order' => $order,
             ], 201);
         } catch (Throwable $e) {

@@ -26,6 +26,10 @@ class OutletPriceRequest extends FormRequest
             'margin_value' => 'required|numeric|min:0',
             'disc_toko_type' => ['nullable', Rule::in(['nominal', 'percentage'])],
             'disc_toko_value' => 'nullable|numeric|min:0',
+            'pajak_type' => ['nullable', Rule::in(['nominal', 'percentage'])],
+            'pajak_value' => 'nullable|numeric|min:0',
+            'outlet_adjustment_type' => ['nullable', Rule::in(['nominal', 'percentage'])],
+            'outlet_adjustment_value' => 'nullable|numeric|min:0',
             'effective_from' => 'nullable|date',
             'effective_until' => 'nullable|date|after_or_equal:effective_from',
             'is_active' => 'nullable|boolean',
@@ -39,6 +43,8 @@ class OutletPriceRequest extends FormRequest
             'disc_tambahan_value' => IndonesianNumber::parse($this->input('disc_tambahan_value')),
             'margin_value' => IndonesianNumber::parse($this->input('margin_value')),
             'disc_toko_value' => IndonesianNumber::parse($this->input('disc_toko_value')),
+            'pajak_value' => IndonesianNumber::parse($this->input('pajak_value')),
+            'outlet_adjustment_value' => IndonesianNumber::parse($this->input('outlet_adjustment_value')),
         ]);
     }
 }

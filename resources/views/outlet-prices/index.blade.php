@@ -12,8 +12,8 @@
                 <div class="alert alert-info">
                     Halaman ini <strong>tidak menambah atau mengurangi stok</strong>.
                     Gunanya mengatur harga aktif POS dengan urutan:
-                    HPP → Disc Brand → Harga Akhir → Margin → Harga Aktif → Disc Toko → Harga Netto.
-                    Outlet Beauty mendapat penyesuaian Rp100 pada harga netto.
+                    HPP → Pajak → HPP Setelah Pajak → Diskon Reguler → Diskon Tambahan → Margin →
+                    Harga Aktif → Diskon Toko → Penyesuaian Outlet → Harga Netto.
                 </div>
                 <a class="btn btn-success" href="{{ route('outlet-prices.create') }}"><i class="fa fa-plus"></i> Tambah Aturan
                     Harga</a>
@@ -38,9 +38,12 @@
                         <tr>
                             <th>Outlet</th>
                             <th>Produk</th>
-                            <th>Disc Brand</th>
-                            <th>Disc Toko</th>
+                            <th>Diskon Reguler</th>
+                            <th>Diskon Tambahan</th>
                             <th>Margin</th>
+                            <th>Diskon Toko</th>
+                            <th>Pajak</th>
+                            <th>Penyesuaian Outlet</th>
                             <th>Aktif</th>
                             <th>Aksi</th>
                         </tr>
@@ -52,9 +55,13 @@
                                 <td>{{ $price->product?->code }} — {{ $price->product?->name }}</td>
                                 <td>{{ $price->disc_brand_value }}{{ $price->disc_brand_type === 'percentage' ? '%' : '' }}
                                 </td>
-                                <td>{{ $price->disc_toko_value }}{{ $price->disc_toko_type === 'percentage' ? '%' : '' }}
+                                <td>{{ $price->disc_tambahan_value ?? 0 }}{{ $price->disc_tambahan_type === 'percentage' ? '%' : '' }}
                                 </td>
                                 <td>{{ $price->margin_value }}{{ $price->margin_type === 'percentage' ? '%' : '' }}</td>
+                                <td>{{ $price->disc_toko_value ?? 0 }}{{ $price->disc_toko_type === 'percentage' ? '%' : '' }}
+                                </td>
+                                <td>{{ $price->pajak_value ?? 0 }}{{ $price->pajak_type === 'percentage' ? '%' : '' }}</td>
+                                <td>{{ $price->outlet_adjustment_value ?? 0 }}{{ $price->outlet_adjustment_type === 'percentage' ? '%' : '' }}</td>
                                 <td>{{ $price->is_active ? 'Ya' : 'Tidak' }}</td>
                                 <td><a class="btn btn-xs btn-warning"
                                         href="{{ route('outlet-prices.edit', $price) }}">Edit</a>
@@ -65,7 +72,7 @@
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="7" class="text-center">
+                                <td colspan="10" class="text-center">
                                     {{ $selectedOutletId ? 'Belum ada master harga untuk outlet ini.' : 'Pilih outlet terlebih dahulu untuk melihat master harga.' }}
                                 </td>
                             </tr>

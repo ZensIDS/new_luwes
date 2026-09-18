@@ -24,6 +24,7 @@ const CartTable = ({
     paymentReference,
     setPaymentReference,
     paymentMethodInputRef,
+    paymentReferenceInputRef,
     paidInputRef,
     voucherInputRef,
     outletId,
@@ -43,6 +44,7 @@ const CartTable = ({
     handleClickDelete,
     handleEmptyCart,
     handleSubmit,
+    isSubmitting,
     errorMessage,
     selectedCartProductId,
     setSelectedCartProductId,
@@ -160,19 +162,22 @@ const CartTable = ({
                     />
                     {requiresPaymentReference && (
                         <div className="form-group" style={{ marginTop: 10 }}>
-                            <label>Nomor Referensi</label>
+                            <label>Nomor Referensi <span className="text-danger">*</span></label>
                             <input
+                                ref={paymentReferenceInputRef}
                                 type="text"
                                 className="form-control"
                                 placeholder="Nomor transaksi / referensi pembayaran"
                                 value={paymentReference}
+                                required
+                                aria-required="true"
                                 onChange={(event) => setPaymentReference(event.target.value)}
                             />
                         </div>
                     )}
                 </div>
                 <div className="col-md-6">
-                    <label>Uang Diterima <small>(F9)</small></label>
+                    <label>Uang Diterima <span className="text-danger">*</span> <small>(F9)</small></label>
                     <div className="input-group input-group-sm">
                         <input
                             ref={paidInputRef}
@@ -207,7 +212,9 @@ const CartTable = ({
                     <button type="button" className="btn btn-danger btn-block" onClick={handleEmptyCart} disabled={!cart.length}>Kosongkan</button>
                 </div>
                 <div className="col-sm-6">
-                <button type="button" className="btn btn-success btn-block" onClick={handleSubmit} disabled={!cart.length || parseIdNumber(paidAmount || grandTotal) < grandTotal}>Process (F10)</button>
+                <button type="button" className="btn btn-success btn-block" onClick={handleSubmit} disabled={isSubmitting || !cart.length}>
+                    {isSubmitting ? "Processing..." : "Process (F10)"}
+                </button>
                 </div>
             </div>
         </>

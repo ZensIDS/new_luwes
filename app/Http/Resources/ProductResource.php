@@ -40,12 +40,16 @@ class ProductResource extends JsonResource
             'price_rule' => $priceRule ? [
                 'disc_brand_type' => $priceRule->disc_brand_type,
                 'disc_brand_value' => $priceRule->disc_brand_value,
+                'pajak_type' => $priceRule->pajak_type,
+                'pajak_value' => $priceRule->pajak_value,
                 'disc_tambahan_type' => $priceRule->disc_tambahan_type,
                 'disc_tambahan_value' => $priceRule->disc_tambahan_value,
                 'margin_type' => $priceRule->margin_type,
                 'margin_value' => $priceRule->margin_value,
                 'disc_toko_type' => $priceRule->disc_toko_type,
                 'disc_toko_value' => $priceRule->disc_toko_value,
+                'outlet_adjustment_type' => $priceRule->outlet_adjustment_type,
+                'outlet_adjustment_value' => $priceRule->outlet_adjustment_value,
             ] : null,
             'owner_stocks' => $ownerStocks->map(fn ($ownerStock) => [
                 'id' => $ownerStock->id,

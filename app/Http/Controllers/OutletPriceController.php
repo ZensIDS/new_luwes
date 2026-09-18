@@ -40,9 +40,16 @@ class OutletPriceController extends Controller
         return view('outlet-prices.form', [
             'price' => new OutletPrice([
                 'disc_brand_type' => 'nominal',
+                'pajak_type' => 'percentage',
+                'pajak_value' => 0,
+                'disc_tambahan_type' => 'nominal',
+                'disc_tambahan_value' => 0,
                 'margin_type' => 'percentage',
+                'margin_value' => 0,
                 'disc_toko_type' => 'nominal',
                 'disc_toko_value' => 0,
+                'outlet_adjustment_type' => 'nominal',
+                'outlet_adjustment_value' => 0,
                 'is_active' => true,
             ]),
             'outlets' => OutletAccess::outlets(),
@@ -61,8 +68,6 @@ class OutletPriceController extends Controller
         ]);
         $price->fill([
             ...$request->validated(),
-            'disc_tambahan_type' => null,
-            'disc_tambahan_value' => null,
             'created_by' => auth()->id(),
             'is_active' => $request->boolean('is_active', true),
         ]);
@@ -111,8 +116,6 @@ class OutletPriceController extends Controller
     {
         $outletPrice->update([
             ...$request->validated(),
-            'disc_tambahan_type' => null,
-            'disc_tambahan_value' => null,
             'is_active' => $request->boolean('is_active'),
         ]);
 

@@ -19,9 +19,11 @@
     </script>
     <style>
         .pos-mode .main-header, .pos-mode .main-sidebar, .pos-mode .main-footer { display:none; }
+        .pos-mode { background:#f4f6f9; }
         .pos-mode .content-wrapper { margin-left:0; min-height:100vh; background:#f4f6f9; }
-        .pos-mode .content { padding:15px; }
-        .pos-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; padding:12px 16px; background:#fff; border-left:4px solid #605ca8; box-shadow:0 1px 2px rgba(0,0,0,.08); font-size:16px; }
+        .pos-mode .content { min-height:100vh; padding:15px; background:#f4f6f9; }
+        .pos-header { display:flex; justify-content:space-between; align-items:center; min-height:46px; margin-bottom:12px; padding:12px 16px; background:#fff; border-left:4px solid #605ca8; box-shadow:0 1px 2px rgba(0,0,0,.08); font-size:16px; }
         .pos-header span { font-size:12px; color:#777; }
+        #cart, #cart > .row, #cart > .row > .col-md-12 { min-height:calc(100vh - 92px); }
     </style>
 @endsection

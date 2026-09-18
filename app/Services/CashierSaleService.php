@@ -116,7 +116,7 @@ class CashierSaleService
             $grandTotal = max(0, $subtotal - $voucherTotal);
             $paidAmount = (float) ($data['paid_amount'] ?? 0);
             if ($paidAmount < $grandTotal) {
-                throw new RuntimeException('Uang pembayaran kurang dari Grand Total.');
+                throw new RuntimeException('Uang Diterima (F9) kurang dari Grand Total.');
             }
 
             $lastOrder = Penjualan::where('outlet_id', $outletId)

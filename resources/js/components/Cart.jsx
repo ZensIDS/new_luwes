@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import axios from "axios";
-import Swal from "sweetalert2";
 import Barcodes from "./Barcodes.jsx";
 import CartTable from "./CartTable";
 import Gallery from "./Gallery";
@@ -63,6 +62,7 @@ const Cart = () => {
     const [search, setSearch] = useState("");
     const [paidAmount, setPaidAmount] = useState("");
     const [errorMessage, setErrorMessage] = useState("");
+    const [isSubmitting, setIsSubmitting] = useState(false);
     const [serialModal, setSerialModal] = useState(false);
     const [selectedProduct, setSelectedProduct] = useState(null);
     const [selectedSerial, setSelectedSerial] = useState("");
@@ -75,6 +75,7 @@ const Cart = () => {
     const paidRef = useRef(null);
     const customerRef = useRef(null);
     const paymentMethodRef = useRef(null);
+    const paymentReferenceRef = useRef(null);
     const cartTableRef = useRef(null);
     const promotionTableRef = useRef(null);
 
@@ -321,25 +322,58 @@ const Cart = () => {
     };
 
     const handleSubmit = () => {
+        if (isSubmitting) return;
+
         setErrorMessage("");
         const selectedPaymentMethod = paymentMethods.find((method) => String(method.id) === String(paymentMethodId));
         const paymentMethodName = selectedPaymentMethod?.name || "Tunai";
         const isCash = !paymentMethodId || /tunai|cash/i.test(paymentMethodName);
+        const paidValue = parseIdNumber(paidAmount);
+
+        if (!paidAmount.trim()) {
+            setErrorMessage("Uang Diterima (F9) wajib diisi sebelum memproses penjualan.");
+            paidRef.current?.focus();
+            return;
+        }
+
+        if (paidValue < grandTotal) {
+            setErrorMessage("Uang Diterima (F9) kurang dari Grand Total.");
+            paidRef.current?.focus();
+            return;
+        }
+
+        if (!isCash && !paymentReference.trim()) {
+            setErrorMessage("Nomor Referensi wajib diisi untuk metode pembayaran ini.");
+            paymentReferenceRef.current?.focus();
+            return;
+        }
+
+        const printWindow = window.open(
+            "about:blank",
+            "pos-print",
+            "width=430,height=700,scrollbars=yes,resizable=yes"
+        );
+        setIsSubmitting(true);
         axios.post("/penjualan", {
             outlet_id: outlet.id,
             customer_id: customerId || null,
-            paid_amount: parseIdNumber(paidAmount || grandTotal),
+            paid_amount: paidValue,
             payment_method_id: paymentMethodId || null,
             payment_method_name: paymentMethodName,
             payment_reference: isCash ? null : paymentReference.trim() || null,
             voucher_codes: appliedVouchers.map((voucher) => voucher.code),
             promotion_codes: appliedPromotions.map((promotion) => promotion.code),
         }).then((response) => {
-            Swal.fire("Success!", "Pesanan berhasil dibuat", "success").then(() => {
-                window.localStorage.setItem("last-pos-sale", response.data.order.id);
-                window.location.href = response.data.redirect;
-            });
+            window.localStorage.setItem("last-pos-sale", response.data.order.id);
+            if (printWindow && !printWindow.closed) {
+                printWindow.location.href = response.data.print;
+            } else {
+                window.open(response.data.print, "pos-print", "width=430,height=700,scrollbars=yes,resizable=yes");
+            }
+            window.location.reload();
         }).catch((error) => {
+            if (printWindow && !printWindow.closed) printWindow.close();
+            setIsSubmitting(false);
             setErrorMessage(error.response?.data?.message || "Checkout gagal.");
         });
     };
@@ -359,7 +393,7 @@ const Cart = () => {
             if (event.key === "F7") { event.preventDefault(); paymentMethodRef.current?.focus(); }
             if (event.key === "F8") { event.preventDefault(); voucherRef.current?.focus(); }
             if (event.key === "F9") { event.preventDefault(); paidRef.current?.focus(); }
-            if (event.key === "F10") { event.preventDefault(); if (cart.length && parseIdNumber(paidAmount || grandTotal) >= grandTotal) handleSubmit(); }
+            if (event.key === "F10") { event.preventDefault(); if (cart.length) handleSubmit(); }
             if (event.ctrlKey && event.key.toLowerCase() === "h") { event.preventDefault(); holdTransaction(); }
             if (event.ctrlKey && event.key.toLowerCase() === "l") { event.preventDefault(); recallTransaction(); }
             if (event.ctrlKey && event.key.toLowerCase() === "p") {
@@ -387,7 +421,7 @@ const Cart = () => {
         };
         window.addEventListener("keydown", shortcut);
         return () => window.removeEventListener("keydown", shortcut);
-    }, [cart, paidAmount, grandTotal, appliedVouchers, appliedPromotions, selectedCartProductId, paymentReference, paymentMethodId]);
+    }, [cart, paidAmount, grandTotal, appliedVouchers, appliedPromotions, selectedCartProductId, paymentReference, paymentMethodId, isSubmitting]);
 
     return (
         <div className="row">
@@ -444,6 +478,7 @@ const Cart = () => {
                     paymentReference={paymentReference}
                     setPaymentReference={setPaymentReference}
                     paymentMethodInputRef={paymentMethodRef}
+                    paymentReferenceInputRef={paymentReferenceRef}
                     paidInputRef={paidRef}
                     voucherInputRef={voucherRef}
                     outletId={outlet.id}
@@ -477,6 +512,7 @@ const Cart = () => {
                     handleClickDelete={deleteCartItem}
                     handleEmptyCart={emptyCart}
                     handleSubmit={handleSubmit}
+                    isSubmitting={isSubmitting}
                     errorMessage={errorMessage}
                     selectedCartProductId={selectedCartProductId}
                     setSelectedCartProductId={setSelectedCartProductId}
