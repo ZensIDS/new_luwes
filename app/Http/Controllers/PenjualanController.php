@@ -75,6 +75,7 @@ class PenjualanController extends Controller
             'paid_amount' => 'required|numeric|min:0',
             'payment_method_id' => 'nullable|integer|exists:payment_methods,id',
             'payment_method_name' => 'nullable|string|max:100',
+            'payment_reference' => 'nullable|string|max:150',
             'salesman_id' => 'nullable|integer|exists:salesmen,id',
             'voucher_codes' => 'nullable|array',
             'voucher_codes.*' => 'string|max:100',
@@ -89,7 +90,7 @@ class PenjualanController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Pesanan berhasil dibuat.',
-                'redirect' => route('penjualan.print', ['penjualan' => $order, 'paper' => '58', 'auto' => 1]),
+                'redirect' => route('outlet.show', $order->outlet_id),
                 'order' => $order,
             ], 201);
         } catch (Throwable $e) {

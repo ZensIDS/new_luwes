@@ -8,6 +8,7 @@
     <title>Sale No : {{ $penjualan->code }}</title>
 </head>
 @php($paperWidth = request('paper') === '80' ? '80mm' : '58mm')
+@php($totalCost = $penjualan->items->sum(fn ($item) => (float) ($item->subtotal ?? ((float) $item->qty * (float) $item->price))))
 <style type="text/css" media="all">
     body {
         width: {{ $paperWidth }};
@@ -149,7 +150,6 @@
             </tr>
         </thead>
         <tbody>
-            @php $totalCost = 0; @endphp
             @foreach ($penjualan->items as $item)
                 <tr>
                     <td style="text-align:center; width:30px;" valign="top">{{ $loop->iteration }}</td>
@@ -158,7 +158,6 @@
                     <td style="text-align:center; width:50px;" valign="top">@currency($item->price)</td>
                     <td style="text-align:right; width:70px;" valign="top">@currency($item->subtotal ?? ($item->qty * $item->price))</td>
                 </tr>
-            @php $totalCost += $item->subtotal ?? ($item->qty * $item->price); @endphp
             @endforeach
             <tr style="border-top: 1px solid #000; border-collapse: collapse;">
                 <td style="text-align:center; width:30px;" valign="top">{{ $penjualan->items->count() }}</td>
@@ -244,6 +243,14 @@
                     {{ $penjualan->paymentMethod?->name ?? $penjualan->payment_method_name ?? 'Tunai' }}
                 </td>
             </tr>
+            @if ($penjualan->payment_reference)
+                <tr>
+                    <td style="text-align:left; padding-top: 5px; font-weight: bold;">Nomor Referensi</td>
+                    <td style="text-align:right; padding-top: 5px; padding-right:1.5%; font-weight:bold;" colspan="3">
+                        {{ $penjualan->payment_reference }}
+                    </td>
+                </tr>
+            @endif
         </tbody>
     </table>
 

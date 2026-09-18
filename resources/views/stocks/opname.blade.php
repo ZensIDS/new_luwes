@@ -57,9 +57,9 @@
                                 </select>
                             </div>
                             <div class="stock-filter">
-                                <label for="filterSupplier">Supplier</label>
+                                <label for="filterSupplier">Supplier <span class="text-danger">*</span></label>
                                 <select id="filterSupplier" class="form-control input-sm select2">
-                                    <option value="">Semua Supplier</option>
+                                    <option value="">Pilih supplier terlebih dahulu</option>
                                     @foreach($supplierOptions as $supplier)
                                         <option value="{{ $supplier->id }}" {{ request('supplier_id') == $supplier->id ? 'selected' : '' }}>{{ $supplier->name }}</option>
                                     @endforeach
@@ -74,7 +74,7 @@
                             </button>
                         </div>
                         <p class="text-muted" style="margin:10px 0 15px;">
-                            Semua stok ditampilkan secara default. Supplier, kategori, dan lokasi bersifat opsional.
+                            Pilih supplier terlebih dahulu untuk memuat data stock opname. Kategori dan lokasi bersifat opsional.
                         </p>
 
                         <div class="table-responsive">
@@ -97,7 +97,7 @@
                                 <i class="fa fa-plus-circle"></i> Tambah Baris
                             </button>
                             <span class="spacer"></span>
-                            <a id="btnExportTemplate" href="{{ route('stock.opname.export-template') }}" class="btn btn-default btn-sm">
+                            <a id="btnExportTemplate" href="#" class="btn btn-default btn-sm disabled" aria-disabled="true">
                                 <i class="fa fa-file-excel-o"></i> Export Template
                             </a>
                             <form method="GET" action="{{ route('laporan.stock-opname') }}" style="display:inline;">
@@ -178,6 +178,10 @@
             }
 
             function loadStockData() {
+                if (!$('#filterSupplier').val()) {
+                    setState('Pilih supplier terlebih dahulu.', false);
+                    return;
+                }
                 setState('Memuat data...', false);
                 $.get('{{ route('stock.opname.data') }}', {
                     kategori: $('#filterKategori').val(),
@@ -200,7 +204,10 @@
                 if (lokasi) params.set('lokasi', lokasi);
                 if (supplier) params.set('supplier_id', supplier);
                 var query = params.toString();
-                $('#btnExportTemplate').attr('href', '{{ route('stock.opname.export-template') }}' + (query ? '?' + query : ''));
+                $('#btnExportTemplate')
+                    .attr('href', supplier ? '{{ route('stock.opname.export-template') }}' + (query ? '?' + query : '') : '#')
+                    .toggleClass('disabled', !supplier)
+                    .attr('aria-disabled', supplier ? 'false' : 'true');
                 $('#exportLokasi').val(lokasi);
                 $('#exportKategori').val(kategori);
             }
@@ -216,6 +223,10 @@
                 $('#filterSearch').val('');
                 updateExportLinks();
                 loadStockData();
+            });
+
+            $('#btnExportTemplate').on('click', function (event) {
+                if (!$('#filterSupplier').val()) event.preventDefault();
             });
 
             $('#tambahBaris').on('click', function (event) {

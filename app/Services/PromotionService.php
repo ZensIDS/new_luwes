@@ -21,10 +21,9 @@ class PromotionService
     }
 
     /**
-     * Apply cashier-selected promotions to already-priced POS allocations.
+     * Apply the promotions supplied by the POS to already-priced allocations.
      *
-     * Promotions are never applied just because they are active. The cashier
-     * must select their codes in the POS before they are included here.
+     * Eligibility is checked here so an unmet promotion is simply skipped.
      */
     public function calculate(
         array $allocations,

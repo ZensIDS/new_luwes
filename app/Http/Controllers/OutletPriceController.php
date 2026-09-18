@@ -8,24 +8,29 @@ use App\Models\OwnerStock;
 use App\Models\Product;
 use App\Support\OutletAccess;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 
 class OutletPriceController extends Controller
 {
     public function index(Request $request)
     {
         $this->ensureManagementAccess();
-        $prices = OutletPrice::with(['outlet', 'product'])
-            ->when($request->filled('outlet_id'), fn ($query) => $query->where('outlet_id', $request->outlet_id))
-            ->when($request->filled('search'), fn ($query) => $query->whereHas('product', fn ($productQuery) => $productQuery
-                ->where('name', 'like', '%' . $request->search . '%')
-                ->orWhere('code', 'like', '%' . $request->search . '%')))
-            ->latest('updated_at')
-            ->paginate(25)
-            ->withQueryString();
+        $outletId = OutletAccess::id($request, false);
+        $prices = $outletId
+            ? OutletPrice::with(['outlet', 'product'])
+                ->where('outlet_id', $outletId)
+                ->when($request->filled('search'), fn ($query) => $query->whereHas('product', fn ($productQuery) => $productQuery
+                    ->where('name', 'like', '%' . $request->search . '%')
+                    ->orWhere('code', 'like', '%' . $request->search . '%')))
+                ->latest('updated_at')
+                ->paginate(25)
+                ->withQueryString()
+            : new LengthAwarePaginator([], 0, 25);
 
         return view('outlet-prices.index', [
             'prices' => $prices,
             'outlets' => OutletAccess::outlets(),
+            'selectedOutletId' => $outletId,
         ]);
     }
 
@@ -35,10 +40,9 @@ class OutletPriceController extends Controller
         return view('outlet-prices.form', [
             'price' => new OutletPrice([
                 'disc_brand_type' => 'nominal',
-                'disc_tambahan_type' => 'nominal',
-                'disc_tambahan_value' => 0,
                 'margin_type' => 'percentage',
                 'disc_toko_type' => 'nominal',
+                'disc_toko_value' => 0,
                 'is_active' => true,
             ]),
             'outlets' => OutletAccess::outlets(),
@@ -57,6 +61,8 @@ class OutletPriceController extends Controller
         ]);
         $price->fill([
             ...$request->validated(),
+            'disc_tambahan_type' => null,
+            'disc_tambahan_value' => null,
             'created_by' => auth()->id(),
             'is_active' => $request->boolean('is_active', true),
         ]);
@@ -103,7 +109,12 @@ class OutletPriceController extends Controller
 
     public function update(OutletPriceRequest $request, OutletPrice $outletPrice)
     {
-        $outletPrice->update([...$request->validated(), 'is_active' => $request->boolean('is_active')]);
+        $outletPrice->update([
+            ...$request->validated(),
+            'disc_tambahan_type' => null,
+            'disc_tambahan_value' => null,
+            'is_active' => $request->boolean('is_active'),
+        ]);
 
         return redirect()->route('outlet-prices.index')->with('toast_success', 'Master harga outlet berhasil diperbarui.');
     }

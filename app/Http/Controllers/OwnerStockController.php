@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\OwnerStock;
 use App\Models\Outlet;
+use App\Models\OutletPurchase;
+use App\Models\OutletPurchaseItem;
 use App\Models\Product;
 use App\Models\StockMovement;
 use App\Models\Supplier;
@@ -40,7 +42,7 @@ class OwnerStockController extends Controller
             ->orderBy('name')
             ->get(['id', 'name']);
 
-        $stockRows = $outlets->isNotEmpty()
+        $stockRows = $outletId
             ? OwnerStock::with(['owner', 'product.category', 'stock.pembelian.supplier'])
                 ->withSum('movements as qty_in_total', 'qty_in')
                 ->withSum('movements as qty_out_total', 'qty_out')
@@ -161,29 +163,88 @@ class OwnerStockController extends Controller
                 ->get()
                 ->map(fn ($activity) => [
                     'date' => optional($activity->created_at)->format('d M Y H:i'),
+                    'created_at' => optional($activity->created_at)->timestamp ?? 0,
                     'user' => $activity->causer?->name ?? 'System',
                     'event' => $activity->event,
                     'properties' => $activity->properties,
                 ]))
-            ->sortBy('date')
+            ->sortBy(fn ($activity) => $activity['created_at'] ?? $activity['date'])
+            ->map(function ($activity) {
+                unset($activity['created_at']);
+
+                return $activity;
+            })
             ->values();
+
+        $purchaseItems = OutletPurchaseItem::with(['purchase.creator'])
+            ->where('product_id', $request->product_id)
+            ->whereHas('purchase', fn ($query) => $query->where('outlet_id', $outletId))
+            ->get();
+        $purchaseIds = $purchaseItems->pluck('outlet_purchase_id')->unique()->values();
 
         $movements = StockMovement::where('owner_id', $outletId)
             ->where('product_id', $request->product_id)
-            ->whereIn('owner_stock_id', $stockIds)
+            ->where(function ($query) use ($stockIds, $purchaseIds) {
+                $query->whereIn('owner_stock_id', $stockIds);
+                if ($purchaseIds->isNotEmpty()) {
+                    $query->orWhere(function ($purchaseQuery) use ($purchaseIds) {
+                        $purchaseQuery->where('reference_type', OutletPurchase::class)
+                            ->whereIn('reference_id', $purchaseIds);
+                    });
+                }
+            })
             ->with('user')
             ->orderBy('created_at')
             ->orderBy('id')
-            ->get()
-            ->map(fn ($movement) => [
-                'date' => optional($movement->created_at)->format('d M Y H:i'),
-                'user' => $movement->user?->name ?? 'System',
-                'type' => $movement->type,
-                'qty_in' => (int) $movement->qty_in,
-                'qty_out' => (int) $movement->qty_out,
-                'balance' => $movement->balance,
-                'notes' => $movement->notes,
+            ->get();
+
+        // Older direct purchases may have an OwnerStock row but no movement
+        // yet. Add their inbound line to this history without duplicating
+        // purchases that already have a recorded movement.
+        foreach ($purchaseItems as $item) {
+            $hasMovement = $movements->contains(fn ($movement) => $movement->reference_type === OutletPurchase::class
+                && (int) $movement->reference_id === (int) $item->outlet_purchase_id
+                && (! $item->owner_stock_id || (int) $movement->owner_stock_id === (int) $item->owner_stock_id));
+
+            if (! $hasMovement) {
+                $purchase = $item->purchase;
+                $movements->push((object) [
+                    'id' => -$item->id,
+                    'created_at' => $purchase?->created_at ?? $purchase?->purchase_date,
+                    'user' => $purchase?->creator,
+                    'type' => 'in',
+                    'reference_type' => OutletPurchase::class,
+                    'reference_id' => $purchase?->id,
+                    'owner_stock_id' => $item->owner_stock_id,
+                    'qty_in' => (int) $item->qty,
+                    'qty_out' => 0,
+                    'balance' => null,
+                    'notes' => 'Pembelian langsung outlet ' . ($purchase?->code ?? ''),
+                ]);
+            }
+        }
+
+        $running = 0;
+        $movements = $movements
+            ->sortBy(fn ($movement) => [
+                optional($movement->created_at)->timestamp ?? 0,
+                (int) $movement->id,
             ])
+            ->map(function ($movement) use (&$running) {
+                $running += (int) $movement->qty_in - (int) $movement->qty_out;
+
+                return [
+                    'date' => optional($movement->created_at)->format('d M Y H:i'),
+                    'user' => $movement->user?->name ?? 'System',
+                    'type' => $movement->type,
+                    'qty_in' => (int) $movement->qty_in,
+                    'qty_out' => (int) $movement->qty_out,
+                    'balance' => $running,
+                    'reference_type' => $movement->reference_type,
+                    'reference_id' => $movement->reference_id,
+                    'notes' => $movement->notes,
+                ];
+            })
             ->values();
 
         return response()->json(['success' => true, 'activities' => $activities, 'movements' => $movements]);

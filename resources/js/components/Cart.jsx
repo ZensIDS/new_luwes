@@ -8,6 +8,46 @@ import Gallery from "./Gallery";
 import SerialSelectionModal from "./SerialSelectionModal.jsx";
 import { formatIdNumber, parseIdNumber } from "../utils";
 
+const ProductSearchModal = ({ open, inputRef, search, onSearch, products, onAddProduct, onClose }) => {
+    useEffect(() => {
+        if (open) window.setTimeout(() => inputRef.current?.focus(), 0);
+    }, [open, inputRef]);
+
+    if (!open) return null;
+
+    return (
+        <div
+            role="dialog"
+            aria-modal="true"
+            onClick={onClose}
+            style={{ position: "fixed", inset: 0, zIndex: 1040, background: "rgba(0,0,0,.45)", padding: "5vh 15px" }}
+        >
+            <div
+                onClick={(event) => event.stopPropagation()}
+                style={{ background: "#fff", maxWidth: 1100, maxHeight: "90vh", margin: "0 auto", overflow: "auto", borderRadius: 4, boxShadow: "0 8px 30px rgba(0,0,0,.3)" }}
+            >
+                <div className="box-header with-border">
+                    <button type="button" className="close" onClick={onClose} aria-label="Tutup">&times;</button>
+                    <h3 className="box-title"><i className="fa fa-search"></i> Cari Produk <small>(F2)</small></h3>
+                </div>
+                <div className="box-body">
+                    <input
+                        ref={inputRef}
+                        type="search"
+                        className="form-control input-lg"
+                        placeholder="Cari nama, kode, atau barcode produk"
+                        value={search}
+                        onChange={(event) => onSearch(event.target.value)}
+                        autoComplete="off"
+                    />
+                    <p className="text-muted small">Klik produk untuk memasukkannya ke transaksi.</p>
+                    <Gallery products={products} addProductToCart={onAddProduct} />
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const Cart = () => {
     const outlet = window.outlet || {};
     const [cart, setCart] = useState([]);
@@ -16,6 +56,7 @@ const Cart = () => {
     const [customerId, setCustomerId] = useState("");
     const [paymentMethods, setPaymentMethods] = useState([]);
     const [paymentMethodId, setPaymentMethodId] = useState("");
+    const [paymentReference, setPaymentReference] = useState("");
     const [appliedVouchers, setAppliedVouchers] = useState([]);
     const [appliedPromotions, setAppliedPromotions] = useState([]);
     const [barcode, setBarcode] = useState("");
@@ -27,6 +68,7 @@ const Cart = () => {
     const [selectedSerial, setSelectedSerial] = useState("");
     const [availableSerials, setAvailableSerials] = useState([]);
     const [selectedCartProductId, setSelectedCartProductId] = useState(null);
+    const [productModalOpen, setProductModalOpen] = useState(false);
     const barcodeRef = useRef(null);
     const searchRef = useRef(null);
     const voucherRef = useRef(null);
@@ -126,6 +168,12 @@ const Cart = () => {
             .then((response) => setPaymentMethods(response.data || []));
     };
 
+    const syncPromotions = (promotions) => {
+        const nextPromotions = promotions || [];
+        setAppliedPromotions(nextPromotions);
+        loadCart(nextPromotions.map((promotion) => promotion.code));
+    };
+
     useEffect(() => {
         loadCart();
         loadProducts();
@@ -135,31 +183,39 @@ const Cart = () => {
     }, []);
 
     const addToCart = (value, serialNumber = null) => {
-        const product = products.find((item) => item.barcode === value || item.code === value);
-        if (!product) {
-            setErrorMessage("Barcode tidak ditemukan pada stok outlet.");
-            return;
-        }
+        const code = String(value || "").trim();
+        const localProduct = products.find((item) => item.barcode === code || item.code === code);
+        const productRequest = localProduct
+            ? Promise.resolve(localProduct)
+            : axios.get("/product?" + new URLSearchParams({ outlet_id: outlet.id, status_produk: "all", search: code }))
+                .then((response) => (response.data.data || []).find((item) => item.barcode === code || item.code === code));
 
-        if (product.is_serialized && !serialNumber) {
-            const serials = (product.owner_stocks || [])
-                .filter((stock) => stock.serial_number && Number(stock.qty) > 0)
-                .map((stock) => ({ id: stock.id, serial: stock.serial_number, status: "available" }));
-            setSelectedProduct(product);
-            setAvailableSerials(serials);
-            setSerialModal(true);
-            return;
-        }
+        productRequest.then((product) => {
+            if (!product) {
+                setErrorMessage("Barcode tidak ditemukan pada stok outlet.");
+                return;
+            }
 
-        axios.post("/cart", { barcode: product.barcode, serial_number: serialNumber, outlet_id: outlet.id })
-            .then(() => {
-                setBarcode("");
-                setErrorMessage("");
-                loadCart();
-                loadProducts(search);
-                barcodeRef.current?.focus();
-            })
-            .catch((error) => setErrorMessage(error.response?.data?.message || "Produk tidak dapat ditambahkan."));
+            if (product.is_serialized && !serialNumber) {
+                const serials = (product.owner_stocks || [])
+                    .filter((stock) => stock.serial_number && Number(stock.qty) > 0)
+                    .map((stock) => ({ id: stock.id, serial: stock.serial_number, status: "available" }));
+                setSelectedProduct(product);
+                setAvailableSerials(serials);
+                setSerialModal(true);
+                return;
+            }
+
+            axios.post("/cart", { barcode: product.barcode || product.code, serial_number: serialNumber, outlet_id: outlet.id })
+                .then(() => {
+                    setBarcode("");
+                    setErrorMessage("");
+                    loadCart();
+                    loadProducts(search);
+                    barcodeRef.current?.focus();
+                })
+                .catch((error) => setErrorMessage(error.response?.data?.message || "Produk tidak dapat ditambahkan."));
+        }).catch(() => setErrorMessage("Barcode tidak ditemukan pada stok outlet."));
     };
 
     const handleScanBarcode = (event) => {
@@ -198,7 +254,6 @@ const Cart = () => {
         }).then(() => {
             setCart([]);
             setAppliedVouchers([]);
-            setAppliedPromotions([]);
             setErrorMessage("");
             barcodeRef.current?.focus();
         }).catch((error) => setErrorMessage(error.response?.data?.message || "Transaksi tidak dapat di-hold."));
@@ -227,7 +282,6 @@ const Cart = () => {
                 }).then(() => {
                     setCustomerId(customer || "");
                     setAppliedVouchers([]);
-                    setAppliedPromotions([]);
                     loadCart([]);
                     barcodeRef.current?.focus();
                 });
@@ -268,12 +322,16 @@ const Cart = () => {
 
     const handleSubmit = () => {
         setErrorMessage("");
+        const selectedPaymentMethod = paymentMethods.find((method) => String(method.id) === String(paymentMethodId));
+        const paymentMethodName = selectedPaymentMethod?.name || "Tunai";
+        const isCash = !paymentMethodId || /tunai|cash/i.test(paymentMethodName);
         axios.post("/penjualan", {
             outlet_id: outlet.id,
             customer_id: customerId || null,
             paid_amount: parseIdNumber(paidAmount || grandTotal),
             payment_method_id: paymentMethodId || null,
-            payment_method_name: paymentMethods.find((method) => String(method.id) === String(paymentMethodId))?.name || "Tunai",
+            payment_method_name: paymentMethodName,
+            payment_reference: isCash ? null : paymentReference.trim() || null,
             voucher_codes: appliedVouchers.map((voucher) => voucher.code),
             promotion_codes: appliedPromotions.map((promotion) => promotion.code),
         }).then((response) => {
@@ -290,14 +348,18 @@ const Cart = () => {
         const shortcut = (event) => {
             const typing = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName);
             if (event.key === "F3") { event.preventDefault(); barcodeRef.current?.focus(); }
-            if (event.key === "F2") { event.preventDefault(); searchRef.current?.focus(); }
+            if (event.key === "F2") {
+                event.preventDefault();
+                setProductModalOpen(true);
+                window.setTimeout(() => searchRef.current?.focus(), 0);
+            }
             if (event.key === "F4") { event.preventDefault(); customerRef.current?.focus(); }
             if (event.key === "F5") { event.preventDefault(); cartTableRef.current?.focusFirstRow(); }
-            if (event.key === "F6") { event.preventDefault(); promotionTableRef.current?.focusFirstRow(); }
+            if (event.key === "F6") { event.preventDefault(); promotionTableRef.current?.open(); }
             if (event.key === "F7") { event.preventDefault(); paymentMethodRef.current?.focus(); }
             if (event.key === "F8") { event.preventDefault(); voucherRef.current?.focus(); }
             if (event.key === "F9") { event.preventDefault(); paidRef.current?.focus(); }
-            if (event.key === "F10") { event.preventDefault(); if (cart.length && parseIdNumber(paidAmount) >= grandTotal) handleSubmit(); }
+            if (event.key === "F10") { event.preventDefault(); if (cart.length && parseIdNumber(paidAmount || grandTotal) >= grandTotal) handleSubmit(); }
             if (event.ctrlKey && event.key.toLowerCase() === "h") { event.preventDefault(); holdTransaction(); }
             if (event.ctrlKey && event.key.toLowerCase() === "l") { event.preventDefault(); recallTransaction(); }
             if (event.ctrlKey && event.key.toLowerCase() === "p") {
@@ -317,11 +379,15 @@ const Cart = () => {
                 if (item) item.pivot.qty > 1 ? updateCart(item.id, Number(item.pivot.qty) - 1) : deleteCartItem(item.id);
             }
             if (!typing && event.key === "Delete" && selectedCartProductId) deleteCartItem(selectedCartProductId);
-            if (event.key === "Escape") { setSerialModal(false); barcodeRef.current?.focus(); }
+            if (event.key === "Escape") {
+                setSerialModal(false);
+                setProductModalOpen(false);
+                barcodeRef.current?.focus();
+            }
         };
         window.addEventListener("keydown", shortcut);
         return () => window.removeEventListener("keydown", shortcut);
-    }, [cart, paidAmount, grandTotal, appliedVouchers, appliedPromotions, selectedCartProductId]);
+    }, [cart, paidAmount, grandTotal, appliedVouchers, appliedPromotions, selectedCartProductId, paymentReference, paymentMethodId]);
 
     return (
         <div className="row">
@@ -336,7 +402,22 @@ const Cart = () => {
                     if (selectedSerial && selectedProduct) addToCart(selectedProduct.barcode, selectedSerial);
                 }}
             />
-            <div className="col-md-6 col-lg-6">
+            <ProductSearchModal
+                open={productModalOpen}
+                inputRef={searchRef}
+                search={search}
+                onSearch={(term) => {
+                    setSearch(term);
+                    loadProducts(term);
+                }}
+                products={products}
+                onAddProduct={(value) => {
+                    setProductModalOpen(false);
+                    addToCart(value);
+                }}
+                onClose={() => setProductModalOpen(false)}
+            />
+            <div className="col-md-12">
                 <Barcodes
                     barcode={barcode}
                     handleScanBarcode={handleScanBarcode}
@@ -360,6 +441,8 @@ const Cart = () => {
                     paymentMethods={paymentMethods}
                     paymentMethodId={paymentMethodId}
                     setPaymentMethodId={setPaymentMethodId}
+                    paymentReference={paymentReference}
+                    setPaymentReference={setPaymentReference}
                     paymentMethodInputRef={paymentMethodRef}
                     paidInputRef={paidRef}
                     voucherInputRef={voucherRef}
@@ -374,6 +457,7 @@ const Cart = () => {
                         id: item.id,
                         qty: Number(item.pivot?.qty || 0),
                         baseSubtotal: Number(item.cashier_base_subtotal || 0),
+                        promotionBreakdown: item.cashier_promotion_breakdown || [],
                     }))}
                     appliedPromotionNames={getAppliedPromotionNames()}
                     promotionTableRef={promotionTableRef}
@@ -397,12 +481,8 @@ const Cart = () => {
                     selectedCartProductId={selectedCartProductId}
                     setSelectedCartProductId={setSelectedCartProductId}
                     cartTableRef={cartTableRef}
+                    onSyncPromotions={syncPromotions}
                 />
-            </div>
-            <div className="col-md-6 col-lg-6">
-                <input ref={searchRef} type="text" className="form-control" style={{ height: "42px", fontSize: "16px" }} placeholder="Cari produk lalu tekan Enter (F2)" value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") loadProducts(search); }} />
-                <br />
-                <Gallery products={products} addProductToCart={(value) => addToCart(value)} />
             </div>
         </div>
     );

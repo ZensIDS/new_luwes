@@ -33,7 +33,8 @@ class VoucherController extends Controller
             return response()->json($vouchers);
         }
 
-        $campaigns = $query->get()->each(fn (Voucher $voucher) => $voucher->setAttribute('campaign_kind', 'voucher'));
+        $campaigns = $this->groupVouchers($query->get())
+            ->each(fn (Voucher $voucher) => $voucher->setAttribute('campaign_kind', 'voucher'));
         $campaigns = $campaigns->concat(
             Promotion::with(['outlet', 'outlets', 'products', 'bonuses'])
                 ->latest()
@@ -174,8 +175,15 @@ class VoucherController extends Controller
     public function show(Voucher $voucher)
     {
         $this->ensureManagementAccess();
+        $voucher->load(['product', 'products', 'outlet', 'outlets'])->loadCount('redemptions');
+        $vouchers = Voucher::with(['product', 'products', 'outlet', 'outlets'])
+            ->withCount('redemptions')
+            ->get()
+            ->filter(fn (Voucher $item) => $this->voucherGroupKey($item) === $this->voucherGroupKey($voucher))
+            ->sortBy('code')
+            ->values();
 
-        return view('vouchers.show', ['voucher' => $voucher->loadCount('redemptions')]);
+        return view('vouchers.show', ['voucher' => $voucher, 'vouchers' => $vouchers]);
     }
 
     public function edit(Voucher $voucher)
@@ -235,6 +243,38 @@ class VoucherController extends Controller
         return collect(range(1, $quantity))
             ->map(fn ($number) => $baseCode.'-'.str_pad((string) $number, 3, '0', STR_PAD_LEFT))
             ->all();
+    }
+
+    private function groupVouchers($vouchers)
+    {
+        return $vouchers
+            ->groupBy(fn (Voucher $voucher) => $this->voucherGroupKey($voucher))
+            ->map(function ($group) {
+                $voucher = $group->sortBy('code')->first();
+                $voucher->setAttribute('voucher_group_items', $group->sortBy('code')->values());
+                $voucher->setAttribute('voucher_group_count', $group->count());
+
+                return $voucher;
+            })
+            ->values();
+    }
+
+    private function voucherGroupKey(Voucher $voucher): string
+    {
+        $baseCode = preg_replace('/-\d{3}$/', '', (string) $voucher->code);
+
+        return implode('|', [
+            $baseCode,
+            $voucher->name,
+            $voucher->type,
+            $voucher->value,
+            $voucher->min_purchase,
+            $voucher->max_discount_amount,
+            optional($voucher->start_at)->toIso8601String(),
+            optional($voucher->end_at)->toIso8601String(),
+            $voucher->outlet_id,
+            $voucher->product_id,
+        ]);
     }
 
     private function parseDateRange(?string $range): array

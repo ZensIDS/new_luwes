@@ -44,7 +44,7 @@
                                 <label for="filterOutlet">Outlet</label>
                                 <select id="filterOutlet" class="form-control input-sm select2"
                                     {{ auth()->user()->outlet_id ? 'disabled' : '' }}>
-                                    <option value="">Semua Outlet</option>
+                                    <option value="">Pilih outlet terlebih dahulu</option>
                                     @foreach ($outlets as $outlet)
                                         <option value="{{ $outlet->id }}" {{ $selectedOwner?->id == $outlet->id ? 'selected' : '' }}>{{ $outlet->name }}</option>
                                     @endforeach
@@ -103,13 +103,16 @@
                             </button>
                         </div>
                         <p class="stock-summary">
-                            <strong>Semua data ditampilkan secara default.</strong>
-                            Gunakan pencarian tabel atau filter di atas untuk mempersempit data.
+                            @if ($selectedOwner)
+                                <strong>{{ $selectedOwner->name }}</strong> — gunakan pencarian tabel atau filter untuk mempersempit data.
+                            @else
+                                <strong>Pilih outlet terlebih dahulu</strong> untuk menampilkan stock toko.
+                            @endif
                         </p>
                     </div>
 
                     <div class="box-body table-responsive">
-                        <table id="example1" class="table table-bordered table-striped stock-table">
+                        <table id="{{ $selectedOwner ? 'example1' : 'owner-stock-empty-table' }}" class="table table-bordered table-striped stock-table">
                             <thead>
                                 <tr>
                                     <th>No</th>
@@ -130,6 +133,9 @@
                                 </tr>
                             </thead>
                             <tbody>
+                                @if (!$selectedOwner)
+                                    <tr><td colspan="15" class="text-center text-muted">Pilih outlet terlebih dahulu.</td></tr>
+                                @else
                                 @foreach ($stocks as $stock)
                                     @php
                                         $sourceType = strtolower((string) $stock->source_type);
@@ -188,6 +194,7 @@
                                         </td>
                                     </tr>
                                 @endforeach
+                                @endif
                             </tbody>
                         </table>
                     </div>
@@ -244,6 +251,8 @@
 @section('page-script')
     <script>
         $(function () {
+            const hasOwner = @json((bool) $selectedOwner);
+
             function escapeHtml(value) {
                 return $('<div>').text(value == null ? '' : value).html();
             }
@@ -275,26 +284,29 @@
                     && matches('#filterStatus', 'status');
             });
 
-            var table = $('#example1').DataTable({
-                order: [[3, 'asc']],
-                columnDefs: [
-                    { targets: [0, 14], orderable: false, searchable: false },
-                    { targets: [7, 8, 9, 10, 11], className: 'text-right' }
-                ],
-                columns: [
-                    { data: null, render: function (data, type, row, meta) { return meta.row + 1; } },
-                    null, null, null, null, null, null, null, null, null, null, null, null, null, null
-                ]
-            });
+            var table = hasOwner ? $('#example1').DataTable({
+                    order: [[3, 'asc']],
+                    columnDefs: [
+                        { targets: [0, 14], orderable: false, searchable: false },
+                        { targets: [7, 8, 9, 10, 11], className: 'text-right' }
+                    ],
+                    columns: [
+                        { data: null, render: function (data, type, row, meta) { return meta.row + 1; } },
+                        null, null, null, null, null, null, null, null, null, null, null, null, null, null
+                    ]
+                }) : null;
 
             $('#filterOutlet, #filterKategori, #filterLokasi, #filterSupplier, #filterSumber, #filterStatus').on('change', function () {
-                table.draw();
+                if (this.id === 'filterOutlet') {
+                    const outletId = $(this).val();
+                    window.location = '{{ route('owner-stocks.index') }}' + (outletId ? '?outlet_id=' + encodeURIComponent(outletId) : '');
+                    return;
+                }
+                if (table) table.draw();
             });
 
             $('#resetOwnerFilters').on('click', function () {
-                $('#filterKategori, #filterLokasi, #filterSupplier, #filterSumber, #filterStatus').val('').trigger('change.select2');
-                if (!$('#filterOutlet').prop('disabled')) $('#filterOutlet').val('').trigger('change.select2');
-                table.search('').draw();
+                window.location = '{{ route('owner-stocks.index') }}';
             });
 
             $('#priceHistoryModal').on('show.bs.modal', function (event) {

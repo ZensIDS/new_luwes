@@ -28,6 +28,7 @@ class Penjualan extends Model
         'change_amount',
         'payment_method_id',
         'payment_method_name',
+        'payment_reference',
         'status',
     ];
 

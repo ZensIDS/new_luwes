@@ -12,30 +12,34 @@
                 <div class="alert alert-info">
                     Halaman ini <strong>tidak menambah atau mengurangi stok</strong>.
                     Gunanya mengatur harga aktif POS dengan urutan:
-                    HPP → Diskon Reguler → Diskon Tambahan → Harga Dasar → Margin → Harga Aktif.
-                    Outlet Beauty mendapat tambahan Rp100 setelah harga jual.
+                    HPP → Disc Brand → Harga Akhir → Margin → Harga Aktif → Disc Toko → Harga Netto.
+                    Outlet Beauty mendapat penyesuaian Rp100 pada harga netto.
                 </div>
                 <a class="btn btn-success" href="{{ route('outlet-prices.create') }}"><i class="fa fa-plus"></i> Tambah Aturan
                     Harga</a>
                 <a class="btn btn-default" href="{{ route('owner-stocks.index') }}"><i class="fa fa-cubes"></i> Lihat Stock
                     Toko</a>
-                <form class="form-inline pull-right" method="GET"><select class="form-control input-sm" name="outlet_id">
-                        <option value="">Semua outlet</option>
+                <form class="form-inline pull-right" method="GET">
+                    <select class="form-control input-sm" name="outlet_id" onchange="this.form.submit()">
+                        <option value="">Pilih outlet terlebih dahulu</option>
                         @foreach ($outlets as $outlet)
-                            <option value="{{ $outlet->id }}" {{ request('outlet_id') == $outlet->id ? 'selected' : '' }}>
+                            <option value="{{ $outlet->id }}" {{ $selectedOutletId == $outlet->id ? 'selected' : '' }}>
                                 {{ $outlet->name }}</option>
                         @endforeach
-                    </select><input class="form-control input-sm" name="search" value="{{ request('search') }}"
-                        placeholder="Cari produk"><button class="btn btn-primary btn-sm">Filter</button></form>
+                    </select>
+                    <input class="form-control input-sm" name="search" value="{{ request('search') }}"
+                        placeholder="Cari produk">
+                    <button class="btn btn-primary btn-sm">Filter</button>
+                </form>
             </div>
             <div class="box-body table-responsive">
-                <table id="example1" class="table table-bordered table-striped table-condensed">
+                <table id="{{ $selectedOutletId ? 'example1' : 'outlet-prices-empty-table' }}" class="table table-bordered table-striped table-condensed">
                     <thead>
                         <tr>
                             <th>Outlet</th>
                             <th>Produk</th>
-                            <th>Diskon Reguler</th>
-                            <th>Diskon Tambahan</th>
+                            <th>Disc Brand</th>
+                            <th>Disc Toko</th>
                             <th>Margin</th>
                             <th>Aktif</th>
                             <th>Aksi</th>
@@ -48,7 +52,7 @@
                                 <td>{{ $price->product?->code }} — {{ $price->product?->name }}</td>
                                 <td>{{ $price->disc_brand_value }}{{ $price->disc_brand_type === 'percentage' ? '%' : '' }}
                                 </td>
-                                <td>{{ $price->disc_tambahan_value ?? $price->disc_toko_value }}{{ ($price->disc_tambahan_type ?? $price->disc_toko_type) === 'percentage' ? '%' : '' }}
+                                <td>{{ $price->disc_toko_value }}{{ $price->disc_toko_type === 'percentage' ? '%' : '' }}
                                 </td>
                                 <td>{{ $price->margin_value }}{{ $price->margin_type === 'percentage' ? '%' : '' }}</td>
                                 <td>{{ $price->is_active ? 'Ya' : 'Tidak' }}</td>
@@ -58,8 +62,12 @@
                                         style="display:inline">@csrf @method('DELETE')<button class="btn btn-xs btn-danger"
                                             onclick="return confirm('Hapus harga ini?')">Hapus</button></form>
                                 </td>
-                        </tr>@empty<tr>
-                                <td colspan="7" class="text-center">Belum ada master harga.</td>
+                            </tr>
+                        @empty
+                            <tr>
+                                <td colspan="7" class="text-center">
+                                    {{ $selectedOutletId ? 'Belum ada master harga untuk outlet ini.' : 'Pilih outlet terlebih dahulu untuk melihat master harga.' }}
+                                </td>
                             </tr>
                         @endforelse
                     </tbody>
@@ -67,4 +75,19 @@
             </div>
         </div>
     </section>
+@endsection
+
+@section('page-script')
+    @if ($selectedOutletId)
+        <script>
+            $(function () {
+                if ($.fn.DataTable.isDataTable('#example1')) {
+                    $('#example1').DataTable().destroy();
+                }
+                // The query is already ordered by updated_at DESC. Keep that
+                // order instead of letting DataTables sort by outlet name.
+                $('#example1').DataTable({ ordering: false, pageLength: 25 });
+            });
+        </script>
+    @endif
 @endsection

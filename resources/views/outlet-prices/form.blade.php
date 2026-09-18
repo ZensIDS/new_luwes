@@ -3,8 +3,7 @@
 @php
     $brandType = old('disc_brand_type', $price->disc_brand_type ?: 'nominal');
     $marginType = old('margin_type', $price->margin_type ?: 'percentage');
-    $additionalType = old('disc_tambahan_type', $price->disc_tambahan_type ?: ($price->disc_toko_type ?: 'nominal'));
-    $additionalValue = old('disc_tambahan_value', $price->disc_tambahan_value ?? ($price->disc_toko_value ?? 0));
+    $storeDiscType = old('disc_toko_type', $price->disc_toko_type ?: 'nominal');
 @endphp
 
 @section('title', $price->exists ? 'Edit Aturan Harga Jual' : 'Tambah Aturan Harga Jual')
@@ -95,7 +94,7 @@
                             <div class="price-rule-card price-rule-brand">
                                 <div class="row">
                                     <div class="col-sm-4">
-                                        <h4 style="margin-top:0"><span class="label label-info">1</span> Diskon Reguler</h4>
+                                        <h4 style="margin-top:0"><span class="label label-info">1</span> Disc Brand</h4>
                                         <p class="text-muted small">Diskon dari brand. Mengurangi HPP sebelum margin dihitung.</p>
                                     </div>
                                     <div class="col-sm-4 form-group">
@@ -106,7 +105,7 @@
                                         </select>
                                     </div>
                                     <div class="col-sm-4 form-group">
-                                        <label for="disc_brand_value">Nilai Diskon Reguler</label>
+                                        <label for="disc_brand_value">Nilai Disc Brand</label>
                                         <div class="input-group">
                                             <span class="input-group-addon price-prefix" data-for="disc_brand_type">Rp</span>
                                             <input id="disc_brand_value" name="disc_brand_value" type="text" inputmode="decimal" data-currency-input data-currency-toggle="disc_brand_type" data-currency-decimals="0" min="0" step="0.01" class="form-control price-value"
@@ -117,36 +116,11 @@
                                 </div>
                             </div>
 
-                            <div class="price-rule-card price-rule-store">
-                                <div class="row">
-                                    <div class="col-sm-4">
-                                        <h4 style="margin-top:0"><span class="label label-warning">2</span> Diskon Tambahan</h4>
-                                        <p class="text-muted small">Diskon tambahan outlet. Dipotong sebelum margin, sesuai aturan harga baru.</p>
-                                    </div>
-                                    <div class="col-sm-4 form-group">
-                                        <label for="disc_tambahan_type">Tipe Potongan</label>
-                                        <select id="disc_tambahan_type" name="disc_tambahan_type" class="form-control select2 price-type" style="width:100%">
-                                            <option value="nominal" {{ $additionalType === 'nominal' ? 'selected' : '' }}>Rp — Nominal</option>
-                                            <option value="percentage" {{ $additionalType === 'percentage' ? 'selected' : '' }}>% — Persentase</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-sm-4 form-group">
-                                        <label for="disc_tambahan_value">Nilai Diskon Tambahan</label>
-                                        <div class="input-group">
-                                            <span class="input-group-addon price-prefix" data-for="disc_tambahan_type">Rp</span>
-                                            <input id="disc_tambahan_value" name="disc_tambahan_value" type="text" inputmode="decimal" data-currency-input data-currency-toggle="disc_tambahan_type" data-currency-decimals="0" min="0" step="0.01" class="form-control price-value"
-                                                value="{{ $additionalValue }}" placeholder="0">
-                                        </div>
-                                        @error('disc_tambahan_value') <span class="help-block text-danger">{{ $message }}</span> @enderror
-                                    </div>
-                                </div>
-                            </div>
-
                             <div class="price-rule-card price-rule-margin">
                                 <div class="row">
                                     <div class="col-sm-4">
-                                        <h4 style="margin-top:0"><span class="label label-success">3</span> Margin</h4>
-                                        <p class="text-muted small">Keuntungan dihitung setelah Diskon Reguler dan Diskon Tambahan.</p>
+                                        <h4 style="margin-top:0"><span class="label label-success">2</span> Margin</h4>
+                                        <p class="text-muted small">Keuntungan dihitung dari Harga Akhir setelah Disc Brand.</p>
                                     </div>
                                     <div class="col-sm-4 form-group">
                                         <label for="margin_type">Tipe Margin</label>
@@ -167,8 +141,30 @@
                                 </div>
                             </div>
 
-                            <input type="hidden" name="disc_toko_type" value="nominal">
-                            <input type="hidden" name="disc_toko_value" value="0">
+                            <div class="price-rule-card price-rule-store">
+                                <div class="row">
+                                    <div class="col-sm-4">
+                                        <h4 style="margin-top:0"><span class="label label-warning">3</span> Disc Toko</h4>
+                                        <p class="text-muted small">Dipotong dari Harga Aktif setelah margin untuk menjadi Harga Netto POS.</p>
+                                    </div>
+                                    <div class="col-sm-4 form-group">
+                                        <label for="disc_toko_type">Tipe Potongan</label>
+                                        <select id="disc_toko_type" name="disc_toko_type" class="form-control select2 price-type" style="width:100%">
+                                            <option value="nominal" {{ $storeDiscType === 'nominal' ? 'selected' : '' }}>Rp — Nominal</option>
+                                            <option value="percentage" {{ $storeDiscType === 'percentage' ? 'selected' : '' }}>% — Persentase</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-sm-4 form-group">
+                                        <label for="disc_toko_value">Nilai Disc Toko</label>
+                                        <div class="input-group">
+                                            <span class="input-group-addon price-prefix" data-for="disc_toko_type">Rp</span>
+                                            <input id="disc_toko_value" name="disc_toko_value" type="text" inputmode="decimal" data-currency-input data-currency-toggle="disc_toko_type" data-currency-decimals="0" min="0" step="0.01" class="form-control price-value"
+                                                value="{{ old('disc_toko_value', $price->disc_toko_value ?? 0) }}" placeholder="0">
+                                        </div>
+                                        @error('disc_toko_value') <span class="help-block text-danger">{{ $message }}</span> @enderror
+                                    </div>
+                                </div>
+                            </div>
 
                             <div class="row" style="margin-top:15px">
                                 <div class="col-md-6 form-group">
@@ -212,12 +208,12 @@
                             </div>
                             <div class="price-preview-list">
                                 <div><span>HPP</span><strong id="preview-hpp">Rp0</strong></div>
-                                <div><span>Diskon Reguler</span><strong id="preview-brand">Rp0</strong></div>
-                                <div><span>Diskon Tambahan</span><strong id="preview-additional">Rp0</strong></div>
-                                <div><span>Harga Dasar</span><strong id="preview-final">Rp0</strong></div>
+                                <div><span>Disc Brand</span><strong id="preview-brand">Rp0</strong></div>
+                                <div><span>Harga Akhir</span><strong id="preview-final">Rp0</strong></div>
                                 <div><span>Margin</span><strong id="preview-margin">Rp0</strong></div>
                                 <div><span>Harga Aktif</span><strong id="preview-active">Rp0</strong></div>
-                                <div><span>Tambahan Beauty</span><strong id="preview-beauty">Rp0</strong></div>
+                                <div><span>Disc Toko</span><strong id="preview-store">Rp0</strong></div>
+                                <div><span>Penyesuaian Beauty</span><strong id="preview-beauty">Rp0</strong></div>
                             </div>
                             <div class="price-preview-total">
                                 <span>Harga Netto POS</span>
@@ -294,21 +290,20 @@
                 const hpp = number('#preview_hpp');
                 const brand = discount(hpp, $('#disc_brand_type').val(), number('#disc_brand_value'));
                 const hargaAkhir = Math.max(0, hpp - brand);
-                const additional = discount(hargaAkhir, $('#disc_tambahan_type').val(), number('#disc_tambahan_value'));
-                const hargaDasar = Math.max(0, hargaAkhir - additional);
                 const margin = $('#margin_type').val() === 'percentage'
-                    ? hargaDasar * number('#margin_value') / 100
+                    ? hargaAkhir * number('#margin_value') / 100
                     : number('#margin_value');
-                const hargaAktif = hargaDasar + margin;
+                const hargaAktif = hargaAkhir + margin;
+                const store = discount(hargaAktif, $('#disc_toko_type').val(), number('#disc_toko_value'));
                 const beauty = String($('#outlet_id option:selected').data('type') || '').toLowerCase() === 'beauty' ? 100 : 0;
-                const hargaNetto = Math.max(0, hargaAktif + beauty);
+                const hargaNetto = Math.max(0, hargaAktif - store + beauty);
 
                 $('#preview-hpp').text(money(hpp));
                 $('#preview-brand').text(money(brand));
-                $('#preview-additional').text(money(additional));
                 $('#preview-final').text(money(hargaAkhir));
                 $('#preview-margin').text(money(margin));
                 $('#preview-active').text(money(hargaAktif));
+                $('#preview-store').text(money(store));
                 $('#preview-beauty').text(money(beauty));
                 $('#preview-net').text(money(hargaNetto));
             }

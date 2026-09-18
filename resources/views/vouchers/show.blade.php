@@ -25,8 +25,8 @@
                                 <td>{{ $voucher->name }}</td>
                             </tr>
                             <tr>
-                                <td>Kode</td>
-                                <td>{{ $voucher->code }}</td>
+                                <td>Kode utama</td>
+                                <td>{{ preg_replace('/-\d{3}$/', '', $voucher->code) }}</td>
                             </tr>
                             @if ($voucher->product)
                                 <tr>
@@ -73,8 +73,35 @@
                             </tr>
                             <tr>
                                 <td>Redemption</td>
-                                <td>{{ $voucher->redemptions_count ?? $voucher->redemptions()->count() }}x</td>
+                                <td>{{ $vouchers->sum('redemptions_count') }} / {{ $vouchers->count() }} kode terpakai</td>
                             </tr>
+                        </table>
+                        <h4>Daftar kode voucher</h4>
+                        <table class="table table-bordered table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Kode</th>
+                                    <th>Status</th>
+                                    <th>Pemakaian</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach ($vouchers as $item)
+                                    <tr>
+                                        <td>{{ $item->code }}</td>
+                                        <td>
+                                            @if ($item->redemptions_count)
+                                                Sudah dipakai
+                                            @elseif ($item->isActive())
+                                                Aktif
+                                            @else
+                                                Tidak aktif
+                                            @endif
+                                        </td>
+                                        <td>{{ $item->redemptions_count }}/{{ $item->limit ?? '∞' }}</td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
                         </table>
                     </div><!-- /.box-body -->
                 </div><!-- /.box -->

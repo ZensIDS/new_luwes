@@ -18,6 +18,9 @@
             @forelse ($campaigns as $campaign)
                 @php
                     $isVoucher = $campaign->campaign_kind === 'voucher';
+                    $voucherItems = $isVoucher ? ($campaign->voucher_group_items ?? collect([$campaign])) : collect();
+                    $voucherCount = $isVoucher ? $voucherItems->count() : 0;
+                    $redemptionCount = $isVoucher ? $voucherItems->sum('redemptions_count') : 0;
                     $productNames = $isVoucher
                         ? ($campaign->products->isNotEmpty() ? $campaign->products->pluck('name')->join(', ') : ($campaign->product?->name ?? 'Semua produk'))
                         : ($campaign->products->isNotEmpty() ? $campaign->products->pluck('name')->join(', ') : '—');
@@ -27,14 +30,17 @@
                     $discountType = $isVoucher ? $campaign->type : $campaign->discount_type;
                     $discountValue = $isVoucher ? $campaign->value : $campaign->discount_value;
                     $status = $isVoucher
-                        ? ($campaign->redemptions_count ? 'Sudah dipakai' : ($campaign->isActive() ? 'Aktif' : 'Tidak aktif'))
+                        ? ($redemptionCount ? 'Sudah dipakai' : ($campaign->isActive() ? 'Aktif' : 'Tidak aktif'))
                         : ($campaign->isActive() ? 'Aktif' : ($campaign->is_active ? 'Tidak aktif' : 'Nonaktif'));
                 @endphp
                 <tr>
                     <td>{{ $loop->iteration }}</td>
                     <td>
                         <strong>{{ $campaign->name }}</strong>
-                        @if ($campaign->code)<br><small>{{ $campaign->code }}</small>@endif
+                        @if ($campaign->code)<br><small>{{ preg_replace('/-\d{3}$/', '', $campaign->code) }}</small>@endif
+                        @if ($isVoucher && $voucherCount > 1)
+                            <br><small class="text-muted">{{ $voucherCount }} kode voucher</small>
+                        @endif
                     </td>
                     <td>{{ $isVoucher ? 'Voucher' : ($campaign->type === 'flash_sale' ? 'Flash Sale' : 'Bundle + Bonus') }}</td>
                     <td>{{ $productNames }}</td>
@@ -56,7 +62,7 @@
                     </td>
                     <td>
                         @if ($isVoucher)
-                            {{ $campaign->redemptions_count }}/1 pemakaian
+                            {{ $redemptionCount }}/{{ $voucherCount }} pemakaian
                         @else
                             {{ $campaign->used_qty }}{{ $campaign->quota_qty ? '/'.$campaign->quota_qty : '' }} pemakaian
                         @endif

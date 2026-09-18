@@ -85,13 +85,8 @@ class CartController extends Controller
             }
         }
 
-        $promotionCodes = collect($request->input('promotion_codes', []))
-            ->map(fn ($code) => strtoupper(trim((string) $code)))
-            ->filter()
-            ->unique()
-            ->values()
-            ->all();
-        $promotionResult = $promotionService->calculate($allocations, $outletId, null, false, $promotionCodes);
+        $activePromotions = $promotionService->activeForOutlet($outletId);
+        $promotionResult = $promotionService->apply($allocations, $activePromotions);
         $allocationsByCartItem = collect($promotionResult['allocations'])->groupBy('cart_index');
         foreach ($cart as $cartIndex => $item) {
             $itemAllocations = $allocationsByCartItem->get($cartIndex, collect());
@@ -106,10 +101,21 @@ class CartController extends Controller
             $item->cashier_unit_price = $calculator->money($baseSubtotal / max(1, (int) $item->pivot->qty));
             $item->cashier_subtotal = $cashierSubtotal;
             $item->cashier_promotion_discount = $promotionDiscount;
-            $item->cashier_promotions = $itemAllocations
-                ->flatMap(fn ($allocation) => collect($allocation['promotion_details'] ?? []))
+            $promotionDetails = $itemAllocations
+                ->flatMap(fn ($allocation) => collect($allocation['promotion_details'] ?? []));
+            $item->cashier_promotions = $promotionDetails
                 ->pluck('promotion_name')
                 ->unique()
+                ->values()
+                ->all();
+            $item->cashier_promotion_breakdown = $promotionDetails
+                ->groupBy(fn ($detail) => $detail['promotion_code'] ?? $detail['promotion_id'])
+                ->map(fn ($details) => [
+                    'promotion_id' => $details->first()['promotion_id'] ?? null,
+                    'promotion_name' => $details->first()['promotion_name'] ?? null,
+                    'promotion_code' => $details->first()['promotion_code'] ?? null,
+                    'amount' => (int) $details->sum('amount'),
+                ])
                 ->values()
                 ->all();
         }

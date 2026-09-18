@@ -629,7 +629,7 @@ class StockController extends Controller
     public function getOpnameData(Request $request)
     {
         $request->validate([
-            'supplier_id' => 'nullable|integer|exists:suppliers,id',
+            'supplier_id' => 'required|integer|exists:suppliers,id',
             'kategori' => 'nullable|string',
             'lokasi' => 'nullable|string',
         ]);
@@ -640,9 +640,7 @@ class StockController extends Controller
             ->orderBy('product_id')
             ->orderBy('sku');
 
-        if ($supplierId = $request->input('supplier_id')) {
-            $query->whereHas('pembelian', fn($q) => $q->where('supplier_id', $supplierId));
-        }
+        $query->whereHas('pembelian', fn ($q) => $q->where('supplier_id', $request->input('supplier_id')));
 
         if ($lokasi = $request->input('lokasi')) {
             $query->whereHas('product', fn($q) => $q->where('lokasi', $lokasi));
@@ -776,6 +774,9 @@ class StockController extends Controller
     // NEW OPNAME TEMPLATE WITHOUT SKU
     public function exportOpnameTemplate(Request $request)
     {
+        $request->validate([
+            'supplier_id' => 'required|integer|exists:suppliers,id',
+        ]);
         $settings = json_decode(Storage::disk('public')->get('settings.json'), true) ?? [];
 
         $query = Stock::with('product')
@@ -792,9 +793,7 @@ class StockController extends Controller
             $query->whereHas('product', fn($q) => $q->where('lokasi', $lokasi));
         }
 
-        if ($supplierId = $request->input('supplier_id')) {
-            $query->whereHas('pembelian', fn($q) => $q->where('supplier_id', $supplierId));
-        }
+        $query->whereHas('pembelian', fn ($q) => $q->where('supplier_id', $request->input('supplier_id')));
 
         if ($kategori = $request->input('kategori')) {
             $query->whereHas('product.category', fn($q) => $q->where('name', $kategori));

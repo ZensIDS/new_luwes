@@ -21,6 +21,8 @@ const CartTable = ({
     paymentMethods,
     paymentMethodId,
     setPaymentMethodId,
+    paymentReference,
+    setPaymentReference,
     paymentMethodInputRef,
     paidInputRef,
     voucherInputRef,
@@ -34,6 +36,7 @@ const CartTable = ({
     selectedProducts,
     appliedPromotionNames,
     promotionTableRef,
+    onSyncPromotions,
     handleChangeQty,
     handleClickIncrease,
     handleClickDecrease,
@@ -46,6 +49,8 @@ const CartTable = ({
     cartTableRef,
 }) => {
     const change = Math.max(0, parseIdNumber(paidAmount) - grandTotal);
+    const selectedPaymentMethod = paymentMethods.find((method) => String(method.id) === String(paymentMethodId));
+    const requiresPaymentReference = Boolean(paymentMethodId) && !/tunai|cash/i.test(selectedPaymentMethod?.name || "");
 
     return (
         <>
@@ -119,6 +124,8 @@ const CartTable = ({
                 onRemovePromotion={onRemovePromotion}
                 selectedProducts={selectedProducts}
                 promotionTableRef={promotionTableRef}
+                voucherBreakdown={voucherBreakdown}
+                onSyncPromotions={onSyncPromotions}
             />
             <div className="row">
                 <div className="col-md-6">
@@ -151,6 +158,18 @@ const CartTable = ({
                             ...paymentMethods.map((method) => ({ value: method.id, label: method.name })),
                         ]}
                     />
+                    {requiresPaymentReference && (
+                        <div className="form-group" style={{ marginTop: 10 }}>
+                            <label>Nomor Referensi</label>
+                            <input
+                                type="text"
+                                className="form-control"
+                                placeholder="Nomor transaksi / referensi pembayaran"
+                                value={paymentReference}
+                                onChange={(event) => setPaymentReference(event.target.value)}
+                            />
+                        </div>
+                    )}
                 </div>
                 <div className="col-md-6">
                     <label>Uang Diterima <small>(F9)</small></label>
@@ -172,20 +191,23 @@ const CartTable = ({
                     </div>
                     <small className="text-muted">Masukkan contoh: 100.000. Nilai disimpan sebagai 100000.</small>
                 </div>
+                <div className="col-md-6">
+                    <label>Kembalian</label>
+                    <div style={{ minHeight: 40, padding: "7px 12px", border: "1px solid #00a65a", borderRadius: 4, background: "#f0fff4", color: "#008d4c", fontSize: 22, fontWeight: 700, textAlign: "right" }}>
+                        {formatRupiah(change)}
+                    </div>
+                </div>
             </div>
             <p className="text-muted small" style={{ marginTop: 10, marginBottom: 0 }}>
-                <i className="fa fa-keyboard-o"></i> F2 Cari produk &nbsp;|&nbsp; F3 Scan &nbsp;|&nbsp; F4 Customer &nbsp;|&nbsp; F5 Item &nbsp;|&nbsp; F6 Promo dipilih &nbsp;|&nbsp; F7 Pembayaran &nbsp;|&nbsp; F8 Voucher/promo &nbsp;|&nbsp; F9 Uang &nbsp;|&nbsp; F10 Proses &nbsp;|&nbsp; Delete hapus baris terpilih
+                <i className="fa fa-keyboard-o"></i> F2 Cari produk &nbsp;|&nbsp; F3 Scan &nbsp;|&nbsp; F4 Customer &nbsp;|&nbsp; F5 Item &nbsp;|&nbsp; F6 Promo &nbsp;|&nbsp; F7 Pembayaran &nbsp;|&nbsp; F8 Voucher &nbsp;|&nbsp; F9 Uang &nbsp;|&nbsp; F10 Proses &nbsp;|&nbsp; Delete hapus baris terpilih
             </p>
-            <div className="text-right" style={{ marginTop: 8 }}>
-                <strong>Kembalian: {formatRupiah(change)}</strong>
-            </div>
             {errorMessage && <div className="alert alert-danger" style={{ marginTop: 8 }}>{errorMessage}</div>}
             <div className="row" style={{ marginTop: 10 }}>
                 <div className="col-sm-6">
                     <button type="button" className="btn btn-danger btn-block" onClick={handleEmptyCart} disabled={!cart.length}>Kosongkan</button>
                 </div>
                 <div className="col-sm-6">
-                <button type="button" className="btn btn-success btn-block" onClick={handleSubmit} disabled={!cart.length || parseIdNumber(paidAmount) < grandTotal}>Process (F10)</button>
+                <button type="button" className="btn btn-success btn-block" onClick={handleSubmit} disabled={!cart.length || parseIdNumber(paidAmount || grandTotal) < grandTotal}>Process (F10)</button>
                 </div>
             </div>
         </>

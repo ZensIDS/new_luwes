@@ -32,6 +32,12 @@
                                         {{ $penjualan->kas?->name ?? $penjualan->paymentMethod?->name ?? $penjualan->transaction?->payment?->name ?? 'Tunai' }}
                                     </td>
                                 </tr>
+                                @if ($penjualan->payment_reference)
+                                    <tr>
+                                        <td colspan="2">Nomor Referensi</td>
+                                        <td colspan="2">{{ $penjualan->payment_reference }}</td>
+                                    </tr>
+                                @endif
                                 <tr>
                                     <td colspan="2">Kasir</td>
                                     <td colspan="2">{{ $penjualan->kasir->name ?? '___customer' }}</td>

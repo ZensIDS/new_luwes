@@ -78,24 +78,12 @@ class CashierSaleService
                 }
             }
 
-            $promotionCodes = collect($data['promotion_codes'] ?? [])
-                ->map(fn ($code) => strtoupper(trim((string) $code)))
-                ->filter()
-                ->unique()
-                ->values()
-                ->all();
-            $promotions = $this->promotionService->selectedForOutlet($outletId, $promotionCodes, now(), true);
-            if ($promotions->count() !== count($promotionCodes)) {
-                throw new RuntimeException('Satu atau lebih kode flash sale atau bundling tidak ditemukan atau sudah tidak aktif.');
-            }
+            // Active promotions are evaluated automatically. PromotionService
+            // skips the ones whose item or minimum-purchase conditions are not
+            // met, so they never block an otherwise valid checkout.
+            $promotions = $this->promotionService->activeForOutlet($outletId, now(), true);
 
             $promotionResult = $this->promotionService->apply($allocations, $promotions, true);
-            $appliedPromotionCodes = collect($promotionResult['applications'])->pluck('code')->all();
-            foreach ($promotionCodes as $promotionCode) {
-                if (! in_array($promotionCode, $appliedPromotionCodes, true)) {
-                    throw new RuntimeException("Promo {$promotionCode} tidak memenuhi syarat item transaksi.");
-                }
-            }
             $allocations = $promotionResult['allocations'];
             $subtotal = (int) $promotionResult['subtotal'];
             $promotionTotal = (int) $promotionResult['promotion_total'];
@@ -156,6 +144,7 @@ class CashierSaleService
                 'change_amount' => $paidAmount - $grandTotal,
                 'payment_method_id' => $data['payment_method_id'] ?? null,
                 'payment_method_name' => $data['payment_method_name'] ?? null,
+                'payment_reference' => $data['payment_reference'] ?? null,
                 'status' => 'paid',
             ]);
 
