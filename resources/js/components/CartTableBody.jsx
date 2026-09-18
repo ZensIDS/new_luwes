@@ -16,7 +16,11 @@ const CartTableBody = forwardRef(({
         const nextIndex = Math.max(0, Math.min(cart.length - 1, index));
         const nextItem = cart[nextIndex];
         setSelectedCartProductId(nextItem.id);
-        window.requestAnimationFrame(() => rowRefs.current[nextIndex]?.focus());
+        window.requestAnimationFrame(() => {
+            const row = rowRefs.current[nextIndex];
+            row?.focus();
+            row?.scrollIntoView({ block: "nearest" });
+        });
     };
 
     const handleRowKeyDown = (event, index) => {
@@ -65,11 +69,6 @@ const CartTableBody = forwardRef(({
                     title="Tab/Shift+Tab atau ↑/↓ untuk berpindah item; Enter untuk edit qty"
                 >
                     <td>
-                        {c.is_serialized && c.pivot.serial_number && (
-                            <span className="badge bg-aqua">
-                                SN: {c.pivot.serial_number}
-                            </span>
-                        )}
                         <span>{c.name}</span>
                     </td>
                     <td>

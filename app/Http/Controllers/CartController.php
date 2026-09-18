@@ -40,21 +40,6 @@ class CartController extends Controller
                 })
                 ->sum('qty');
 
-            if ($item->is_serialized) {
-                $item->availableSerials = $item->ownerStocks()
-                    ->with('stock')
-                    ->where('owner_id', $outletId)
-                    ->where('qty', '>', 0)
-                    ->where(function ($expiryQuery) {
-                        $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
-                    })
-                    ->whereHas('stock', fn ($query) => $query->whereNotNull('serial_number'))
-                    ->get()
-                    ->mapWithKeys(fn ($ownerStock) => [
-                        $ownerStock->id => $ownerStock->stock?->serial_number,
-                    ])
-                    ->toArray();
-            }
             $rule = OutletPrice::with('outlet')->where('outlet_id', $outletId)
                 ->where('product_id', $item->id)
                 ->currentlyActive()
@@ -70,7 +55,7 @@ class CartController extends Controller
                     $rule,
                     $item
                 );
-                $allocatedQty = $item->is_serialized ? 1 : min($remainingQty, (int) $ownerStock->qty);
+                $allocatedQty = min($remainingQty, (int) $ownerStock->qty);
                 $firstPrice ??= $price;
                 $allocations[] = [
                     'cart_index' => $cartIndex,
@@ -128,72 +113,37 @@ class CartController extends Controller
         try {
             $request->validate([
                 'barcode' => 'required|exists:products,code',
-                'serial_number' => 'nullable|string',
                 'outlet_id' => 'required|integer|exists:outlets,id',
             ]);
             $outletId = OutletAccess::id($request);
             $product = Product::where('code', $request->barcode)->firstOrFail();
 
-            if ($product->is_serialized) {
-                $stock = OwnerStock::with('stock')
-                    ->where('owner_id', $outletId)
-                    ->where('product_id', $product->id)
-                    ->where('qty', '>', 0)
-                    ->where(function ($expiryQuery) {
-                        $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
-                    })
-                    ->when($request->serial_number, function ($query) use ($request) {
-                        $query->whereHas('stock', fn ($stockQuery) => $stockQuery->where('serial_number', $request->serial_number));
-                    })
-                    ->first();
+            $stockQty = OwnerStock::where('owner_id', $outletId)
+                ->where('product_id', $product->id)
+                ->where('qty', '>', 0)
+                ->where(function ($expiryQuery) {
+                    $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                })
+                ->sum('qty');
+            $cart = $request->user()->cart()
+                ->wherePivot('outlet_id', (string) $outletId)
+                ->where('products.id', $product->id)
+                ->first();
 
-                if (! $stock) {
-                    return response(['message' => 'Serial number tidak tersedia di outlet ini.'], 400);
+            if ($cart) {
+                if ($stockQty <= $cart->pivot->qty) {
+                    return response(['message' => 'Stok outlet tersedia hanya: ' . $stockQty], 400);
                 }
-
-                $cart = $request->user()->cart()
-                    ->wherePivot('outlet_id', (string) $outletId)
-                    ->wherePivot('owner_stock_id', $stock->id)
-                    ->first();
-
-                if ($cart) {
-                    return response(['message' => 'Serial number sudah ada di keranjang.'], 400);
+                $cart->pivot->qty++;
+                $cart->pivot->save();
+            } else {
+                if ($stockQty < 1) {
+                    return response(['message' => 'Produk tidak memiliki stok di outlet ini.'], 400);
                 }
-
                 $request->user()->cart()->attach($product->id, [
                     'qty' => 1,
                     'outlet_id' => $outletId,
-                    'owner_stock_id' => $stock->id,
-                    'serial_number' => $stock->stock?->serial_number,
                 ]);
-            } else {
-                $stockQty = OwnerStock::where('owner_id', $outletId)
-                    ->where('product_id', $product->id)
-                    ->where('qty', '>', 0)
-                    ->where(function ($expiryQuery) {
-                        $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
-                    })
-                    ->sum('qty');
-                $cart = $request->user()->cart()
-                    ->wherePivot('outlet_id', (string) $outletId)
-                    ->where('products.id', $product->id)
-                    ->first();
-
-                if ($cart) {
-                    if ($stockQty <= $cart->pivot->qty) {
-                        return response(['message' => 'Stok outlet tersedia hanya: ' . $stockQty], 400);
-                    }
-                    $cart->pivot->qty++;
-                    $cart->pivot->save();
-                } else {
-                    if ($stockQty < 1) {
-                        return response(['message' => 'Produk tidak memiliki stok di outlet ini.'], 400);
-                    }
-                    $request->user()->cart()->attach($product->id, [
-                        'qty' => 1,
-                        'outlet_id' => $outletId,
-                    ]);
-                }
             }
 
             return response('success', 204);
@@ -214,10 +164,6 @@ class CartController extends Controller
             ]);
             $outletId = OutletAccess::id($request);
             $product = Product::findOrFail($request->product_id);
-
-            if ($product->is_serialized) {
-                return response(['message' => 'Quantity barang serialized selalu satu.'], 400);
-            }
 
             $stockQty = OwnerStock::where('owner_id', $outletId)
                 ->where('product_id', $product->id)

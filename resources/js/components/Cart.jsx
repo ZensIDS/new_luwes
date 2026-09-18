@@ -4,10 +4,9 @@ import axios from "axios";
 import Barcodes from "./Barcodes.jsx";
 import CartTable from "./CartTable";
 import Gallery from "./Gallery";
-import SerialSelectionModal from "./SerialSelectionModal.jsx";
-import { formatIdNumber, parseIdNumber } from "../utils";
+import { parseIdNumber } from "../utils";
 
-const ProductSearchModal = ({ open, inputRef, search, onSearch, products, onAddProduct, onClose }) => {
+const ProductSearchModal = ({ open, inputRef, search, onSearch, products, productsLoading, onAddProduct, onClose }) => {
     useEffect(() => {
         if (open) window.setTimeout(() => inputRef.current?.focus(), 0);
     }, [open, inputRef]);
@@ -39,8 +38,10 @@ const ProductSearchModal = ({ open, inputRef, search, onSearch, products, onAddP
                         onChange={(event) => onSearch(event.target.value)}
                         autoComplete="off"
                     />
-                    <p className="text-muted small">Klik produk untuk memasukkannya ke transaksi.</p>
-                    <Gallery products={products} addProductToCart={onAddProduct} />
+                    <p className="text-muted small">Tekan Tab lalu Enter untuk memilih produk, atau klik produk untuk memasukkannya ke transaksi.</p>
+                    {productsLoading && <p className="text-muted text-center">Memuat produk outlet...</p>}
+                    {!productsLoading && !products.length && <p className="text-muted text-center">Produk tidak ditemukan di outlet ini.</p>}
+                    {!productsLoading && <Gallery products={products} addProductToCart={onAddProduct} />}
                 </div>
             </div>
         </div>
@@ -49,8 +50,10 @@ const ProductSearchModal = ({ open, inputRef, search, onSearch, products, onAddP
 
 const Cart = () => {
     const outlet = window.outlet || {};
+    const outletProductsUrl = window.POS_PRODUCTS_URL || (outlet.id ? `/outlet/${outlet.id}/products` : "");
     const [cart, setCart] = useState([]);
     const [products, setProducts] = useState([]);
+    const [productsLoading, setProductsLoading] = useState(false);
     const [customers, setCustomers] = useState([]);
     const [customerId, setCustomerId] = useState("");
     const [paymentMethods, setPaymentMethods] = useState([]);
@@ -63,10 +66,6 @@ const Cart = () => {
     const [paidAmount, setPaidAmount] = useState("");
     const [errorMessage, setErrorMessage] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [serialModal, setSerialModal] = useState(false);
-    const [selectedProduct, setSelectedProduct] = useState(null);
-    const [selectedSerial, setSelectedSerial] = useState("");
-    const [availableSerials, setAvailableSerials] = useState([]);
     const [selectedCartProductId, setSelectedCartProductId] = useState(null);
     const [productModalOpen, setProductModalOpen] = useState(false);
     const barcodeRef = useRef(null);
@@ -78,6 +77,8 @@ const Cart = () => {
     const paymentReferenceRef = useRef(null);
     const cartTableRef = useRef(null);
     const promotionTableRef = useRef(null);
+    const productsRequestRef = useRef(null);
+    const productSearchTimerRef = useRef(null);
 
     const getBaseSubtotal = (items = cart) => items.reduce(
         (sum, item) => sum + Number(item.cashier_base_subtotal ?? item.cashier_subtotal ?? (Number(item.pivot.qty || 0) * Number(item.harga_jual || 0))), 0
@@ -148,12 +149,52 @@ const Cart = () => {
         }).catch((error) => setErrorMessage(error.response?.data?.message || "Gagal memuat keranjang."));
     };
 
-    const loadProducts = (term = "") => {
-        const params = new URLSearchParams({ outlet_id: outlet.id, status_produk: "all" });
-        if (term) params.set("search", term);
-        axios.get("/product?" + params.toString())
-            .then((response) => setProducts(response.data.data || []))
-            .catch(() => setErrorMessage("Gagal memuat produk outlet."));
+    const loadProducts = (term = "", immediate = false) => {
+        const fetchProducts = () => {
+            if (!outletProductsUrl) {
+                setProducts([]);
+                setProductsLoading(false);
+                setErrorMessage("Outlet kasir tidak ditemukan.");
+                return;
+            }
+
+            productsRequestRef.current?.abort();
+            const controller = new AbortController();
+            productsRequestRef.current = controller;
+            const params = new URLSearchParams({ status_produk: "all", per_page: "25" });
+            const normalizedTerm = String(term || "").trim();
+            if (normalizedTerm) params.set("search", normalizedTerm);
+
+            setProducts([]);
+            setProductsLoading(true);
+            axios.get(`${outletProductsUrl}?${params.toString()}`, {
+                headers: { Accept: "application/json" },
+                signal: controller.signal,
+            })
+                .then((response) => {
+                    if (productsRequestRef.current !== controller) return;
+                    setProducts(Array.isArray(response.data?.data) ? response.data.data : []);
+                })
+                .catch((error) => {
+                    if (axios.isCancel(error) || error.code === "ERR_CANCELED") return;
+                    setErrorMessage("Gagal memuat produk outlet.");
+                })
+                .finally(() => {
+                    if (productsRequestRef.current === controller) {
+                        productsRequestRef.current = null;
+                        setProductsLoading(false);
+                    }
+                });
+        };
+
+        window.clearTimeout(productSearchTimerRef.current);
+        setProducts([]);
+        setProductsLoading(true);
+        if (immediate) {
+            fetchProducts();
+            return;
+        }
+        productSearchTimerRef.current = window.setTimeout(fetchProducts, 250);
     };
 
     const loadCustomers = () => {
@@ -177,18 +218,25 @@ const Cart = () => {
 
     useEffect(() => {
         loadCart();
-        loadProducts();
+        loadProducts("", true);
         loadCustomers();
         loadPaymentMethods();
-        setTimeout(() => barcodeRef.current?.focus(), 100);
+        const focusTimer = setTimeout(() => barcodeRef.current?.focus(), 100);
+        return () => {
+            clearTimeout(focusTimer);
+            window.clearTimeout(productSearchTimerRef.current);
+            productsRequestRef.current?.abort();
+        };
     }, []);
 
-    const addToCart = (value, serialNumber = null) => {
+    const addToCart = (value) => {
         const code = String(value || "").trim();
         const localProduct = products.find((item) => item.barcode === code || item.code === code);
         const productRequest = localProduct
             ? Promise.resolve(localProduct)
-            : axios.get("/product?" + new URLSearchParams({ outlet_id: outlet.id, status_produk: "all", search: code }))
+            : axios.get(`${outletProductsUrl}?` + new URLSearchParams({ search: code, status_produk: "all", per_page: "25" }), {
+                headers: { Accept: "application/json" },
+            })
                 .then((response) => (response.data.data || []).find((item) => item.barcode === code || item.code === code));
 
         productRequest.then((product) => {
@@ -197,22 +245,11 @@ const Cart = () => {
                 return;
             }
 
-            if (product.is_serialized && !serialNumber) {
-                const serials = (product.owner_stocks || [])
-                    .filter((stock) => stock.serial_number && Number(stock.qty) > 0)
-                    .map((stock) => ({ id: stock.id, serial: stock.serial_number, status: "available" }));
-                setSelectedProduct(product);
-                setAvailableSerials(serials);
-                setSerialModal(true);
-                return;
-            }
-
-            axios.post("/cart", { barcode: product.barcode || product.code, serial_number: serialNumber, outlet_id: outlet.id })
+            axios.post("/cart", { barcode: product.barcode || product.code, outlet_id: outlet.id })
                 .then(() => {
                     setBarcode("");
                     setErrorMessage("");
                     loadCart();
-                    loadProducts(search);
                     barcodeRef.current?.focus();
                 })
                 .catch((error) => setErrorMessage(error.response?.data?.message || "Produk tidak dapat ditambahkan."));
@@ -385,6 +422,7 @@ const Cart = () => {
             if (event.key === "F2") {
                 event.preventDefault();
                 setProductModalOpen(true);
+                loadProducts(search, true);
                 window.setTimeout(() => searchRef.current?.focus(), 0);
             }
             if (event.key === "F4") { event.preventDefault(); customerRef.current?.focus(); }
@@ -414,28 +452,16 @@ const Cart = () => {
             }
             if (!typing && event.key === "Delete" && selectedCartProductId) deleteCartItem(selectedCartProductId);
             if (event.key === "Escape") {
-                setSerialModal(false);
                 setProductModalOpen(false);
                 barcodeRef.current?.focus();
             }
         };
         window.addEventListener("keydown", shortcut);
         return () => window.removeEventListener("keydown", shortcut);
-    }, [cart, paidAmount, grandTotal, appliedVouchers, appliedPromotions, selectedCartProductId, paymentReference, paymentMethodId, isSubmitting]);
+    }, [cart, paidAmount, grandTotal, appliedVouchers, appliedPromotions, selectedCartProductId, paymentReference, paymentMethodId, isSubmitting, search]);
 
     return (
-        <div className="row">
-            <SerialSelectionModal
-                serialModal={serialModal}
-                setSerialModal={setSerialModal}
-                selectedProduct={selectedProduct}
-                selectedSerial={selectedSerial}
-                setSelectedSerial={setSelectedSerial}
-                availableSerials={availableSerials}
-                handleSerialSelection={() => {
-                    if (selectedSerial && selectedProduct) addToCart(selectedProduct.barcode, selectedSerial);
-                }}
-            />
+        <div className="row pos-cashier-layout">
             <ProductSearchModal
                 open={productModalOpen}
                 inputRef={searchRef}
@@ -445,80 +471,83 @@ const Cart = () => {
                     loadProducts(term);
                 }}
                 products={products}
+                productsLoading={productsLoading}
                 onAddProduct={(value) => {
                     setProductModalOpen(false);
                     addToCart(value);
                 }}
                 onClose={() => setProductModalOpen(false)}
             />
-            <div className="col-md-12">
+            <div className="col-md-12 pos-cashier-column">
                 <Barcodes
                     barcode={barcode}
                     handleScanBarcode={handleScanBarcode}
                     handleOnChangeBarcode={(event) => setBarcode(event.target.value)}
                     inputRef={barcodeRef}
                 />
-                <CartTable
-                    cart={cart}
-                    getBaseSubtotal={getBaseSubtotal}
-                    getSubtotal={getSubtotal}
-                    promotionTotal={getPromotionTotal()}
-                    voucherBreakdown={voucherBreakdown}
-                    voucherTotal={voucherTotal}
-                    grandTotal={grandTotal}
-                    customers={customers}
-                    customerId={customerId}
-                    setCustomerId={setCustomerId}
-                    customerInputRef={customerRef}
-                    paidAmount={paidAmount}
-                    setPaidAmount={setPaidAmount}
-                    paymentMethods={paymentMethods}
-                    paymentMethodId={paymentMethodId}
-                    setPaymentMethodId={setPaymentMethodId}
-                    paymentReference={paymentReference}
-                    setPaymentReference={setPaymentReference}
-                    paymentMethodInputRef={paymentMethodRef}
-                    paymentReferenceInputRef={paymentReferenceRef}
-                    paidInputRef={paidRef}
-                    voucherInputRef={voucherRef}
-                    outletId={outlet.id}
-                    appliedVouchers={appliedVouchers}
-                    onAddVoucher={addVoucher}
-                    onRemoveVoucher={removeVoucher}
-                    appliedPromotions={appliedPromotions}
-                    onAddPromotion={addPromotion}
-                    onRemovePromotion={removePromotion}
-                    selectedProducts={cart.map((item) => ({
-                        id: item.id,
-                        qty: Number(item.pivot?.qty || 0),
-                        baseSubtotal: Number(item.cashier_base_subtotal || 0),
-                        promotionBreakdown: item.cashier_promotion_breakdown || [],
-                    }))}
-                    appliedPromotionNames={getAppliedPromotionNames()}
-                    promotionTableRef={promotionTableRef}
-                    handleChangeQty={(productId, value) => {
-                        const qty = Number.parseInt(value, 10);
-                        if (Number.isInteger(qty) && qty >= 1) updateCart(productId, qty);
-                    }}
-                    handleClickIncrease={(productId) => {
-                        const item = cart.find((value) => value.id === productId);
-                        if (item) updateCart(productId, Number(item.pivot.qty) + 1);
-                    }}
-                    handleClickDecrease={(productId) => {
-                        const item = cart.find((value) => value.id === productId);
-                        if (item && Number(item.pivot.qty) > 1) updateCart(productId, Number(item.pivot.qty) - 1);
-                        else deleteCartItem(productId);
-                    }}
-                    handleClickDelete={deleteCartItem}
-                    handleEmptyCart={emptyCart}
-                    handleSubmit={handleSubmit}
-                    isSubmitting={isSubmitting}
-                    errorMessage={errorMessage}
-                    selectedCartProductId={selectedCartProductId}
-                    setSelectedCartProductId={setSelectedCartProductId}
-                    cartTableRef={cartTableRef}
-                    onSyncPromotions={syncPromotions}
-                />
+                <div className="pos-cashier-details">
+                    <CartTable
+                        cart={cart}
+                        getBaseSubtotal={getBaseSubtotal}
+                        getSubtotal={getSubtotal}
+                        promotionTotal={getPromotionTotal()}
+                        voucherBreakdown={voucherBreakdown}
+                        voucherTotal={voucherTotal}
+                        grandTotal={grandTotal}
+                        customers={customers}
+                        customerId={customerId}
+                        setCustomerId={setCustomerId}
+                        customerInputRef={customerRef}
+                        paidAmount={paidAmount}
+                        setPaidAmount={setPaidAmount}
+                        paymentMethods={paymentMethods}
+                        paymentMethodId={paymentMethodId}
+                        setPaymentMethodId={setPaymentMethodId}
+                        paymentReference={paymentReference}
+                        setPaymentReference={setPaymentReference}
+                        paymentMethodInputRef={paymentMethodRef}
+                        paymentReferenceInputRef={paymentReferenceRef}
+                        paidInputRef={paidRef}
+                        voucherInputRef={voucherRef}
+                        outletId={outlet.id}
+                        appliedVouchers={appliedVouchers}
+                        onAddVoucher={addVoucher}
+                        onRemoveVoucher={removeVoucher}
+                        appliedPromotions={appliedPromotions}
+                        onAddPromotion={addPromotion}
+                        onRemovePromotion={removePromotion}
+                        selectedProducts={cart.map((item) => ({
+                            id: item.id,
+                            qty: Number(item.pivot?.qty || 0),
+                            baseSubtotal: Number(item.cashier_base_subtotal || 0),
+                            promotionBreakdown: item.cashier_promotion_breakdown || [],
+                        }))}
+                        appliedPromotionNames={getAppliedPromotionNames()}
+                        promotionTableRef={promotionTableRef}
+                        handleChangeQty={(productId, value) => {
+                            const qty = Number.parseInt(value, 10);
+                            if (Number.isInteger(qty) && qty >= 1) updateCart(productId, qty);
+                        }}
+                        handleClickIncrease={(productId) => {
+                            const item = cart.find((value) => value.id === productId);
+                            if (item) updateCart(productId, Number(item.pivot.qty) + 1);
+                        }}
+                        handleClickDecrease={(productId) => {
+                            const item = cart.find((value) => value.id === productId);
+                            if (item && Number(item.pivot.qty) > 1) updateCart(productId, Number(item.pivot.qty) - 1);
+                            else deleteCartItem(productId);
+                        }}
+                        handleClickDelete={deleteCartItem}
+                        handleEmptyCart={emptyCart}
+                        handleSubmit={handleSubmit}
+                        isSubmitting={isSubmitting}
+                        errorMessage={errorMessage}
+                        selectedCartProductId={selectedCartProductId}
+                        setSelectedCartProductId={setSelectedCartProductId}
+                        cartTableRef={cartTableRef}
+                        onSyncPromotions={syncPromotions}
+                    />
+                </div>
             </div>
         </div>
     );

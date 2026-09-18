@@ -229,42 +229,104 @@ class DemoDataSeeder extends Seeder
         $this->categories['utilities'] = $this->seedCategory('Utilitas', 'pengeluaran', null);
 
         $productData = [
-            'A' => ['DEMO-001', 'Produk Demo A', $productCategories['cosmetics'], 'Series A', 100000, 106875, 20, 'Rak A-01', 'pcs', null, null, false, 'sudah'],
-            'B' => ['DEMO-002', 'Produk Demo B', $productCategories['household'], 'Series B', 50000, 53820, 15, 'Rak B-01', 'pcs', null, null, false, 'sudah'],
-            'C' => ['DEMO-003', 'Produk Demo C', $productCategories['fashion'], 'Series C', 75000, 90000, 10, 'Rak C-01', 'pcs', 'dus', 12, false, 'tambahan_diskon'],
-            'D' => ['DEMO-004', 'Produk Demo D', $productCategories['food'], 'Series D', 30000, 45000, 25, 'Rak D-01', 'pcs', 'karton', 24, false, 'sudah'],
-            'E' => ['DEMO-005', 'Produk Demo E Serialized', $productCategories['electronics'], 'Model E', 350000, 450000, 5, 'Rak E-01', 'unit', null, null, true, 'lunas'],
-            'F' => ['DEMO-006', 'Produk Demo F Low Stock', $productCategories['fashion'], 'Series F', 15000, 25000, 20, 'Rak F-01', 'pcs', null, null, false, 'belum_lunas'],
+            'A' => [
+                'code' => 'DEMO-001', 'name' => 'Shampoo Daily Care 250 ml', 'category' => $productCategories['cosmetics'],
+                'brand' => 'Luwes Beauty', 'model' => 'Series A', 'warna' => 'Putih', 'ukuran' => '250 ml',
+                'cost' => 100000, 'sale' => 106875, 'minimum' => 20, 'location' => 'Rak A-01',
+                'unit' => 'pcs', 'large_unit' => 'dus', 'conversion' => 12, 'status' => 'sudah', 'supplier_keys' => ['S00001'],
+            ],
+            'B' => [
+                'code' => 'DEMO-002', 'name' => 'Sabun Cuci Piring 800 ml', 'category' => $productCategories['household'],
+                'brand' => 'Luwes Home', 'model' => 'Series B', 'warna' => 'Hijau', 'ukuran' => '800 ml',
+                'cost' => 50000, 'sale' => 53820, 'minimum' => 15, 'location' => 'Rak B-01',
+                'unit' => 'botol', 'large_unit' => 'dus', 'conversion' => 24, 'status' => 'sudah', 'supplier_keys' => ['S00001'],
+            ],
+            'C' => [
+                'code' => 'DEMO-003', 'name' => 'Kaos Basic Unisex', 'category' => $productCategories['fashion'],
+                'brand' => 'Luwes Wear', 'model' => 'Series C', 'warna' => 'Biru', 'ukuran' => 'M',
+                'cost' => 75000, 'sale' => 90000, 'minimum' => 10, 'location' => 'Rak C-01',
+                'unit' => 'pcs', 'large_unit' => 'dus', 'conversion' => 12, 'status' => 'tambahan_diskon', 'supplier_keys' => ['S00003'],
+            ],
+            'D' => [
+                'code' => 'DEMO-004', 'name' => 'Kopi Bubuk Arabika 200 g', 'category' => $productCategories['food'],
+                'brand' => 'Kopi Magelang', 'model' => 'Series D', 'warna' => 'Cokelat', 'ukuran' => '200 g',
+                'cost' => 30000, 'sale' => 45000, 'minimum' => 25, 'location' => 'Rak D-01',
+                'unit' => 'pack', 'large_unit' => 'karton', 'conversion' => 24, 'status' => 'sudah', 'supplier_keys' => ['S00003'],
+            ],
+            'E' => [
+                'code' => 'DEMO-005', 'name' => 'Headset Bluetooth Basic', 'category' => $productCategories['electronics'],
+                'brand' => 'SonicPro', 'model' => 'Model E', 'warna' => 'Hitam', 'ukuran' => 'Standard',
+                'cost' => 350000, 'sale' => 450000, 'minimum' => 5, 'location' => 'Rak E-01',
+                'unit' => 'pcs', 'large_unit' => 'box', 'conversion' => 10, 'status' => 'lunas', 'supplier_keys' => ['S00002'],
+            ],
+            'F' => [
+                'code' => 'DEMO-006', 'name' => 'Celana Jogger Basic', 'category' => $productCategories['fashion'],
+                'brand' => 'Luwes Wear', 'model' => 'Series F', 'warna' => 'Abu-abu', 'ukuran' => 'L',
+                'cost' => 15000, 'sale' => 25000, 'minimum' => 20, 'location' => 'Rak C-02',
+                'unit' => 'pcs', 'large_unit' => 'lusin', 'conversion' => 12, 'status' => 'belum_lunas', 'supplier_keys' => ['S00004'],
+            ],
+            'G' => [
+                'code' => 'DEMO-007', 'name' => 'Lip Tint Velvet 3.5 ml', 'category' => $productCategories['cosmetics'],
+                'brand' => 'Luwes Beauty', 'model' => 'LT-03', 'warna' => 'Rose', 'ukuran' => '3.5 ml',
+                'cost' => 28000, 'sale' => 42000, 'minimum' => 10, 'location' => 'Rak A-02',
+                'unit' => 'pcs', 'large_unit' => 'dus', 'conversion' => 12, 'status' => 'tambahan_diskon', 'supplier_keys' => ['S00001'],
+            ],
+            'H' => [
+                'code' => 'DEMO-008', 'name' => 'Kaos Oversize Cotton', 'category' => $productCategories['fashion'],
+                'brand' => 'Luwes Wear', 'model' => 'OS-01', 'warna' => 'Hitam', 'ukuran' => 'XL',
+                'cost' => 45000, 'sale' => 65000, 'minimum' => 8, 'location' => 'Rak C-03',
+                'unit' => 'pcs', 'large_unit' => 'lusin', 'conversion' => 12, 'status' => 'sudah', 'supplier_keys' => ['S00003'],
+            ],
+            'I' => [
+                'code' => 'DEMO-009', 'name' => 'Beras Premium 5 kg', 'category' => $productCategories['food'],
+                'brand' => 'Mitra Pangan', 'model' => 'BP-05', 'warna' => 'Putih', 'ukuran' => '5 kg',
+                'cost' => 68000, 'sale' => 82000, 'minimum' => 8, 'location' => 'Rak D-02',
+                'unit' => 'karung', 'large_unit' => 'pallet', 'conversion' => 20, 'status' => 'sudah', 'supplier_keys' => ['S00003'],
+            ],
+            'J' => [
+                'code' => 'DEMO-010', 'name' => 'Lampu LED 12 Watt', 'category' => $productCategories['electronics'],
+                'brand' => 'Terang Jaya', 'model' => 'LED-12W', 'warna' => 'Putih', 'ukuran' => '12W',
+                'cost' => 20000, 'sale' => 32000, 'minimum' => 12, 'location' => 'Rak E-02',
+                'unit' => 'pcs', 'large_unit' => 'box', 'conversion' => 20, 'status' => 'sudah', 'supplier_keys' => ['S00002'],
+            ],
+            'K' => [
+                'code' => 'DEMO-011', 'name' => 'Organizer Plastik Serbaguna', 'category' => $productCategories['household'],
+                'brand' => 'Luwes Home', 'model' => 'ORG-01', 'warna' => 'Bening', 'ukuran' => '30 x 20 cm',
+                'cost' => 18000, 'sale' => 29000, 'minimum' => 10, 'location' => 'Rak B-02',
+                'unit' => 'pcs', 'large_unit' => 'karton', 'conversion' => 24, 'status' => 'sudah', 'supplier_keys' => ['S00001'],
+            ],
+            'L' => [
+                'code' => 'DEMO-012', 'name' => 'Tumbler Stainless 500 ml', 'category' => $productCategories['household'],
+                'brand' => 'Luwes Home', 'model' => 'TMB-500', 'warna' => 'Biru', 'ukuran' => '500 ml',
+                'cost' => 55000, 'sale' => 79000, 'minimum' => 6, 'location' => 'Rak B-03',
+                'unit' => 'pcs', 'large_unit' => 'box', 'conversion' => 12, 'status' => 'sudah', 'supplier_keys' => ['S00004'],
+            ],
         ];
 
-        foreach ($productData as $key => [$code, $name, $category, $model, $cost, $sale, $minimum, $location, $unit, $largeUnit, $conversion, $serialized, $status]) {
-            $this->products[$key] = $this->upsert(Product::class, ['code' => $code], [
-                'pic' => 'products/'.strtolower($code).'.png',
-                'name' => $name,
-                'category_id' => $category->id,
-                'desc' => 'Data demo untuk '.$name.'.',
-                'warna' => $key === 'C' ? 'Biru' : 'Multicolor',
-                'ukuran' => $key === 'C' ? 'M' : null,
-                'model' => $model,
-                'is_serialized' => $serialized,
-                'harga_beli' => $cost,
-                'harga_jual' => $sale,
+        foreach ($productData as $key => $data) {
+            $this->products[$key] = $this->upsert(Product::class, ['code' => $data['code']], [
+                'pic' => 'products/'.strtolower($data['code']).'.png',
+                'name' => $data['name'],
+                'category_id' => $data['category']->id,
+                'desc' => 'Data demo untuk '.$data['name'].'.',
+                'warna' => $data['warna'],
+                'ukuran' => $data['ukuran'],
+                'brand' => $data['brand'],
+                'model' => $data['model'],
+                'is_serialized' => false,
+                'harga_beli' => $data['cost'],
+                'harga_jual' => $data['sale'],
                 'diskon' => 0,
-                'satuan' => $unit,
-                'min_stock' => $minimum,
-                'lokasi' => $location,
-                'status_produk' => $status,
-                'status_produk_note' => $status === 'tambahan_diskon' ? 'Program diskon toko demo.' : null,
-                'satuan_besar' => $largeUnit,
-                'konversi_qty' => $conversion,
+                'satuan' => $data['unit'],
+                'min_stock' => $data['minimum'],
+                'lokasi' => $data['location'],
+                'status_produk' => $data['status'],
+                'status_produk_note' => $data['status'] === 'tambahan_diskon' ? 'Program diskon toko demo.' : null,
+                'satuan_besar' => $data['large_unit'],
+                'konversi_qty' => $data['conversion'],
             ]);
 
-            $supplierKeys = match ($key) {
-                'A', 'B' => ['S00001'],
-                'C', 'D' => ['S00003'],
-                'E' => ['S00002'],
-                default => ['S00004'],
-            };
+            $supplierKeys = $data['supplier_keys'];
             $this->products[$key]->suppliers()->sync(array_map(fn ($supplierKey) => $this->suppliers[$supplierKey]->id, $supplierKeys));
         }
 
@@ -552,7 +614,7 @@ class DemoDataSeeder extends Seeder
             'outlet_id' => null,
             'supplier_id' => $this->suppliers['S00001']->id,
             'kas_id' => $this->kas['warehouse']->id,
-            'total' => '11525000',
+            'total' => '15599000',
             'is_published' => true,
             'owner_approval_status' => 'approved',
             'owner_approved_by' => $this->users['owner']->id,
@@ -568,45 +630,38 @@ class DemoDataSeeder extends Seeder
             ['A', 50, 100000, 'WH-DEMO-A-001', 37],
             ['B', 40, 50000, 'WH-DEMO-B-001', 32],
             ['C', 25, 75000, 'WH-DEMO-C-001', 25],
-            ['E', 4, 350000, 'WH-DEMO-E-', 4],
+            ['D', 24, 30000, 'WH-DEMO-D-001', 24],
+            ['E', 4, 350000, 'WH-DEMO-E-001', 4],
+            ['G', 24, 28000, 'WH-DEMO-G-001', 24],
+            ['H', 24, 45000, 'WH-DEMO-H-001', 24],
+            ['I', 20, 68000, 'WH-DEMO-I-001', 20],
+            ['J', 20, 20000, 'WH-DEMO-J-001', 20],
+            ['K', 24, 18000, 'WH-DEMO-K-001', 24],
+            ['L', 12, 55000, 'WH-DEMO-L-001', 12],
         ];
-        foreach ($publishedLines as [$productKey, $qty, $cost, $skuPrefix, $remainingQty]) {
+        foreach ($publishedLines as [$productKey, $qty, $cost, $sku, $remainingQty]) {
             $product = $this->products[$productKey];
-            $serialNumbers = [];
-            if ($product->is_serialized) {
-                for ($serial = 1; $serial <= $qty; $serial++) {
-                    $serialNumber = $skuPrefix.str_pad((string) $serial, 3, '0', STR_PAD_LEFT);
-                    $serialNumbers[] = $serialNumber;
-                    $this->upsert(StockPembelian::class, [
-                        'pembelian_id' => $publishedPurchase->id,
-                        'product_id' => $product->id,
-                        'serial_number' => $serialNumber,
-                    ], [
-                        'sku' => $serialNumber,
-                        'harga_beli' => $cost,
-                        'qty' => 1,
-                        'subtotal' => $cost,
-                        'expired_at' => today()->addYear()->toDateString(),
-                        'condition' => 'new',
-                        'status' => 'sent_to_outlet',
-                    ]);
-                }
-                $this->seedStock($publishedPurchase, $product, $skuPrefix.'001', $cost, $remainingQty, 'WH-E-001', $serialNumbers[0]);
-            } else {
-                $this->upsert(StockPembelian::class, [
-                    'pembelian_id' => $publishedPurchase->id,
-                    'product_id' => $product->id,
-                ], [
-                    'sku' => $skuPrefix,
-                    'harga_beli' => $cost,
-                    'qty' => 0,
-                    'subtotal' => $qty * $cost,
-                    'expired_at' => today()->addYear()->toDateString(),
-                    'condition' => 'new',
-                    'status' => 'sent_to_outlet',
-                ]);
-                $this->seedStock($publishedPurchase, $product, $skuPrefix, $cost, $remainingQty, $product->lokasi, null);
-            }
+            // Remove serial-based rows from older demo-seeder versions before
+            // recreating this product as ordinary quantity-based stock.
+            StockPembelian::query()
+                ->where('pembelian_id', $publishedPurchase->id)
+                ->where('product_id', $product->id)
+                ->whereNotNull('serial_number')
+                ->delete();
+            $this->upsert(StockPembelian::class, [
+                'pembelian_id' => $publishedPurchase->id,
+                'product_id' => $product->id,
+            ], [
+                'sku' => $sku,
+                'qty' => 0,
+                'harga_beli' => $cost,
+                'subtotal' => $qty * $cost,
+                'expired_at' => today()->addYear()->toDateString(),
+                'condition' => 'new',
+                'status' => 'sent_to_outlet',
+                'serial_number' => null,
+            ]);
+            $this->seedStock($publishedPurchase, $product, $sku, $cost, $remainingQty, $product->lokasi);
 
             $this->upsert(PembelianProduct::class, [
                 'pembelian_id' => $publishedPurchase->id,
@@ -617,11 +672,11 @@ class DemoDataSeeder extends Seeder
                 'qty_diterima' => $qty,
                 'subtotal' => $qty * $cost,
                 'expired_at' => today()->addYear()->toDateString(),
-                'serial_numbers' => $serialNumbers ?: null,
+                'serial_numbers' => null,
             ]);
         }
 
-        $paidAmount = 11525000;
+        $paidAmount = 15599000;
         $this->upsert(PembelianTransaction::class, ['pembelian_id' => $publishedPurchase->id], [
             'payment_date' => now()->subDays(9),
             'payment_method' => 'Transfer BCA',
@@ -693,7 +748,30 @@ class DemoDataSeeder extends Seeder
         $this->seedWarehouseMovement('A', $publishedPurchase->id, 50, 0, 50, 'Penerimaan PO-DEMO-001.');
         $this->seedWarehouseMovement('B', $publishedPurchase->id, 40, 0, 40, 'Penerimaan PO-DEMO-001.');
         $this->seedWarehouseMovement('C', $publishedPurchase->id, 25, 0, 25, 'Penerimaan PO-DEMO-001.');
+        $this->seedWarehouseMovement('D', $publishedPurchase->id, 24, 0, 24, 'Penerimaan PO-DEMO-001.');
         $this->seedWarehouseMovement('E', $publishedPurchase->id, 4, 0, 4, 'Penerimaan PO-DEMO-001.');
+        $this->seedWarehouseMovement('G', $publishedPurchase->id, 24, 0, 24, 'Penerimaan PO-DEMO-001.');
+        $this->seedWarehouseMovement('H', $publishedPurchase->id, 24, 0, 24, 'Penerimaan PO-DEMO-001.');
+        $this->seedWarehouseMovement('I', $publishedPurchase->id, 20, 0, 20, 'Penerimaan PO-DEMO-001.');
+        $this->seedWarehouseMovement('J', $publishedPurchase->id, 20, 0, 20, 'Penerimaan PO-DEMO-001.');
+        $this->seedWarehouseMovement('K', $publishedPurchase->id, 24, 0, 24, 'Penerimaan PO-DEMO-001.');
+        $this->seedWarehouseMovement('L', $publishedPurchase->id, 12, 0, 12, 'Penerimaan PO-DEMO-001.');
+
+        foreach ([
+            ['D', 6], ['E', 2], ['G', 12], ['H', 10], ['I', 8], ['J', 10], ['K', 12], ['L', 6],
+        ] as [$productKey, $qty]) {
+            $product = $this->products[$productKey];
+            $this->ownerStocks['one'.$productKey] = $this->seedOwnerStock(
+                $this->outlets['one'],
+                $product,
+                'DEMO-OUTLET-'.$productKey.'-001',
+                $this->stocks[$product->code],
+                $qty,
+                Pembelian::class,
+                $publishedPurchase->id,
+                'Penerimaan stok demo dari PO-DEMO-001.'
+            );
+        }
     }
 
     private function seedOutletOperations(): void
@@ -1074,7 +1152,7 @@ class DemoDataSeeder extends Seeder
         }
     }
 
-    private function seedStock(Pembelian $purchase, Product $product, string $sku, int $cost, int $qty, string $location, ?string $serialNumber): Stock
+    private function seedStock(Pembelian $purchase, Product $product, string $sku, int $cost, int $qty, string $location): Stock
     {
         $stock = $this->upsert(Stock::class, ['sku' => $sku], [
             'pembelian_id' => $purchase->id,
@@ -1083,7 +1161,7 @@ class DemoDataSeeder extends Seeder
             'qty' => $qty,
             'qty_reserved' => 0,
             'expired_at' => today()->addYear()->toDateString(),
-            'serial_number' => $serialNumber,
+            'serial_number' => null,
             'imei' => null,
             'condition' => 'new',
             'location' => $location,
@@ -1095,9 +1173,13 @@ class DemoDataSeeder extends Seeder
             'DEMO-001' => 'A',
             'DEMO-002' => 'B',
             'DEMO-003' => 'C',
-            default => 'E',
+            'DEMO-005' => 'E',
+            default => null,
         };
-        $this->stocks[$key] = $stock->fresh();
+        $this->stocks[$product->code] = $stock->fresh();
+        if ($key) {
+            $this->stocks[$key] = $stock->fresh();
+        }
 
         return $stock->fresh();
     }
@@ -1123,7 +1205,7 @@ class DemoDataSeeder extends Seeder
             'source_id' => $sourceId,
             'created_by' => $this->users['warehouse']->id,
         ]);
-        $this->seedMovement($product, $outlet, $ownerStock, $this->users['warehouse'], 'in', $sourceType, $sourceId, $product->code === 'DEMO-001' ? 12 : 8, 0, $product->code === 'DEMO-001' ? 12 : 8, $notes);
+        $this->seedMovement($product, $outlet, $ownerStock, $this->users['warehouse'], 'in', $sourceType, $sourceId, $qty, 0, $qty, $notes);
 
         return $ownerStock->fresh();
     }

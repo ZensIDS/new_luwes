@@ -21,6 +21,14 @@ const Gallery = ({ products, addProductToCart }) => {
                             key={p.id}
                             className="cursor-pointer"
                             onClick={() => addProductToCart(p.barcode)}
+                            tabIndex="0"
+                            onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    addProductToCart(p.barcode);
+                                }
+                            }}
+                            title="Tekan Enter untuk memasukkan produk"
                         >
                             <td className="text-center align-middle">
                                 <img

@@ -67,6 +67,8 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::resource('/customer', CustomerController::class);
     Route::resource('/kas', KasController::class);
     Route::resource('/payment', PaymentMethodController::class);
+    Route::get('/outlet/{outlet}/products', [ProductController::class, 'outletProducts'])
+        ->name('outlet.products');
     Route::resource('/outlet', OutletController::class);
     Route::get('/outlet/{outlet_id}/kas', [OutletController::class, 'getKas']);
     Route::resource('/supplier', SupplierController::class);

@@ -25,32 +25,63 @@ use Spatie\Activitylog\Models\Activity;
 
 class ProductController extends Controller
 {
+    /**
+     * Return only products available in the requested outlet for the cashier.
+     * The outlet is part of the URL so the client cannot accidentally fall
+     * back to the global product listing.
+     */
+    public function outletProducts(Request $request, Outlet $outlet)
+    {
+        $request->merge([
+            'outlet_id' => $outlet->id,
+            'status_produk' => 'all',
+        ]);
+        $request->headers->set('Accept', 'application/json');
+
+        return $this->index($request);
+    }
+
     public function index(Request $request)
     {
         if (in_array($request->user()?->role, ['staff-outlet', 'kasir'], true)) {
             $request->merge(['outlet_id' => OutletAccess::id($request)]);
         }
+        $outletId = $request->input('outlet_id');
         $statusFilter = $request->input('status_produk', 'sudah');
         $products = Product::query();
 
         if ($request->filled('search')) {
-            $search = $request->search;
-            $products = $products->where(function ($query) use ($search) {
-                $query->where('name', 'LIKE', "%{$search}%")
-                    ->orWhere('code', 'LIKE', "%{$search}%")
-                    ->orWhere('harga_jual', 'LIKE', "%{$search}%")
-                    ->orWhere('brand', 'LIKE', "%{$search}%")
-                    ->orWhere('model', 'LIKE', "%{$search}%")
-                    ->orWhereHas('stocks', function ($stockQuery) use ($search) {
-                        $stockQuery->where('serial_number', 'LIKE', "%{$search}%")
-                            ->orWhere('status', 'LIKE', "%{$search}%");
-                    });
-            });
+            $search = trim((string) $request->search);
+            if ($search !== '') {
+                $products = $products->where(function ($query) use ($search, $outletId) {
+                    $query->where('name', 'LIKE', "%{$search}%")
+                        ->orWhere('code', 'LIKE', "%{$search}%")
+                        ->orWhere('harga_jual', 'LIKE', "%{$search}%")
+                        ->orWhere('brand', 'LIKE', "%{$search}%")
+                        ->orWhere('model', 'LIKE', "%{$search}%");
+
+                    if ($outletId) {
+                        $query->orWhereHas('ownerStocks', function ($stockQuery) use ($outletId, $search) {
+                            $stockQuery->where('owner_id', $outletId)
+                                ->where('qty', '>', 0)
+                                ->where(function ($expiryQuery) {
+                                    $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                                })
+                                ->whereHas('stock', fn ($stock) => $stock->where('serial_number', 'LIKE', "%{$search}%"));
+                        });
+                    } else {
+                        $query->orWhereHas('stocks', function ($stockQuery) use ($search) {
+                            $stockQuery->where('serial_number', 'LIKE', "%{$search}%")
+                                ->orWhere('status', 'LIKE', "%{$search}%");
+                        });
+                    }
+                });
+            }
         }
 
-        if ($request->filled('outlet_id')) {
-            $products = $products->whereHas('ownerStocks', function ($query) use ($request) {
-                $query->where('owner_id', $request->outlet_id)
+        if ($outletId) {
+            $products = $products->whereHas('ownerStocks', function ($query) use ($outletId) {
+                $query->where('owner_id', $outletId)
                     ->where('qty', '>', 0)
                     ->where(function ($expiryQuery) {
                         $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
@@ -71,33 +102,40 @@ class ProductController extends Controller
         }
 
         if (request()->wantsJson()) {
+            $relations = [
+                'category:id,name',
+                'outletPrices' => function ($query) use ($outletId) {
+                    if ($outletId) {
+                        $query->where('outlet_id', $outletId);
+                    }
+                    $query->with('outlet')->currentlyActive();
+                },
+            ];
+
+            if ($outletId) {
+                // Cashier searches only need stock owned by this outlet. Do not
+                // hydrate warehouse stocks for every search result.
+                $relations['ownerStocks'] = function ($query) use ($outletId) {
+                    $query->where('owner_id', $outletId)
+                        ->where('qty', '>', 0)
+                        ->where(function ($expiryQuery) {
+                            $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                        })
+                        ->with('stock');
+                };
+            } else {
+                $relations['stocks'] = function ($query) {
+                    $query->where('qty', '>', 0)
+                        ->orderBy('status')
+                        ->orderBy('serial_number');
+                };
+            }
+
+            $perPage = min(max($request->integer('per_page', 25), 1), 50);
             $products = $products
-                ->with([
-                    'category',
-                    'stocks' => function ($query) {
-                        $query->where('qty', '>', 0)
-                            ->orderBy('status')
-                            ->orderBy('serial_number');
-                    },
-                    'ownerStocks' => function ($query) use ($request) {
-                        if ($request->filled('outlet_id')) {
-                            $query->where('owner_id', $request->outlet_id);
-                        }
-                        $query->where('qty', '>', 0)
-                            ->where(function ($expiryQuery) {
-                                $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
-                            })
-                            ->with('stock');
-                    },
-                    'outletPrices' => function ($query) use ($request) {
-                        if ($request->filled('outlet_id')) {
-                            $query->where('outlet_id', $request->outlet_id);
-                        }
-                        $query->with('outlet')->currentlyActive();
-                    },
-                ])
+                ->with($relations)
                 ->latest()
-                ->paginate(10);
+                ->paginate($perPage);
 
             return ProductResource::collection($products);
         }

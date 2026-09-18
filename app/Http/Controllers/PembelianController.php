@@ -259,20 +259,14 @@ class PembelianController extends Controller
             abort(403);
         }
 
-        // Langsung insert ke DB (draft), lalu redirect ke halaman edit — create dan edit
-        // jadi satu alur yang sama dengan autosave, meniru pola Request Order.
-        $pembelian = Pembelian::create([
-            'code' => null,
-            'supplier_id' => null,
-            'total' => 0,
-            'is_published' => false,
-            'owner_approval_status' => 'approved',
-            'owner_approved_by' => null,
-            'owner_approved_at' => null,
-            'owner_approval_note' => null,
+        // Open the input form first. The PO is created only after the user
+        // submits it, so clicking "Buat PO Baru" does not create an empty PO.
+        return view('pembelians.create', [
+            'kas' => Kas::get(),
+            'outlets' => Outlet::get(),
+            'suppliers' => Supplier::orderBy('name')->get(),
+            'products' => collect(),
         ]);
-
-        return redirect()->route('pembelian.edit', $pembelian);
     }
 
     public function autosaveHeader(Request $request, Pembelian $pembelian)

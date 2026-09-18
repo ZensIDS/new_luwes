@@ -53,7 +53,7 @@ class CashierSaleService
                         break;
                     }
 
-                    $qty = $product->is_serialized ? 1 : min($remaining, (int) $ownerStock->qty);
+                    $qty = min($remaining, (int) $ownerStock->qty);
                     if ($qty <= 0) {
                         continue;
                     }
@@ -166,7 +166,7 @@ class CashierSaleService
                     'base_subtotal' => $allocation['base_line_total'],
                     'promotion_discount' => $allocation['promotion_discount'],
                     'promotion_details' => $allocation['promotion_details'],
-                    'serial_number' => $ownerStock->stock?->serial_number ?? $product->pivot->serial_number,
+                    'serial_number' => null,
                 ]);
 
                 $this->stockService->issue(
@@ -220,10 +220,6 @@ class CashierSaleService
             ->where(function ($query) {
                 $query->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
             });
-
-        if ($product->is_serialized && $product->pivot->owner_stock_id) {
-            $query->whereKey($product->pivot->owner_stock_id);
-        }
 
         return $query->orderBy('created_at')->orderBy('id')->lockForUpdate()->get();
     }

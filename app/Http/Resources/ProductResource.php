@@ -9,7 +9,9 @@ class ProductResource extends JsonResource
     public function toArray($request)
     {
         // Sort stocks by status and serial_number
-        $sortedStocks = $this->stocks->sortBy('status')->sortBy('serial_number');
+        $sortedStocks = $this->relationLoaded('stocks')
+            ? $this->stocks->sortBy('status')->sortBy('serial_number')
+            : collect();
         $ownerStocks = $this->relationLoaded('ownerStocks')
             ? $this->ownerStocks->where('qty', '>', 0)->values()
             : collect();
