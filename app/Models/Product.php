@@ -57,6 +57,14 @@ class Product extends Model
         return $this->belongsTo(Category::class);
     }
 
+    /**
+     * Product codes are the barcode value used by the POS and label printer.
+     */
+    public function getBarcodeAttribute(): ?string
+    {
+        return $this->code;
+    }
+
     public function outlet()
     {
         return $this->belongsTo(Outlet::class);

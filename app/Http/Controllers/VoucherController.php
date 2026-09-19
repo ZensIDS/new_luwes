@@ -302,6 +302,7 @@ class VoucherController extends Controller
             'id' => $voucher->id,
             'name' => $voucher->name,
             'code' => $voucher->code,
+            'barcode' => $voucher->barcode,
             'type' => $voucher->type,
             'value' => $voucher->value,
             'min_purchase' => $voucher->min_purchase,

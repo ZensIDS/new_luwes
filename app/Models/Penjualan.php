@@ -14,6 +14,7 @@ class Penjualan extends Model
         'customer_id',
         'outlet_id',
         'kasir_id',
+        'cashier_session_id',
         'kas_id',
         'voucher_id',
         'salesman_id',
@@ -56,6 +57,11 @@ class Penjualan extends Model
     public function kasir()
     {
         return $this->belongsTo(User::class, 'kasir_id');
+    }
+
+    public function cashierSession()
+    {
+        return $this->belongsTo(CashierSession::class, 'cashier_session_id');
     }
 
     public function kas()

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\OwnerStock;
 use App\Models\OutletPrice;
+use App\Models\CashierSession;
 use App\Models\Penjualan;
 use App\Models\Transaction;
 use App\Models\Voucher;
@@ -35,6 +36,16 @@ class CashierSaleService
         }
 
         return DB::transaction(function () use ($user, $data, $cart, $outletId) {
+            $cashierSession = CashierSession::query()
+                ->where('outlet_id', $outletId)
+                ->where('cashier_id', $user->getAuthIdentifier())
+                ->where('status', 'open')
+                ->lockForUpdate()
+                ->first();
+            if (! $cashierSession) {
+                throw new RuntimeException('Buka kasir dan input saldo awal cash drawer sebelum memproses penjualan.');
+            }
+
             $rules = OutletPrice::with('outlet')->where('outlet_id', $outletId)
                 ->currentlyActive()
                 ->get()
@@ -131,6 +142,7 @@ class CashierSaleService
                 'customer_id' => $data['customer_id'] ?? null,
                 'outlet_id' => $outletId,
                 'kasir_id' => $user->getAuthIdentifier(),
+                'cashier_session_id' => $cashierSession->id,
                 'voucher_id' => $vouchers->first()?->id,
                 'salesman_id' => $data['salesman_id'] ?? null,
                 'discount' => $discountTotal,

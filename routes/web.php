@@ -4,6 +4,8 @@ use App\Http\Controllers\AdminController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\CartUserController;
 use App\Http\Controllers\CampaignController;
+use App\Http\Controllers\CashierPrintController;
+use App\Http\Controllers\CashierSessionController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DashboardController;
@@ -64,6 +66,12 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/pembelian-detail/{pembelian_id}/items', [PembelianController::class, 'getItems']);
 
     Route::get('/kasir', [UserController::class, 'kasir'])->name('kasir.index');
+    Route::get('/cashier-sessions/history', [CashierSessionController::class, 'history'])->name('cashier.history');
+    Route::get('/cashier/print/products', [CashierPrintController::class, 'products'])->name('cashier.print.products');
+    Route::get('/cashier/print/vouchers', [CashierPrintController::class, 'vouchers'])->name('cashier.print.vouchers');
+    Route::post('/outlet/{outlet}/cashier/open', [CashierSessionController::class, 'open'])->name('cashier.open');
+    Route::post('/cashier-sessions/{cashierSession}/drawer-entry', [CashierSessionController::class, 'entry'])->name('cashier.drawer-entry');
+    Route::post('/cashier-sessions/{cashierSession}/close', [CashierSessionController::class, 'close'])->name('cashier.close');
     Route::resource('/customer', CustomerController::class);
     Route::resource('/kas', KasController::class);
     Route::resource('/payment', PaymentMethodController::class);

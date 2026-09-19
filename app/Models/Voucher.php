@@ -34,6 +34,14 @@ class Voucher extends Model
         'end_at' => 'datetime',
     ];
 
+    /**
+     * Voucher codes are printed as the barcode value for physical promo cards.
+     */
+    public function getBarcodeAttribute(): ?string
+    {
+        return $this->code;
+    }
+
     public function product()
     {
         return $this->belongsTo(Product::class);
