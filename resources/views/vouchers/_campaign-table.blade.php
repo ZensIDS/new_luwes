@@ -2,6 +2,9 @@
     <table id="{{ $tableId }}" class="table table-bordered table-striped">
         <thead>
             <tr>
+                <th class="text-center">
+                    <input type="checkbox" class="voucher-select-all" title="Pilih semua di halaman ini">
+                </th>
                 <th>No</th>
                 <th>Nama / Kode</th>
                 <th>Jenis</th>
@@ -34,6 +37,21 @@
                         : ($campaign->isActive() ? 'Aktif' : ($campaign->is_active ? 'Tidak aktif' : 'Nonaktif'));
                 @endphp
                 <tr>
+                    <td class="text-center">
+                        @if ($isVoucher && $voucherItems->contains(fn ($voucher) => filled($voucher->code)))
+                            <input type="checkbox" class="voucher-print-checkbox"
+                                data-campaign-type="voucher"
+                                data-voucher-ids="{{ $voucherItems->pluck('id')->implode(',') }}"
+                                form="voucher-label-print-form"
+                                aria-label="Pilih voucher {{ $campaign->name }}">
+                        @elseif (! $isVoucher && filled($campaign->code))
+                            <input type="checkbox" class="voucher-print-checkbox"
+                                data-campaign-type="promotion"
+                                data-voucher-ids="{{ $campaign->id }}"
+                                form="voucher-label-print-form"
+                                aria-label="Pilih promo {{ $campaign->name }}">
+                        @endif
+                    </td>
                     <td>{{ $loop->iteration }}</td>
                     <td>
                         <strong>{{ $campaign->name }}</strong>

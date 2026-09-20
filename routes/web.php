@@ -67,7 +67,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
 
     Route::get('/kasir', [UserController::class, 'kasir'])->name('kasir.index');
     Route::get('/cashier-sessions/history', [CashierSessionController::class, 'history'])->name('cashier.history');
-    Route::get('/cashier/print/products', [CashierPrintController::class, 'products'])->name('cashier.print.products');
+    Route::match(['get', 'post'], '/cashier/print/products', [CashierPrintController::class, 'products'])->name('cashier.print.products');
     Route::get('/cashier/print/vouchers', [CashierPrintController::class, 'vouchers'])->name('cashier.print.vouchers');
     Route::post('/outlet/{outlet}/cashier/open', [CashierSessionController::class, 'open'])->name('cashier.open');
     Route::post('/cashier-sessions/{cashierSession}/drawer-entry', [CashierSessionController::class, 'entry'])->name('cashier.drawer-entry');

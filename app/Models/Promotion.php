@@ -46,6 +46,14 @@ class Promotion extends Model
         'end_at' => 'datetime',
     ];
 
+    /**
+     * Promotion codes are printed as the barcode value for physical promo cards.
+     */
+    public function getBarcodeAttribute(): ?string
+    {
+        return $this->code;
+    }
+
     public function products()
     {
         return $this->belongsToMany(Product::class, 'promotion_products')
