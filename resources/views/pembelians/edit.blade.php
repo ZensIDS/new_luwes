@@ -253,8 +253,93 @@
         }
 
         let currentProducts = null;
+        let productMap = {};
         let supplierRequest = null;
         let selectedSupplierId = $('#supplier_id').val() || null;
+
+        // ---- anti-duplikat produk dalam 1 PO (berdasarkan id produk & barcode/kode) ----
+        function rowProductId($row) {
+            const $sel = $row.find('.product');
+            return String($sel.val() || $sel.data('current-product') || '');
+        }
+
+        function productCode(id) {
+            const p = productMap[id];
+            return p && p.code ? String(p.code).trim() : '';
+        }
+
+        // Cari baris LAIN yang sudah memakai produk yang sama (id sama atau barcode sama)
+        function findDuplicateRow(productId, $exceptRow) {
+            productId = String(productId || '');
+            if (!productId) return null;
+            const code = productCode(productId);
+            let $dup = null;
+
+            $('#product-repeater tr').each(function() {
+                if ($exceptRow && this === $exceptRow[0]) return;
+                const otherId = rowProductId($(this));
+                if (!otherId) return;
+                if (otherId === productId || (code && productCode(otherId) === code)) {
+                    $dup = $(this);
+                    return false;
+                }
+            });
+            return $dup;
+        }
+
+        // Produk yang sudah dipakai di PO (untuk modal Cek Barang)
+        function getUsedProducts() {
+            const ids = new Set();
+            const codes = new Set();
+            $('#product-repeater tr').each(function() {
+                const id = rowProductId($(this));
+                if (!id) return;
+                ids.add(id);
+                const code = productCode(id);
+                if (code) codes.add(code);
+            });
+            return { ids, codes };
+        }
+
+        // Nonaktifkan option produk yang sudah dipilih di baris lain
+        function refreshProductOptions() {
+            const idOwner = {};
+            const codeOwner = {};
+
+            $('#product-repeater .product').each(function() {
+                const id = String($(this).val() || $(this).data('current-product') || '');
+                if (!id) return;
+                if (!idOwner[id]) idOwner[id] = this;
+                const code = productCode(id);
+                if (code && !codeOwner[code]) codeOwner[code] = this;
+            });
+
+            $('#product-repeater .product').each(function() {
+                const sel = this;
+                $(sel).find('option').each(function() {
+                    if (!this.value) return;
+                    const code = productCode(this.value);
+                    const byId = idOwner[this.value];
+                    const byCode = code ? codeOwner[code] : null;
+                    this.disabled = !!((byId && byId !== sel) || (byCode && byCode !== sel));
+                });
+            });
+        }
+
+        function markDuplicate($row) {
+            $row.find('.row-status').html('<span class="label label-danger">Duplikat</span>');
+        }
+
+        // Tandai baris yang produknya dobel (mis. data lama yang sudah terlanjur dobel)
+        function flagDuplicateRows() {
+            $('#product-repeater tr').each(function() {
+                const $row = $(this);
+                const id = rowProductId($row);
+                if (id && findDuplicateRow(id, $row)) {
+                    markDuplicate($row);
+                }
+            });
+        }
 
         //TODO use product's konversiDisplay instead
         function konversiDisplay(qty, konversiQty, satuanBesar, satuan) {
@@ -320,6 +405,7 @@
         function initializeProductRow($row) {
             $row.find('.numeral-mask').mask("#,##0", { reverse: true });
             $row.find('.select2').select2();
+            $row.data('prev-product', String($row.find('.product').data('current-product') || ''));
 
             if (currentProducts) {
                 populateProductSelects(currentProducts, $row.find('.product'));
@@ -339,7 +425,14 @@
         }
 
         function resetProductRowsForSupplierChange() {
+            // Batalkan autosave yang masih menunggu / berjalan untuk baris-baris lama
+            $('#product-repeater tr').each(function() {
+                clearTimeout($(this).data('debounce'));
+                $(this).data('removed', true);
+            });
             $('#product-repeater').empty();
+            productMap = {};
+            setTotal(0);
         }
 
         // Function to populate product selects with given products
@@ -371,6 +464,7 @@
 
         function loadProductsForSupplier(supplierId) {
             currentProducts = [];
+            productMap = {};
             resetCekBarangModal();
             populateProductSelects([]);
 
@@ -390,11 +484,16 @@
                     }
 
                     currentProducts = products;
+                    productMap = {};
+                    products.forEach(function(p) { productMap[p.id] = p; });
                     populateProductSelects(products);
 
                     $('#product-repeater tr').each(function() {
                         updateKonversiDisplay($(this));
                     });
+
+                    refreshProductOptions();
+                    flagDuplicateRows();
                 })
                 .fail(function() {
                     alert('Gagal memuat daftar produk supplier. Silakan refresh halaman.');
@@ -412,6 +511,7 @@
                 initializeProductRow($(this));
             });
 
+            flagDuplicateRows();
             $('#supplier_id').select2();
         });
 
@@ -437,6 +537,7 @@
         $('#add-row').on('click', function() {
             $('#product-repeater').append(buildProductRow());
             initializeProductRow($('#product-repeater tr:last'));
+            refreshProductOptions();
         });
 
         function updateRowSubtotal($row) {
@@ -451,25 +552,66 @@
         }
 
         // ---- item row autosave ----
+        // Aturan penting: 1 baris = maksimal 1 request simpan yang sedang berjalan.
+        // Kalau ada perubahan saat request masih jalan, disimpan lagi SETELAH request selesai
+        // (dengan item_id yang sudah ada). Ini mencegah 1 baris tersimpan 2x (produk dobel).
+        function deleteItemRequest(itemId, onDone) {
+            $.ajax({
+                url: routes.destroyItem(itemId),
+                method: 'POST',
+                headers: { 'X-CSRF-TOKEN': csrfToken },
+                data: { _method: 'DELETE' },
+                success: function(res) {
+                    setTotal(res.total);
+                    if (onDone) onDone(res);
+                },
+                error: function() { showIndicator('Gagal menghapus item', true); },
+            });
+        }
+
         function autosaveRow($row) {
-            const productId = $row.find('.product').val();
+            clearTimeout($row.data('debounce'));
+            if ($row.data('removed') || !document.contains($row[0])) return;
+
+            const productId = rowProductId($row);
             const qty       = parseFloat($row.find('.qty').val()) || 0;
             const $hargaInput = $row.find('.harga_beli');
             const hargaBeli = ($hargaInput.data('mask') !== undefined)
                 ? ($hargaInput.cleanVal() || 0)
                 : (parseFloat($hargaInput.val()) || 0);
-            const itemId    = $row.data('item-id') || null;
 
             updateRowSubtotal($row);
 
             if (!productId || qty <= 0) return;
 
+            // Produk yang sama tidak boleh muncul 2x di 1 PO
+            if (findDuplicateRow(productId, $row)) {
+                markDuplicate($row);
+                showIndicator('Produk sudah ada di PO ini', true);
+                return;
+            }
+
+            if ($row.data('saving')) {
+                $row.data('dirty', true);
+                return;
+            }
+
+            $row.data('saving', true);
+            $row.data('dirty', false);
+            $row.find('.row-status').html('<span class="label label-warning">Menyimpan...</span>');
+
             $.ajax({
                 url: routes.autosaveItem,
                 method: 'POST',
                 headers: { 'X-CSRF-TOKEN': csrfToken },
-                data: { id: itemId, product_id: productId, qty: qty, harga_beli: hargaBeli },
+                data: { id: $row.data('item-id') || null, product_id: productId, qty: qty, harga_beli: hargaBeli },
                 success: function(res) {
+                    // Baris sudah di-Remove user selagi request jalan -> hapus item yang baru terbentuk
+                    if ($row.data('removed')) {
+                        deleteItemRequest(res.item_id);
+                        return;
+                    }
+
                     $row.data('item-id', res.item_id);
                     $row.attr('data-item-id', res.item_id);
                     $row.find('.row-status').html('<span class="label label-success">Tersimpan</span>');
@@ -477,20 +619,50 @@
                     showIndicator('Item tersimpan ✓');
                 },
                 error: function(xhr) {
+                    if ($row.data('removed')) return;
+
                     const msg = xhr.responseJSON?.message || 'Gagal menyimpan item';
-                    $row.find('.row-status').html('<span class="label label-danger">Gagal</span>');
+                    if (xhr.status === 422 && xhr.responseJSON?.code === 'duplicate') {
+                        markDuplicate($row);
+                    } else {
+                        $row.find('.row-status').html('<span class="label label-danger">Gagal</span>');
+                    }
                     showIndicator(msg, true);
+                },
+                complete: function() {
+                    $row.data('saving', false);
+                    if ($row.data('dirty') && !$row.data('removed')) {
+                        $row.data('dirty', false);
+                        autosaveRow($row);
+                    }
                 },
             });
         }
 
-        let rowDebounce;
         $(document).on('change', '.product', function() {
-            let $row = $(this).closest('tr');
-            let $qtyInput = $row.find('.qty');
-            let product_id = $(this).val();
-            let isProductSerialized = $(this).find('option:selected').data('serialized');
-            let hargaFromOption = $(this).find('option:selected').data('harga');
+            const $select = $(this);
+            const $row = $select.closest('tr');
+            const product_id = $select.val();
+
+            // Tolak kalau produk (id / barcode) sudah dipilih di baris lain
+            if (product_id) {
+                const $dup = findDuplicateRow(product_id, $row);
+                if ($dup) {
+                    const prev = $row.data('prev-product') || '';
+                    const name = (productMap[product_id] && productMap[product_id].name) || 'Produk ini';
+                    alert(name + ' sudah ada di PO ini. Satu produk hanya boleh dipilih satu kali.');
+                    $select.val(prev).trigger('change.select2');
+                    refreshProductOptions();
+                    return;
+                }
+            }
+
+            $row.data('prev-product', product_id || '');
+            $select.data('current-product', product_id || '');
+
+            const $qtyInput = $row.find('.qty');
+            const isProductSerialized = $select.find('option:selected').data('serialized');
+            const hargaFromOption = $select.find('option:selected').data('harga');
 
             if (isProductSerialized) {
                 $qtyInput.prop('readonly', true);
@@ -505,45 +677,45 @@
             }
 
             updateKonversiDisplay($row);
-            autosaveRow($row);
+            refreshProductOptions();
+            autosaveRow($row);   // autosaveRow membatalkan debounce dari trigger('input') di atas
         });
 
+        // Debounce PER BARIS (sebelumnya 1 timer global dipakai bersama semua baris)
         $(document).on('input', '.qty, .harga_beli', function() {
-            let $row = $(this).closest('tr');
+            const $row = $(this).closest('tr');
             updateKonversiDisplay($row);
             updateRowSubtotal($row);
-            clearTimeout(rowDebounce);
-            rowDebounce = setTimeout(function() {
+            clearTimeout($row.data('debounce'));
+            $row.data('debounce', setTimeout(function() {
                 autosaveRow($row);
-            }, 600);
+            }, 600));
         });
 
         $(document).on('click', '.remove-row', function() {
-            if ($('#product-repeater tr').length <= 1) {
-                $(this).closest('tr').remove();
-                $('#product-repeater').append(buildProductRow());
-                initializeProductRow($('#product-repeater tr:last'));
-                return;
-            }
-
             const $row   = $(this).closest('tr');
             const itemId = $row.data('item-id');
 
+            const finish = function() {
+                $row.remove();
+                if ($('#product-repeater tr').length === 0) {
+                    $('#product-repeater').append(buildProductRow());
+                    initializeProductRow($('#product-repeater tr:last'));
+                }
+                refreshProductOptions();
+            };
+
+            clearTimeout($row.data('debounce'));
+
             if (itemId) {
-                $.ajax({
-                    url: routes.destroyItem(itemId),
-                    method: 'POST',
-                    headers: { 'X-CSRF-TOKEN': csrfToken },
-                    data: { _method: 'DELETE' },
-                    success: function(res) {
-                        $row.remove();
-                        setTotal(res.total);
-                        showIndicator('Item dihapus ✓');
-                    },
-                    error: function() { showIndicator('Gagal menghapus item', true); },
+                deleteItemRequest(itemId, function() {
+                    finish();
+                    showIndicator('Item dihapus ✓');
                 });
             } else {
-                $row.remove();
+                // Belum punya item_id, tapi mungkin request simpan pertamanya masih jalan
+                if ($row.data('saving')) $row.data('removed', true);
+                finish();
             }
         });
 
@@ -575,24 +747,30 @@
             const tbody = $('#cekBarangBody');
             tbody.empty();
 
+            const used = getUsedProducts();
+
             sorted.forEach(function (p) {
                 const isUnder = p.is_under_minimum;
+                const code = p.code ? String(p.code).trim() : '';
+                const alreadyInPo = used.ids.has(String(p.id)) || (code && used.codes.has(code));
 
-                const $tr = $('<tr>').addClass(isUnder ? 'danger' : '');
+                const $tr = $('<tr>').addClass(alreadyInPo ? 'text-muted' : (isUnder ? 'danger' : ''));
 
                 const $checkTd = $('<td>').addClass('text-center').append(
                     $('<input>').attr({ type: 'checkbox', class: 'cek-product-check', value: p.id })
+                        .prop('disabled', !!alreadyInPo)
                         .data('name', p.name).data('harga', p.harga_beli || 0)
                 );
                 const $statusBadge = $('<span>').addClass('label')
-                    .addClass(isUnder ? 'label-danger' : 'label-success')
-                    .text(isUnder ? 'OUT OF STOCK' : 'Normal');
+                    .addClass(alreadyInPo ? 'label-default' : (isUnder ? 'label-danger' : 'label-success'))
+                    .text(alreadyInPo ? 'Sudah di PO' : (isUnder ? 'OUT OF STOCK' : 'Normal'));
                 const $qtyInput = $('<input>')
                     .attr({
                         type: 'text',
                         class: 'form-control input-sm cek-qty'
                     })
                     .css('width', '70px')
+                    .prop('disabled', !!alreadyInPo)
                     .val(0) // Nilai awal kembali ke 0
                     .on('input', function() {
                         // 1. Hapus semua karakter yang bukan angka (termasuk tanda minus '-')
@@ -651,6 +829,7 @@
             $(document).off('input', '.cek-qty').on('input', '.cek-qty', function() {
                 var qty = parseInt($(this).val()) || 0;
                 var $check = $(this).closest('tr').find('.cek-product-check');
+                if ($check.prop('disabled')) return;
                 if (qty > 0) {
                     $check.prop('checked', true);
                 } else {
@@ -663,7 +842,7 @@
             const checked = $(this).prop('checked');
             if (cekBarangTable) {
                 cekBarangTable.rows().nodes().each(function (node) {
-                    $(node).find('.cek-product-check').prop('checked', checked);
+                    $(node).find('.cek-product-check:not(:disabled)').prop('checked', checked);
                 });
             }
         });
@@ -677,10 +856,9 @@
             }
 
             cekBarangTable.rows().nodes().each(function (node) {
-                const $check = $(node).find('.cek-product-check:checked');
+                const $check = $(node).find('.cek-product-check:checked:not(:disabled)');
                 const qty = parseInt($(node).find('.cek-qty').val()) || 0;
                 if ($check.length && qty > 0) { // tambah pengecekan qty > 0
-                    const $row = $(node);
                     selected.push({
                         product_id: $check.val(),
                         name: $check.data('name'),
@@ -696,11 +874,31 @@
             }
 
             const $firstRow = $('#product-repeater tr:first');
-            if ($firstRow.length && ($firstRow.find('.product').val() === null || $firstRow.find('.product').val() === '')) {
+            if ($firstRow.length && !rowProductId($firstRow) && !$firstRow.data('item-id')) {
                 $firstRow.remove();
             }
 
+            // Pastikan tidak ada produk dobel: terhadap isi PO saat ini DAN di antara pilihan itu sendiri
+            const used = getUsedProducts();
+            const skipped = [];
+            const toAdd = [];
+
             selected.forEach(function (item) {
+                const code = productCode(item.product_id);
+                if (used.ids.has(String(item.product_id)) || (code && used.codes.has(code))) {
+                    skipped.push(item.name);
+                    return;
+                }
+                used.ids.add(String(item.product_id));
+                if (code) used.codes.add(code);
+                toAdd.push(item);
+            });
+
+            if (skipped.length) {
+                alert('Produk berikut dilewati karena sudah ada di PO:\n- ' + skipped.join('\n- '));
+            }
+
+            toAdd.forEach(function (item) {
                 $('#product-repeater').append(buildProductRow());
                 const $newRow = $('#product-repeater tr:last');
                 initializeProductRow($newRow);
@@ -710,12 +908,16 @@
                 const $qtyInput = $newRow.find('.qty');
 
                 $productSelect.val(item.product_id).trigger('change.select2');
+                $productSelect.data('current-product', String(item.product_id));
+                $newRow.data('prev-product', String(item.product_id));
                 $hargaInput.val(item.harga).trigger('input');
                 $qtyInput.val(item.qty);
 
                 updateKonversiDisplay($newRow);
-                autosaveRow($newRow);
+                autosaveRow($newRow);   // membatalkan debounce dari trigger('input') di atas
             });
+
+            refreshProductOptions();
 
             $('#modalCekBarang').modal('hide');
 

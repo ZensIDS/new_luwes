@@ -282,20 +282,38 @@ class PembelianController extends Controller
             'supplier_id' => 'nullable|exists:suppliers,id',
         ]);
 
-        $updates = ['supplier_id' => $data['supplier_id'] ?? null];
+        $newSupplierId = $data['supplier_id'] ?? null;
 
-        // Kode PO mengikuti supplier — digenerate ulang tiap kali supplier berubah.
-        if (! empty($data['supplier_id']) && (int) $pembelian->supplier_id !== (int) $data['supplier_id']) {
-            $updates['code'] = $this->generatePoCode($data['supplier_id']);
-        } elseif (empty($data['supplier_id'])) {
-            $updates['code'] = null;
-        }
+        DB::transaction(function () use ($pembelian, $newSupplierId) {
+            // Kunci PO ini supaya tidak bentrok dengan autosave item yang sedang berjalan.
+            Pembelian::whereKey($pembelian->id)->lockForUpdate()->first();
+            $pembelian->refresh();
 
-        $pembelian->update($updates);
+            $supplierChanged = (int) $pembelian->supplier_id !== (int) $newSupplierId;
+            $updates = ['supplier_id' => $newSupplierId];
+
+            if ($supplierChanged) {
+                // Di halaman edit, list produk langsung dikosongkan saat supplier diganti.
+                // Samakan di database supaya item lama tidak "muncul lagi" setelah refresh.
+                $pembelian->pembelianProducts()->delete();
+                $pembelian->stockPembelians()->delete();
+                $updates['total'] = 0;
+            }
+
+            // Kode PO mengikuti supplier — digenerate ulang tiap kali supplier berubah.
+            if ($newSupplierId && $supplierChanged) {
+                $updates['code'] = $this->generatePoCode($newSupplierId);
+            } elseif (! $newSupplierId) {
+                $updates['code'] = null;
+            }
+
+            $pembelian->update($updates);
+        });
 
         return response()->json([
             'status'    => 'ok',
             'code'      => $pembelian->code,
+            'total'     => $pembelian->total,
             'saved_at'  => now()->toDateTimeString(),
         ]);
     }
@@ -305,81 +323,146 @@ class PembelianController extends Controller
         abort_unless($pembelian->canBeEditedBy(auth()->user()), 403);
 
         $data = $request->validate([
-            'id'             => 'nullable|integer|exists:pembelian_products,id',
+            'id'             => 'nullable|integer',
             'product_id'     => 'required|exists:products,id',
             'qty'            => 'required|numeric|min:1',
             'harga_beli'     => 'required|numeric|min:0',
             'serial_numbers' => 'nullable|string',
         ]);
 
-        $duplicate = $pembelian->pembelianProducts()
-            ->where('product_id', $data['product_id'])
-            ->when(!empty($data['id']), fn($q) => $q->where('id', '!=', $data['id']))
-            ->exists();
+        return DB::transaction(function () use ($data, $pembelian) {
+            // Kunci baris PO: request autosave yang datang bersamaan untuk PO yang sama
+            // diproses satu per satu, jadi pengecekan duplikat di bawah tidak bisa "kebalap".
+            Pembelian::whereKey($pembelian->id)->lockForUpdate()->first();
 
-        if ($duplicate) {
-            return response()->json(['status' => 'error', 'message' => 'Produk sudah ada di list.'], 422);
-        }
+            $product = Product::findOrFail($data['product_id']);
 
-        $product = Product::find($data['product_id']);
+            $item = null;
+            if (! empty($data['id'])) {
+                $item = $pembelian->pembelianProducts()->find($data['id']);
 
-        $serialNumbers = null;
-        if (! empty($data['serial_numbers'])) {
-            $serialNumbers = array_filter(array_map('trim', explode("\n", $data['serial_numbers'])));
-        }
+                if (! $item) {
+                    return response()->json([
+                        'status'  => 'error',
+                        'code'    => 'item_not_found',
+                        'message' => 'Item PO tidak ditemukan (mungkin sudah dihapus).',
+                    ], 404);
+                }
+            }
 
-        $qty = $product->is_serialized && $serialNumbers ? count($serialNumbers) : (int) $data['qty'];
-        $hargaBeli = (int) $data['harga_beli'];
-        $subtotal = $qty * $hargaBeli;
+            // Satu produk (product_id ATAU barcode/kode yang sama) hanya boleh 1x per PO.
+            if ($this->productAlreadyInPo($pembelian, $product, $item?->id)) {
+                return response()->json([
+                    'status'  => 'error',
+                    'code'    => 'duplicate',
+                    'message' => 'Produk "' . $product->name . '" (' . $product->code . ') sudah ada di PO ini.',
+                ], 422);
+            }
 
-        $item = PembelianProduct::updateOrCreate(
-            ['id' => $data['id'] ?? null, 'pembelian_id' => $pembelian->id],
-            [
-                'product_id'     => $product->id,
-                'harga_beli'     => $hargaBeli,
-                'qty'            => $qty,
-                'subtotal'       => $subtotal,
-                'serial_numbers' => $serialNumbers,
-            ]
-        );
+            $serialNumbers = null;
+            if (! empty($data['serial_numbers'])) {
+                $serialNumbers = array_values(array_filter(array_map('trim', explode("\n", $data['serial_numbers']))));
+            }
 
-        // Warehouse stock (StockPembelian) — sama seperti updateStock() untuk PO belum published
-        if ($product->is_serialized && $serialNumbers) {
-            foreach ($serialNumbers as $serial) {
+            $qty = $product->is_serialized && $serialNumbers ? count($serialNumbers) : (int) $data['qty'];
+            $hargaBeli = (int) $data['harga_beli'];
+            $subtotal = $qty * $hargaBeli;
+
+            $attributes = [
+                'product_id' => $product->id,
+                'harga_beli' => $hargaBeli,
+                'qty'        => $qty,
+                'subtotal'   => $subtotal,
+            ];
+
+            // Serial number hanya ditimpa kalau memang dikirim (halaman ini tidak mengirimnya),
+            // supaya autosave qty/harga tidak menghapus serial number yang sudah tersimpan.
+            if ($serialNumbers !== null) {
+                $attributes['serial_numbers'] = $serialNumbers;
+            }
+
+            if ($item) {
+                $oldProductId = $item->product_id;
+                $item->update($attributes);
+
+                // Produk pada baris ini diganti -> stok gudang produk lama harus ikut dibersihkan.
+                if ((int) $oldProductId !== (int) $product->id) {
+                    $this->cleanupStockPembelian($pembelian, $oldProductId);
+                }
+            } else {
+                $item = $pembelian->pembelianProducts()->create($attributes);
+            }
+
+            // Warehouse stock (StockPembelian) — sama seperti updateStock() untuk PO belum published
+            if ($product->is_serialized && $serialNumbers) {
+                foreach ($serialNumbers as $serial) {
+                    StockPembelian::updateOrCreate(
+                        ['pembelian_id' => $pembelian->id, 'product_id' => $product->id, 'serial_number' => $serial],
+                        [
+                            'harga_beli' => $hargaBeli,
+                            'qty'        => 1,
+                            'subtotal'   => $hargaBeli,
+                            'condition'  => 'new',
+                            'status'     => 'available',
+                        ]
+                    );
+                }
+            } else {
                 StockPembelian::updateOrCreate(
-                    ['pembelian_id' => $pembelian->id, 'product_id' => $product->id, 'serial_number' => $serial],
+                    ['pembelian_id' => $pembelian->id, 'product_id' => $product->id],
                     [
                         'harga_beli' => $hargaBeli,
-                        'qty'        => 1,
-                        'subtotal'   => $hargaBeli,
+                        'qty'        => $qty,
+                        'subtotal'   => $subtotal,
                         'condition'  => 'new',
                         'status'     => 'available',
                     ]
                 );
             }
-        } else {
-            StockPembelian::updateOrCreate(
-                ['pembelian_id' => $pembelian->id, 'product_id' => $product->id],
-                [
-                    'harga_beli' => $hargaBeli,
-                    'qty'        => $qty,
-                    'subtotal'   => $subtotal,
-                    'condition'  => 'new',
-                    'status'     => 'available',
-                ]
-            );
+
+            $product->update(['harga_beli' => $hargaBeli]);
+
+            $pembelian->update(['total' => $pembelian->pembelianProducts()->sum('subtotal')]);
+
+            return response()->json([
+                'status'   => 'ok',
+                'item_id'  => $item->id,
+                'subtotal' => $subtotal,
+                'total'    => $pembelian->total,
+            ]);
+        });
+    }
+
+    /**
+     * Cek apakah produk (berdasarkan product_id atau barcode/kode yang sama) sudah ada di PO.
+     */
+    private function productAlreadyInPo(Pembelian $pembelian, Product $product, ?int $exceptItemId = null): bool
+    {
+        return $pembelian->pembelianProducts()
+            ->when($exceptItemId, fn ($q) => $q->where('id', '!=', $exceptItemId))
+            ->where(function ($q) use ($product) {
+                $q->where('product_id', $product->id);
+
+                if (filled($product->code)) {
+                    $q->orWhereHas('product', fn ($p) => $p->where('code', $product->code));
+                }
+            })
+            ->exists();
+    }
+
+    /**
+     * Hapus stok gudang (StockPembelian) sebuah produk di PO, kecuali produk itu
+     * masih dipakai oleh item PO yang lain.
+     */
+    private function cleanupStockPembelian(Pembelian $pembelian, $productId): void
+    {
+        $stillUsed = $pembelian->pembelianProducts()->where('product_id', $productId)->exists();
+
+        if (! $stillUsed) {
+            StockPembelian::where('pembelian_id', $pembelian->id)
+                ->where('product_id', $productId)
+                ->delete();
         }
-
-        $product->update(['harga_beli' => $hargaBeli]);
-
-        $pembelian->update(['total' => $pembelian->pembelianProducts()->sum('subtotal')]);
-
-        return response()->json([
-            'status'   => 'ok',
-            'item_id'  => $item->id,
-            'subtotal' => $subtotal,
-            'total'    => $pembelian->total,
-        ]);
     }
 
     public function destroyItem(Pembelian $pembelian, PembelianProduct $item)
@@ -387,9 +470,16 @@ class PembelianController extends Controller
         abort_unless($item->pembelian_id == $pembelian->id, 404);
         abort_unless($pembelian->canBeEditedBy(auth()->user()), 403);
 
-        $item->delete();
+        DB::transaction(function () use ($pembelian, $item) {
+            Pembelian::whereKey($pembelian->id)->lockForUpdate()->first();
 
-        $pembelian->update(['total' => $pembelian->pembelianProducts()->sum('subtotal')]);
+            $productId = $item->product_id;
+            $item->delete();
+
+            $this->cleanupStockPembelian($pembelian, $productId);
+
+            $pembelian->update(['total' => $pembelian->pembelianProducts()->sum('subtotal')]);
+        });
 
         return response()->json(['status' => 'ok', 'total' => $pembelian->total]);
     }
