@@ -112,7 +112,13 @@
         @endif
 
         @if (in_array($role, ['superadmin', 'admin-gudang', 'owner', 'staff-outlet', 'kasir']))
-        <li class="{{ request()->is('penjualan*') ? 'active' : '' }}"><a href="{{ route('penjualan.index') }}"><i class="fa fa-file-text"></i><span>Penjualan</span></a></li>
+        <li class="treeview {{ request()->is('penjualan*') || request()->is('refundPenjualan*') ? 'active' : '' }}">
+            <a href="#"><i class="fa fa-file-text"></i><span>Penjualan</span><i class="fa fa-angle-left pull-right"></i></a>
+            <ul class="treeview-menu">
+                <li class="{{ request()->is('penjualan*') ? 'active' : '' }}"><a href="{{ route('penjualan.index') }}"><i class="fa fa-file-text"></i><span>Daftar Penjualan</span></a></li>
+                <li class="{{ request()->is('refundPenjualan*') ? 'active' : '' }}"><a href="{{ route('refundPenjualan.index') }}"><i class="fa fa-exchange"></i><span>Ganti Barang</span></a></li>
+            </ul>
+        </li>
         @endif
 
         {{-- Pembelian (superadmin, admin-gudang) --}}

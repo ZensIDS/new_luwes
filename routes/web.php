@@ -23,6 +23,7 @@ use App\Http\Controllers\ProductMinimumAdjustmentController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RefundController;
 use App\Http\Controllers\RefundPembelianController;
+use App\Http\Controllers\RefundPenjualanController;
 use App\Http\Controllers\RequestOrderController;
 use App\Http\Controllers\ReviewController;
 use App\Http\Controllers\SalesmanController;
@@ -54,6 +55,9 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/penjualan-detail/{penjualan_id}/items', [PenjualanController::class, 'getItems']);
     Route::resource('/penjualan', PenjualanController::class)->only(['index', 'create', 'store', 'show', 'destroy']);
     Route::get('/penjualan/{penjualan}/print', [PenjualanController::class, 'print'])->name('penjualan.print');
+    Route::get('/refundPenjualan/invoices', [RefundPenjualanController::class, 'invoices'])->name('refundPenjualan.invoices');
+    Route::get('/refundPenjualan/stocks', [RefundPenjualanController::class, 'stocks'])->name('refundPenjualan.stocks');
+    Route::resource('/refundPenjualan', RefundPenjualanController::class)->only(['index', 'create', 'store', 'show']);
     Route::get('/cart', [CartController::class, 'index'])->name('cart.index');
     Route::post('/cart', [CartController::class, 'store'])->name('cart.store');
     Route::post('/cart-change-qty', [CartController::class, 'changeQty'])->name('cart.change-qty');

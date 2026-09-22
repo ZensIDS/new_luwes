@@ -89,6 +89,11 @@ class Penjualan extends Model
         return $this->hasMany(PenjualanItem::class);
     }
 
+    public function refundPenjualans()
+    {
+        return $this->hasMany(RefundPenjualan::class);
+    }
+
     public function vouchers()
     {
         return $this->belongsToMany(Voucher::class, 'voucher_redemptions')
