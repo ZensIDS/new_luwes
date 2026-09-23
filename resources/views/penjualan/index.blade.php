@@ -12,7 +12,7 @@
                         <a href="{{ route('penjualan.create') }}" class="btn btn-primary"><i class="fa fa-plus"></i> Buat Penjualan Baru</a>
                         <a href="{{ route('owner-stocks.index') }}" class="btn btn-default"><i class="fa fa-cubes"></i> Lihat Stock Toko</a>
                         <a href="{{ route('cashier.history') }}" class="btn btn-info"><i class="fa fa-history"></i> History Kasir</a>
-                        <a href="{{ route('refundPenjualan.index') }}" class="btn btn-warning"><i class="fa fa-exchange"></i> Ganti Barang</a>
+                        <a href="{{ route('refundPenjualan.create') }}" class="btn btn-warning"><i class="fa fa-exchange"></i> Retur / Ganti Barang</a>
                     </div>
                     <div class="box-body table-responsive text-nowrap">
                         <table id="example1" class="table table-bordered table-striped">

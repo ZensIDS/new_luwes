@@ -26,6 +26,9 @@
             </div>
             <div class="pos-header-actions">
                 <span class="pos-shortcuts">F2 Cari · F3 Scan · F8 Voucher · F10 Process</span>
+                <a class="btn btn-xs btn-warning" href="{{ route('refundPenjualan.create', ['outlet_id' => $outlet->id]) }}">
+                    <i class="fa fa-exchange"></i> Retur barang
+                </a>
                 @if ($cashierSession)
                     <button type="button" class="btn btn-xs btn-warning" data-toggle="modal" data-target="#bonModal">
                         <i class="fa fa-minus-circle"></i> Catat BON

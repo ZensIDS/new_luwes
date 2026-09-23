@@ -11,7 +11,7 @@
             <div class="box-body">
                 <dl class="dl-horizontal">
                     <dt>Kode</dt><dd>{{ $refundPenjualan->code }}</dd>
-                    <dt>Invoice asal</dt><dd>{{ $refundPenjualan->penjualan?->code ?? '-' }}</dd>
+                    <dt>Nota asal</dt><dd>{{ $refundPenjualan->penjualan?->code ?? 'Retur tanpa nota' }}</dd>
                     <dt>Tanggal</dt><dd>{{ $refundPenjualan->created_at?->format('d/m/Y H:i') }}</dd>
                     <dt>Outlet</dt><dd>{{ $refundPenjualan->outlet?->name ?? '-' }}</dd>
                     <dt>Diproses oleh</dt><dd>{{ $refundPenjualan->user?->name ?? '-' }}</dd>
@@ -42,7 +42,12 @@
                 @endif
                 <div class="alert alert-info">
                     <i class="fa fa-info-circle"></i>
-                    Invoice asal tetap tersimpan untuk audit. Perubahan stock hanya terjadi di Stock Toko.
+                    @if ($refundPenjualan->penjualan)
+                        Retur ini terhubung ke nota asal untuk audit.
+                    @else
+                        Retur ini dibuat sebagai transaksi baru tanpa nota asal.
+                    @endif
+                    Perubahan stock hanya terjadi di Stock Toko.
                 </div>
             </div>
             <div class="box-footer">

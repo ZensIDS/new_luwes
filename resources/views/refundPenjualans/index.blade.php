@@ -4,7 +4,7 @@
 
 @section('container')
     <section class="content-header">
-        <h1>Ganti Barang Penjualan <small>Retur barang, tanpa pengembalian uang</small></h1>
+    <h1>Retur / Ganti Barang Penjualan <small>Scan barang tanpa wajib mencari nota</small></h1>
     </section>
 
     <section class="content">
@@ -21,7 +21,7 @@
                         <tr>
                             <th>Tanggal</th>
                             <th>Kode Retur</th>
-                            <th>Invoice Asal</th>
+                            <th>Nota Asal</th>
                             <th>Barang Diretur</th>
                             <th>Barang Pengganti</th>
                             <th>Selisih</th>
@@ -34,7 +34,7 @@
                             <tr>
                                 <td>{{ $refund->created_at?->format('d/m/Y H:i') }}</td>
                                 <td>{{ $refund->code }}</td>
-                                <td>{{ $refund->penjualan?->code ?? '-' }}</td>
+                            <td>{{ $refund->penjualan?->code ?? 'Retur tanpa nota' }}</td>
                                 <td>
                                     @foreach ($refund->items->where('type', 'return') as $item)
                                         {{ $item->product?->name ?? '-' }} × {{ $item->qty }}<br>

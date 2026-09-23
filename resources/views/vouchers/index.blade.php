@@ -25,7 +25,7 @@
                 </button>
             </form>
             <p class="help-block" style="margin:10px 0 0;">
-                Pilih voucher atau bundling. Semua kode voucher dalam satu grup akan dicetak satu label per kode.
+                Pilih promo bundling untuk mencetak label. Voucher dan flash sale tidak memakai pilihan checkbox di halaman ini.
             </p>
         </div>
         <div class="box-body">
@@ -50,6 +50,7 @@
                         'campaigns' => $voucherFlashSale,
                         'tableId' => 'voucher-flash-sale-table',
                         'emptyMessage' => 'Belum ada voucher atau flash sale.',
+                        'allowPrintSelection' => false,
                     ])
                 </div>
                 <div role="tabpanel" class="tab-pane" id="bundling">
@@ -57,6 +58,7 @@
                         'campaigns' => $bundles,
                         'tableId' => 'bundling-table',
                         'emptyMessage' => 'Belum ada bundling.',
+                        'allowPrintSelection' => true,
                     ])
                 </div>
             </div>

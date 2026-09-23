@@ -44,6 +44,9 @@
         td { vertical-align: top; }
         .meta td { padding: 1px 0; }
         .meta td:last-child { text-align: right; padding-left: 4px; }
+        .receipt-barcode { margin: 3mm 0 1mm; }
+        .receipt-barcode svg { display: block; width: 100%; max-width: 62mm; height: 11mm; margin: 0 auto; }
+        .receipt-code { font-size: 10px; letter-spacing: .5px; }
         .item-row td { padding: 2px 0; }
         .item-name { word-wrap: break-word; overflow-wrap: break-word; }
         .qty-price { font-size: 10px; color: #333; padding-left: 4px; }
@@ -113,6 +116,11 @@
             </tr>
         @endif
     </table>
+
+    <div class="center receipt-barcode">
+        {!! DNS1D::getBarcodeSVG((string) $penjualan->code, 'C128', 1, 28, 'black', false, false) !!}
+        <div class="receipt-code">{{ $penjualan->code }}</div>
+    </div>
 
     <hr>
 

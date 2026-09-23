@@ -1,320 +1,350 @@
 @extends('layouts.master')
 
-@section('title', 'Proses Ganti Barang')
+@section('title', 'Retur Penjualan')
+@section('body_class', 'pos-mode return-pos-mode')
 
 @section('container')
-    <section class="content-header">
-        <h1>Proses Ganti Barang <small>Penjualan</small></h1>
-    </section>
+    <section class="content return-pos-content">
+        <div class="return-pos-header">
+            <div>
+                <strong><i class="fa fa-exchange"></i> Retur / Ganti Barang</strong>
+                <span class="text-muted">Scan barang, hitung nilainya, lalu scan barang pengganti.</span>
+            </div>
+            <div class="return-pos-actions">
+                @if ($outletId)
+                    <a href="{{ route('outlet.show', $outletId) }}" class="btn btn-xs btn-primary"><i class="fa fa-shopping-cart"></i> Kasir Penjualan</a>
+                @endif
+                <a href="{{ route('refundPenjualan.index') }}" class="btn btn-xs btn-default"><i class="fa fa-list"></i> History Retur</a>
+            </div>
+        </div>
 
-    <section class="content">
         @if ($errors->any())
             <div class="alert alert-danger">
-                <ul style="margin-bottom:0">
-                    @foreach ($errors->all() as $error)<li>{{ $error }}</li>@endforeach
-                </ul>
+                <ul style="margin:0">@foreach ($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul>
             </div>
         @endif
-        <form method="POST" action="{{ route('refundPenjualan.store') }}" id="exchangeForm">
+
+        <form method="POST" action="{{ route('refundPenjualan.store') }}" id="returnForm">
             @csrf
             <input type="hidden" name="code" value="{{ $code }}">
+            <input type="hidden" name="penjualan_id" id="penjualan_id" value="">
 
-            <div class="box">
-                <div class="box-header with-border"><h3 class="box-title">1. Pilih invoice dan barang yang diretur</h3></div>
-                <div class="box-body">
-                    <div class="row">
-                        <div class="col-md-4">
-                            <label>Outlet</label>
-                            @if ($outlets->count() === 1)
-                                <input type="hidden" name="outlet_id" id="outlet_id" value="{{ $outlets->first()->id }}">
-                                <input type="text" class="form-control" value="{{ $outlets->first()->name }}" readonly>
-                            @else
-                                <select name="outlet_id" id="outlet_id" class="form-control" required>
-                                    <option value="">Pilih outlet</option>
-                                    @foreach ($outlets as $outlet)
-                                        <option value="{{ $outlet->id }}" @selected((string) $outletId === (string) $outlet->id)>{{ $outlet->name }}</option>
-                                    @endforeach
-                                </select>
-                            @endif
+            <div class="return-pos-layout">
+                <div class="return-pos-main">
+                    <div class="return-pos-box">
+                        <div class="return-pos-box-header">
+                            <span class="step-number">1</span>
+                            <div><strong>Barang yang dikembalikan</strong><small>Scan satu per satu. Scan ulang untuk menambah qty.</small></div>
                         </div>
-                        <div class="col-md-8">
-                            <label>Cari invoice</label>
-                            <input type="search" id="invoice_search" class="form-control" placeholder="Ketik kode invoice, misalnya INV000123">
-                            <select id="penjualan_id_select" class="form-control" style="margin-top:6px" required>
-                                <option value="">Pilih invoice</option>
-                            </select>
-                            <input type="hidden" name="penjualan_id" id="penjualan_id">
+                        <div class="return-pos-box-body">
+                            <div class="row">
+                                <div class="col-sm-4 form-group">
+                                    <label for="outlet_id">Outlet</label>
+                                    @if ($outlets->count() === 1)
+                                        <select id="outlet_id" class="form-control" disabled>
+                                            <option value="{{ $outlets->first()->id }}" selected>{{ $outlets->first()->name }}</option>
+                                        </select>
+                                        <input type="hidden" name="outlet_id" value="{{ $outlets->first()->id }}">
+                                    @else
+                                        <select name="outlet_id" id="outlet_id" class="form-control" required>
+                                            <option value="">Pilih outlet</option>
+                                            @foreach ($outlets as $outlet)
+                                                <option value="{{ $outlet->id }}" @selected((string) $outletId === (string) $outlet->id)>{{ $outlet->name }}</option>
+                                            @endforeach
+                                        </select>
+                                    @endif
+                                </div>
+                                <div class="col-sm-8 form-group">
+                                    <label for="receipt_barcode">Scan no nota <small>(opsional)</small></label>
+                                    <div class="input-group">
+                                        <input type="text" id="receipt_barcode" class="form-control" placeholder="Scan barcode nota untuk menghubungkan retur ke penjualan" autocomplete="off">
+                                        <span class="input-group-btn"><button type="button" class="btn btn-default" id="receiptButton"><i class="fa fa-search"></i> Hubungkan</button></span>
+                                    </div>
+                                    <small id="receiptStatus" class="help-block">Tanpa nota tetap bisa diproses sebagai data retur baru.</small>
+                                </div>
+                            </div>
+                            <div class="scan-line">
+                                <label for="return_barcode">Scan barang retur <small>(Enter)</small></label>
+                                <input type="text" id="return_barcode" class="form-control input-lg" placeholder="Scan barcode barang yang dibawa customer" autocomplete="off" disabled>
+                            </div>
+                            <div class="table-responsive return-table-wrap">
+                                <table class="table table-bordered table-striped table-condensed">
+                                    <thead><tr><th>Produk</th><th class="text-center">Qty</th><th class="text-right">Harga retur</th><th class="text-right">Subtotal</th><th></th></tr></thead>
+                                    <tbody id="returnRows"><tr><td colspan="5" class="text-center text-muted empty-row">Belum ada barang retur. Scan barcode untuk mulai.</td></tr></tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
 
-                    <div id="returnBox" class="table-responsive" style="margin-top:20px; display:none">
-                        <p class="text-muted">Centang satu atau beberapa barang yang dikembalikan, lalu isi qty masing-masing.</p>
-                        <table class="table table-bordered table-striped">
-                            <thead><tr><th></th><th>Produk</th><th>Terjual</th><th>Sisa boleh retur</th><th>Harga</th><th>Qty retur</th></tr></thead>
-                            <tbody id="returnRows"></tbody>
-                        </table>
+                    <div class="return-pos-box replacement-step">
+                        <div class="return-pos-box-header">
+                            <span class="step-number">2</span>
+                            <div><strong>Barang pengganti</strong><small>Nilai total harus sama atau lebih besar dari barang yang dikembalikan.</small></div>
+                        </div>
+                        <div class="return-pos-box-body">
+                            <div class="scan-line">
+                                <label for="replacement_barcode">Scan barang pengganti <small>(Enter)</small></label>
+                                <input type="text" id="replacement_barcode" class="form-control input-lg" placeholder="Scan barang yang dipilih sebagai ganti baru" autocomplete="off" disabled>
+                            </div>
+                            <div class="table-responsive return-table-wrap">
+                                <table class="table table-bordered table-striped table-condensed">
+                                    <thead><tr><th>Produk</th><th class="text-center">Qty</th><th class="text-right">Harga jual</th><th class="text-right">Subtotal</th><th></th></tr></thead>
+                                    <tbody id="replacementRows"><tr><td colspan="5" class="text-center text-muted empty-row">Scan barang retur terlebih dahulu.</td></tr></tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            <div class="box">
-                <div class="box-header with-border"><h3 class="box-title">2. Pilih barang pengganti</h3></div>
-                <div class="box-body">
-                    <div class="row" style="margin-bottom:10px">
-                        <div class="col-md-8">
-                            <label for="replacement_search">Cari barang pengganti</label>
-                            <input type="search" id="replacement_search" class="form-control" placeholder="Cari nama, kode, atau SKU">
-                        </div>
-                        <div class="col-md-4" style="padding-top:25px"><span class="text-muted" id="replacementResultHint">Maksimal 10 hasil ditampilkan.</span></div>
-                    </div>
-                    <div id="stockHint" class="alert alert-warning">Pilih invoice terlebih dahulu.</div>
-                    <div id="replacementBox" class="table-responsive" style="display:none">
-                        <table class="table table-bordered table-striped">
-                            <thead><tr><th></th><th>Produk</th><th>SKU / Batch</th><th>Stock toko</th><th>Harga</th><th>Qty</th></tr></thead>
-                            <tbody id="replacementRows"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-            <div class="box">
-                <div class="box-header with-border"><h3 class="box-title">3. Konfirmasi</h3></div>
-                <div class="box-body">
-                    <div class="row">
-                        <div class="col-sm-4"><strong>Nilai barang diretur</strong><div id="returnedTotalText">Rp 0</div></div>
-                        <div class="col-sm-4"><strong>Nilai barang pengganti</strong><div id="replacementTotalText">Rp 0</div></div>
-                        <div class="col-sm-4"><strong>Selisih yang dibayar</strong><div id="differenceText" class="text-warning">Rp 0</div></div>
-                    </div>
-                    <hr>
-                    <div class="row" id="paymentBox" style="display:none">
-                        <div class="col-md-4">
-                            <label>Selisih dibayar</label>
-                            <input type="text" inputmode="numeric" name="difference_paid" id="difference_paid" class="form-control" value="0" data-currency-input data-currency-decimals="0">
-                        </div>
-                        <div class="col-md-4">
-                            <label>Metode pembayaran selisih</label>
-                            <select name="payment_method_name" id="payment_method_name" class="form-control">
-                                <option value="Tunai">Tunai</option>
-                                <option value="Transfer">Transfer</option>
-                                <option value="QRIS">QRIS</option>
-                                <option value="Debit">Debit</option>
-                            </select>
-                        </div>
-                        <div class="col-md-4" id="paymentReferenceBox" style="display:none">
-                            <label>Nomor referensi <small>(non-tunai)</small></label>
-                            <input type="text" name="payment_reference" id="payment_reference" class="form-control" maxlength="150">
+                <aside class="return-pos-summary">
+                    <div class="return-pos-box summary-box">
+                        <div class="return-pos-box-header"><span class="step-number">3</span><div><strong>Konfirmasi</strong><small>Periksa nilai tukar sebelum simpan.</small></div></div>
+                        <div class="return-pos-box-body">
+                            <dl class="summary-list">
+                                <dt>Nilai barang retur</dt><dd id="returnedTotalText">Rp 0</dd>
+                                <dt>Nilai barang pengganti</dt><dd id="replacementTotalText">Rp 0</dd>
+                                <dt class="difference-label">Selisih dibayar</dt><dd id="differenceText" class="difference-value">Tidak ada selisih</dd>
+                            </dl>
+                            <div id="paymentBox" style="display:none">
+                                <hr>
+                                <div class="form-group">
+                                    <label for="difference_paid">Selisih dibayar</label>
+                                    <input type="text" inputmode="numeric" name="difference_paid" id="difference_paid" class="form-control" value="0" data-currency-input data-currency-decimals="0">
+                                </div>
+                                <div class="form-group">
+                                    <label for="payment_method_name">Metode pembayaran</label>
+                                    <select name="payment_method_name" id="payment_method_name" class="form-control">
+                                        <option value="Tunai">Tunai</option><option value="Transfer">Transfer</option><option value="QRIS">QRIS</option><option value="Debit">Debit</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" id="paymentReferenceBox" style="display:none">
+                                    <label for="payment_reference">Nomor referensi <small>(non-tunai)</small></label>
+                                    <input type="text" name="payment_reference" id="payment_reference" class="form-control" maxlength="150">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="notes">Catatan <small>(opsional)</small></label>
+                                <textarea name="notes" id="notes" rows="2" class="form-control"></textarea>
+                            </div>
+                            <div id="formError" class="alert alert-danger" style="display:none"></div>
+                            <button type="submit" class="btn btn-success btn-lg btn-block" id="submitButton" disabled><i class="fa fa-check"></i> Simpan Retur</button>
+                            <a href="{{ route('refundPenjualan.index') }}" class="btn btn-default btn-block">Batal</a>
                         </div>
                     </div>
-                    <div class="form-group" style="margin-top:15px">
-                        <label>Catatan (opsional)</label>
-                        <textarea name="notes" class="form-control" rows="2"></textarea>
-                    </div>
-                    <div id="formError" class="alert alert-danger" style="display:none"></div>
-                </div>
-                <div class="box-footer">
-                    <a href="{{ route('refundPenjualan.index') }}" class="btn btn-default">Batal</a>
-                    <button type="submit" class="btn btn-primary" id="submitButton" disabled><i class="fa fa-exchange"></i> Simpan Ganti Barang</button>
-                </div>
+                    <p class="text-muted small return-help"><i class="fa fa-info-circle"></i> Nota hanya diperlukan jika ingin menghubungkan retur dengan transaksi lama. Stok retur masuk kembali dan stok barang pengganti berkurang saat disimpan.</p>
+                </aside>
             </div>
         </form>
     </section>
+@endsection
 
+@section('page-script')
+    <style>
+        html:has(body.return-pos-mode), body.return-pos-mode { height:100%; overflow:hidden; }
+        .return-pos-mode .wrapper { height:100vh; min-height:0; overflow:hidden; }
+        .return-pos-mode .main-header, .return-pos-mode .main-sidebar, .return-pos-mode .main-footer { display:none !important; }
+        .return-pos-mode .content-wrapper { margin-left:0 !important; min-height:100vh !important; height:100vh; overflow:hidden; background:#f4f6f9; }
+        .return-pos-content { height:100%; min-height:0 !important; padding:15px; overflow:auto; background:#f4f6f9; }
+        .return-pos-header { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; padding:10px 14px; background:#fff; border-left:4px solid #605ca8; box-shadow:0 1px 2px rgba(0,0,0,.08); font-size:16px; }
+        .return-pos-header .text-muted { display:block; margin-top:3px; font-size:12px; }
+        .return-pos-actions { display:flex; gap:5px; flex-wrap:wrap; justify-content:flex-end; }
+        .return-pos-layout { display:flex; align-items:flex-start; gap:12px; }
+        .return-pos-main { flex:1 1 auto; min-width:0; }
+        .return-pos-summary { flex:0 0 340px; }
+        .return-pos-box { margin-bottom:12px; background:#fff; border-top:3px solid #605ca8; box-shadow:0 1px 2px rgba(0,0,0,.08); }
+        .return-pos-box-header { display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid #eee; }
+        .return-pos-box-header strong { display:block; font-size:16px; }
+        .return-pos-box-header small { display:block; color:#777; margin-top:2px; }
+        .step-number { display:inline-block; width:28px; height:28px; border-radius:50%; background:#605ca8; color:#fff; text-align:center; line-height:28px; font-weight:bold; }
+        .return-pos-box-body { padding:14px; }
+        .scan-line { margin-bottom:12px; }
+        .scan-line label { display:block; font-size:14px; }
+        .scan-line input { height:44px; font-size:18px; }
+        .return-table-wrap { max-height:38vh; overflow:auto; border:1px solid #ddd; }
+        .return-table-wrap table { margin-bottom:0; }
+        .return-table-wrap th { position:sticky; top:0; z-index:1; background:#fff; }
+        .return-table-wrap td, .return-table-wrap th { vertical-align:middle !important; }
+        .empty-row { padding:24px !important; }
+        .summary-list { display:grid; grid-template-columns:1fr auto; gap:12px 8px; margin:0; }
+        .summary-list dt { font-weight:normal; color:#666; }
+        .summary-list dd { margin:0; text-align:right; font-weight:bold; }
+        .difference-label, .difference-value { color:#d58512; }
+        .return-help { line-height:1.5; }
+        @media (max-width:900px) {
+            html:has(body.return-pos-mode), body.return-pos-mode { overflow:auto; }
+            .return-pos-mode .wrapper, .return-pos-mode .content-wrapper { height:auto; min-height:100vh; overflow:visible; }
+            .return-pos-header, .return-pos-layout { display:block; }
+            .return-pos-actions { justify-content:flex-start; margin-top:8px; }
+            .return-pos-summary { width:auto; }
+            .return-table-wrap { max-height:none; }
+        }
+    </style>
     <script>
         (() => {
-            const money = (value) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(value || 0));
-            const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[character]));
+            const endpoint = @json(route('refundPenjualan.products'));
+            const invoiceEndpoint = @json(route('refundPenjualan.invoices'));
             const outlet = document.getElementById('outlet_id');
-            const invoiceSearch = document.getElementById('invoice_search');
-            const invoiceSelect = document.getElementById('penjualan_id_select');
-            const replacementSearch = document.getElementById('replacement_search');
-            const invoiceId = document.getElementById('penjualan_id');
+            const receipt = document.getElementById('receipt_barcode');
+            const receiptButton = document.getElementById('receiptButton');
+            const receiptStatus = document.getElementById('receiptStatus');
+            const saleId = document.getElementById('penjualan_id');
+            const returnInput = document.getElementById('return_barcode');
+            const replacementInput = document.getElementById('replacement_barcode');
             const returnRows = document.getElementById('returnRows');
             const replacementRows = document.getElementById('replacementRows');
-            const returnBox = document.getElementById('returnBox');
-            const replacementBox = document.getElementById('replacementBox');
-            const stockHint = document.getElementById('stockHint');
-            const replacementResultHint = document.getElementById('replacementResultHint');
-            const submitButton = document.getElementById('submitButton');
             const paymentBox = document.getElementById('paymentBox');
             const differencePaid = document.getElementById('difference_paid');
             const paymentMethod = document.getElementById('payment_method_name');
             const paymentReferenceBox = document.getElementById('paymentReferenceBox');
             const paymentReference = document.getElementById('payment_reference');
-            let invoices = [];
-            let stocks = [];
-            let replacementSelections = new Map();
-            let replacementSearchTimer;
+            const submitButton = document.getElementById('submitButton');
+            const form = document.getElementById('returnForm');
+            const formError = document.getElementById('formError');
+            const state = { sale: null, returns: [], replacements: [] };
 
-            const selectedReturnInputs = () => [...returnRows.querySelectorAll('.return-select:checked')];
-            const selectedReturnQtys = () => selectedReturnInputs().map((input) => ({
-                itemId: String(input.value),
-                qty: Number(input.closest('tr').querySelector('.return-qty').value || 0),
-                ownerStockId: String(input.dataset.ownerStockId || ''),
-            }));
+            const money = (value) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(value || 0));
+            const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[character]));
+            const outletId = () => outlet?.value || '';
+            const showError = (message) => { formError.textContent = message; formError.style.display = ''; };
+            const clearError = () => { formError.textContent = ''; formError.style.display = 'none'; };
 
-            const captureReplacementSelections = () => {
-                replacementRows.querySelectorAll('.replacement-select:checked').forEach((input) => {
-                    replacementSelections.set(String(input.value), {
-                        id: String(input.value),
-                        price: Number(input.dataset.price || 0),
-                        qty: Number(input.closest('tr').querySelector('.replacement-qty').value || 0),
-                    });
-                });
+            const updateInputs = () => {
+                const ready = Boolean(outletId());
+                returnInput.disabled = !ready;
+                replacementInput.disabled = !ready || state.returns.length === 0;
+                if (!ready) { returnInput.value = ''; replacementInput.value = ''; }
             };
 
-            const refreshReturnedStockCandidates = () => {
-                const quantities = {};
-                selectedReturnQtys().forEach((item) => {
-                    if (item.ownerStockId) quantities[item.ownerStockId] = (quantities[item.ownerStockId] || 0) + item.qty;
-                });
-                loadStocks(quantities);
-            };
+            const totals = () => ({
+                returned: state.returns.reduce((sum, item) => sum + Number(item.price) * Number(item.qty), 0),
+                replacement: state.replacements.reduce((sum, item) => sum + Number(item.price) * Number(item.qty), 0),
+            });
 
-            const updateSummary = () => {
-                const returned = selectedReturnQtys().reduce((sum, item) => {
-                    const input = returnRows.querySelector(`.return-select[value="${item.itemId}"]`);
-                    return sum + Number(input?.dataset.price || 0) * item.qty;
-                }, 0);
-                captureReplacementSelections();
-                const replacements = [...replacementSelections.values()];
-                const replacement = replacements.reduce((sum, item) => sum + item.price * item.qty, 0);
+            const render = () => {
+                returnRows.innerHTML = state.returns.length ? state.returns.map((item, index) => `
+                    <tr><td><strong>${esc(item.code)}</strong> — ${esc(item.name)}${item.item_id ? '<br><small class="text-info">Terhubung ke nota</small>' : ''}</td>
+                    <td class="text-center">
+                        <input type="number" class="form-control input-sm return-qty" data-index="${index}" min="1"${item.available_qty ? ` max="${item.available_qty}"` : ''} value="${item.qty}" style="width:80px; margin:auto;">
+                        ${item.available_qty ? `<small class="text-muted">maks ${item.available_qty}</small>` : ''}
+                    </td>
+                    <td class="text-right">${money(item.price)}</td><td class="text-right">${money(item.price * item.qty)}</td>
+                    <td class="text-center"><button type="button" class="btn btn-xs btn-danger remove-return" data-index="${index}"><i class="fa fa-trash"></i></button></td></tr>`).join('')
+                    : '<tr><td colspan="5" class="text-center text-muted empty-row">Belum ada barang retur. Scan barcode untuk mulai.</td></tr>';
+                replacementRows.innerHTML = state.replacements.length ? state.replacements.map((item, index) => `
+                    <tr><td><strong>${esc(item.code)}</strong> — ${esc(item.name)}</td><td class="text-center"><input type="number" class="form-control input-sm replacement-qty" data-index="${index}" min="1" value="${item.qty}" style="width:80px; margin:auto;"></td>
+                    <td class="text-right">${money(item.price)}</td><td class="text-right">${money(item.price * item.qty)}</td>
+                    <td class="text-center"><button type="button" class="btn btn-xs btn-danger remove-replacement" data-index="${index}"><i class="fa fa-trash"></i></button></td></tr>`).join('')
+                    : '<tr><td colspan="5" class="text-center text-muted empty-row">Scan barang retur terlebih dahulu.</td></tr>';
+
+                const { returned, replacement } = totals();
                 const difference = Math.max(0, replacement - returned);
                 document.getElementById('returnedTotalText').textContent = money(returned);
                 document.getElementById('replacementTotalText').textContent = money(replacement);
                 document.getElementById('differenceText').textContent = difference ? money(difference) : 'Tidak ada selisih';
                 paymentBox.style.display = difference > 0 ? '' : 'none';
-                differencePaid.dataset.rawValue = String(difference);
                 differencePaid.value = window.formatIdNumber ? window.formatIdNumber(difference) : String(difference);
                 const isCash = /tunai|cash/i.test(paymentMethod.value);
                 paymentReferenceBox.style.display = difference > 0 && !isCash ? '' : 'none';
                 paymentReference.required = difference > 0 && !isCash;
                 if (isCash) paymentReference.value = '';
-                submitButton.disabled = !selectedReturnInputs().length || !replacements.length || replacement < returned;
+                submitButton.disabled = !state.returns.length || !state.replacements.length || replacement < returned;
+                updateInputs();
             };
 
-            const renderReturnRows = (sale) => {
-                returnRows.innerHTML = sale.items.map((item) => `
-                    <tr class="${item.available_qty < 1 ? 'text-muted' : ''}">
-                        <td><input type="checkbox" class="return-select" value="${item.id}" data-price="${item.price}" data-owner-stock-id="${item.owner_stock_id || ''}" ${item.available_qty < 1 ? 'disabled' : ''}></td>
-                        <td>${esc(item.code || '')} - ${esc(item.name)}</td>
-                        <td>${item.qty}</td>
-                        <td>${item.available_qty}</td>
-                        <td>${money(item.price)}</td>
-                        <td><input type="number" class="form-control input-sm return-qty" min="1" max="${item.available_qty}" value="1" ${item.available_qty < 1 ? 'disabled' : ''}></td>
-                    </tr>`).join('');
-                returnRows.querySelectorAll('.return-select').forEach((input) => input.addEventListener('change', () => {
-                    updateSummary();
-                    refreshReturnedStockCandidates();
-                }));
-                returnRows.querySelectorAll('.return-qty').forEach((input) => input.addEventListener('input', () => {
-                    updateSummary();
-                    refreshReturnedStockCandidates();
-                }));
-                returnBox.style.display = '';
-                updateSummary();
-                refreshReturnedStockCandidates();
+            const fetchProduct = (barcode, purpose) => {
+                const params = new URLSearchParams({ outlet_id: outletId(), barcode, purpose });
+                return fetch(`${endpoint}?${params.toString()}`, { headers: { Accept: 'application/json' } }).then(async (response) => {
+                    const data = await response.json();
+                    if (!response.ok) throw new Error(data.message || 'Produk tidak dapat ditemukan.');
+                    return data;
+                });
             };
 
-            const renderReplacementRows = () => {
-                captureReplacementSelections();
-                replacementRows.innerHTML = stocks.map((stock) => {
-                    const selected = replacementSelections.get(String(stock.id));
-                    const qty = selected?.qty || 1;
-                    return `
-                        <tr>
-                            <td><input type="checkbox" class="replacement-select" value="${stock.id}" data-price="${stock.price}" ${selected ? 'checked' : ''}></td>
-                            <td>${esc(stock.code || '')} - ${esc(stock.name)}</td>
-                            <td>${esc(stock.sku || '-')}</td>
-                            <td>${stock.qty}${stock.available_qty > stock.qty ? ` <small class="text-success">(+${stock.available_qty - stock.qty} retur)</small>` : ''}</td>
-                            <td>${money(stock.price)}</td>
-                            <td><input type="number" class="form-control input-sm replacement-qty" min="1" max="${stock.available_qty}" value="${qty}"></td>
-                        </tr>`;
-                }).join('');
-                replacementRows.querySelectorAll('.replacement-select').forEach((input) => input.addEventListener('change', () => {
-                    const row = input.closest('tr');
-                    if (input.checked) {
-                        replacementSelections.set(String(input.value), { id: String(input.value), price: Number(input.dataset.price || 0), qty: Number(row.querySelector('.replacement-qty').value || 1) });
+            const scanReturn = (barcode) => {
+                if (!outletId()) return showError('Pilih outlet terlebih dahulu.');
+                fetchProduct(barcode, 'return').then((product) => {
+                    const invoiceItem = state.sale?.items.find((item) => Number(item.product_id) === Number(product.product_id));
+                    if (state.sale && !invoiceItem) throw new Error('Produk ini tidak ada pada nota yang dipilih.');
+                    if (invoiceItem) {
+                        const current = state.returns.find((item) => Number(item.item_id) === Number(invoiceItem.id));
+                        const nextQty = Number(current?.qty || 0) + 1;
+                        if (nextQty > Number(invoiceItem.available_qty)) throw new Error(`Sisa retur ${invoiceItem.name} hanya ${invoiceItem.available_qty}.`);
+                        if (current) current.qty = nextQty;
+                        else state.returns.push({ product_id: invoiceItem.product_id, item_id: invoiceItem.id, owner_stock_id: invoiceItem.owner_stock_id, name: invoiceItem.name, code: invoiceItem.code || product.code, price: invoiceItem.price, qty: 1, available_qty: invoiceItem.available_qty });
                     } else {
-                        replacementSelections.delete(String(input.value));
+                        const current = state.returns.find((item) => Number(item.product_id) === Number(product.product_id));
+                        if (current) current.qty += 1;
+                        else state.returns.push({ ...product, qty: 1 });
                     }
-                    updateSummary();
-                }));
-                replacementRows.querySelectorAll('.replacement-qty').forEach((input) => input.addEventListener('input', () => {
-                    const checkbox = input.closest('tr').querySelector('.replacement-select');
-                    const selected = replacementSelections.get(String(checkbox.value));
-                    if (selected) selected.qty = Number(input.value || 0);
-                    updateSummary();
-                }));
-                replacementBox.style.display = stocks.length ? '' : 'none';
-                stockHint.style.display = stocks.length ? 'none' : '';
-                replacementResultHint.textContent = stocks.length ? `${stocks.length} hasil ditampilkan. Centang satu atau beberapa barang.` : 'Tidak ada stock yang cocok.';
-                updateSummary();
+                    returnInput.value = ''; clearError(); render(); returnInput.focus();
+                }).catch((error) => showError(error.message));
             };
 
-            const loadStocks = (returnedStockQtys = {}) => {
-                if (!outlet.value) return;
-                const params = new URLSearchParams({ outlet_id: outlet.value, search: replacementSearch.value || '' });
-                Object.entries(returnedStockQtys).forEach(([id, qty]) => params.append(`returned_stock_qtys[${id}]`, qty));
-                fetch(`{{ route('refundPenjualan.stocks') }}?${params.toString()}`, { headers: { 'Accept': 'application/json' } })
-                    .then((response) => {
-                        if (!response.ok) throw new Error('Stock request failed');
-                        return response.json();
-                    })
-                    .then((data) => { stocks = data || []; renderReplacementRows(); })
-                    .catch(() => { stockHint.textContent = 'Stock toko gagal dimuat. Coba cari ulang.'; stockHint.style.display = ''; });
+            const scanReplacement = (barcode) => {
+                if (!state.returns.length) return showError('Scan barang yang dikembalikan terlebih dahulu.');
+                fetchProduct(barcode, 'replacement').then((product) => {
+                    const current = state.replacements.find((item) => Number(item.product_id) === Number(product.product_id));
+                    if (current) current.qty += 1;
+                    else state.replacements.push({ ...product, qty: 1 });
+                    replacementInput.value = ''; clearError(); render(); replacementInput.focus();
+                }).catch((error) => showError(error.message));
             };
 
-            const loadInvoices = () => {
-                invoiceSelect.innerHTML = '<option value="">Memuat invoice...</option>';
-                invoiceId.value = '';
-                returnBox.style.display = 'none';
-                replacementSelections.clear();
-                if (!outlet.value) return;
-                const params = new URLSearchParams({ outlet_id: outlet.value, search: invoiceSearch.value || '' });
-                fetch(`{{ route('refundPenjualan.invoices') }}?${params.toString()}`, { headers: { 'Accept': 'application/json' } })
-                    .then((response) => response.json())
-                    .then((data) => {
-                        invoices = data || [];
-                        invoiceSelect.innerHTML = '<option value="">Pilih invoice</option>' + invoices.map((sale) => `<option value="${sale.id}">${esc(sale.code)} — ${esc(sale.date)} — ${money(sale.total)}</option>`).join('');
-                    })
-                    .catch(() => { invoiceSelect.innerHTML = '<option value="">Invoice gagal dimuat</option>'; });
+            const linkReceipt = () => {
+                const code = receipt.value.trim();
+                if (!outletId() || !code) return;
+                if (state.returns.length) return showError('Nota hanya dapat dihubungkan sebelum scan barang retur.');
+                const params = new URLSearchParams({ outlet_id: outletId(), search: code });
+                fetch(`${invoiceEndpoint}?${params.toString()}`, { headers: { Accept: 'application/json' } }).then((response) => response.json()).then((sales) => {
+                    const sale = (sales || []).find((item) => String(item.code).toLowerCase() === code.toLowerCase());
+                    if (!sale) throw new Error('Nota tidak ditemukan di outlet ini.');
+                    state.sale = sale; saleId.value = sale.id;
+                    receiptStatus.innerHTML = `<span class="text-success"><i class="fa fa-check"></i> Terhubung ke ${esc(sale.code)} · ${esc(sale.date)}</span>`;
+                    receipt.value = ''; clearError(); returnInput.focus();
+                }).catch((error) => { state.sale = null; saleId.value = ''; receiptStatus.textContent = error.message; });
             };
 
-            outlet.addEventListener('change', () => { loadInvoices(); loadStocks(); });
-            invoiceSearch.addEventListener('input', loadInvoices);
-            replacementSearch.addEventListener('input', () => {
-                window.clearTimeout(replacementSearchTimer);
-                replacementSearchTimer = window.setTimeout(() => loadStocks(Object.fromEntries(selectedReturnQtys().filter((item) => item.ownerStockId).map((item) => [item.ownerStockId, item.qty]))), 250);
+            receiptButton.addEventListener('click', linkReceipt);
+            receipt.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); linkReceipt(); } });
+            returnInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); const value = returnInput.value.trim(); if (value) scanReturn(value); } });
+            replacementInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); const value = replacementInput.value.trim(); if (value) scanReplacement(value); } });
+            outlet.addEventListener('change', () => { state.sale = null; saleId.value = ''; state.returns = []; state.replacements = []; receiptStatus.textContent = 'Tanpa nota tetap bisa diproses sebagai data retur baru.'; render(); });
+            paymentMethod.addEventListener('change', render);
+            returnRows.addEventListener('click', (event) => { const button = event.target.closest('.remove-return'); if (button) { state.returns.splice(Number(button.dataset.index), 1); if (!state.returns.length) state.replacements = []; render(); } });
+            replacementRows.addEventListener('click', (event) => { const button = event.target.closest('.remove-replacement'); if (button) { state.replacements.splice(Number(button.dataset.index), 1); render(); } });
+            returnRows.addEventListener('change', (event) => {
+                if (!event.target.matches('.return-qty')) return;
+                const item = state.returns[Number(event.target.dataset.index)];
+                if (!item) return;
+                const requested = Math.max(1, Number.parseInt(event.target.value, 10) || 1);
+                item.qty = item.available_qty ? Math.min(requested, Number(item.available_qty)) : requested;
+                render();
             });
-            paymentMethod.addEventListener('change', updateSummary);
-            invoiceSelect.addEventListener('change', () => {
-                const sale = invoices.find((value) => String(value.id) === String(invoiceSelect.value));
-                invoiceId.value = sale?.id || '';
-                replacementSelections.clear();
-                if (sale) renderReturnRows(sale); else returnBox.style.display = 'none';
-                updateSummary();
+            replacementRows.addEventListener('change', (event) => {
+                if (!event.target.matches('.replacement-qty')) return;
+                const item = state.replacements[Number(event.target.dataset.index)];
+                if (!item) return;
+                item.qty = Math.max(1, Number.parseInt(event.target.value, 10) || 1);
+                render();
             });
 
-            document.getElementById('exchangeForm').addEventListener('submit', (event) => {
-                captureReplacementSelections();
-                const returns = selectedReturnQtys().filter((item) => item.qty > 0);
-                const replacements = [...replacementSelections.values()].filter((item) => item.qty > 0);
-                if (!returns.length || !replacements.length) {
+            form.addEventListener('submit', (event) => {
+                clearError();
+                const { returned, replacement } = totals();
+                if (!state.returns.length || !state.replacements.length || replacement < returned) {
                     event.preventDefault();
-                    const error = document.getElementById('formError');
-                    error.textContent = 'Centang minimal satu barang yang diretur dan satu barang pengganti.';
-                    error.style.display = '';
+                    showError('Scan minimal satu barang retur dan satu barang pengganti. Nilai barang pengganti tidak boleh lebih kecil.');
                     return;
                 }
-                returns.forEach((item, index) => {
-                    document.getElementById('exchangeForm').insertAdjacentHTML('beforeend', `<input class="generated-exchange-field" type="hidden" name="returns[${index}][item_id]" value="${item.itemId}"><input class="generated-exchange-field" type="hidden" name="returns[${index}][qty]" value="${item.qty}">`);
-                });
-                replacements.forEach((item, index) => {
-                    document.getElementById('exchangeForm').insertAdjacentHTML('beforeend', `<input class="generated-exchange-field" type="hidden" name="replacements[${index}][owner_stock_id]" value="${item.id}"><input class="generated-exchange-field" type="hidden" name="replacements[${index}][qty]" value="${item.qty}">`);
-                });
+                form.querySelectorAll('.generated-return-field').forEach((field) => field.remove());
+                const hidden = (name, value) => { const input = document.createElement('input'); input.type = 'hidden'; input.name = name; input.value = value ?? ''; input.className = 'generated-return-field'; form.appendChild(input); };
+                state.returns.forEach((item, index) => { hidden(`returns[${index}][product_id]`, item.product_id); hidden(`returns[${index}][item_id]`, item.item_id || ''); hidden(`returns[${index}][owner_stock_id]`, item.owner_stock_id || ''); hidden(`returns[${index}][qty]`, item.qty); });
+                state.replacements.forEach((item, index) => { hidden(`replacements[${index}][product_id]`, item.product_id); hidden(`replacements[${index}][owner_stock_id]`, item.owner_stock_id || ''); hidden(`replacements[${index}][qty]`, item.qty); });
+                differencePaid.value = String(Math.max(0, replacement - returned));
             });
 
-            if (outlet.value) { loadInvoices(); loadStocks(); }
+            render();
+            if (outletId()) returnInput.focus();
         })();
     </script>
 @endsection

@@ -65,6 +65,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::resource('/penjualan', PenjualanController::class)->only(['index', 'create', 'store', 'show', 'destroy']);
     Route::get('/penjualan/{penjualan}/print', [PenjualanController::class, 'print'])->name('penjualan.print');
     Route::get('/refundPenjualan/invoices', [RefundPenjualanController::class, 'invoices'])->name('refundPenjualan.invoices');
+    Route::get('/refundPenjualan/products', [RefundPenjualanController::class, 'products'])->name('refundPenjualan.products');
     Route::get('/refundPenjualan/stocks', [RefundPenjualanController::class, 'stocks'])->name('refundPenjualan.stocks');
     Route::resource('/refundPenjualan', RefundPenjualanController::class)->only(['index', 'create', 'store', 'show']);
     Route::get('/cart', [CartController::class, 'index'])->name('cart.index');
