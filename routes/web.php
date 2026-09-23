@@ -17,6 +17,7 @@ use App\Http\Controllers\PaymentMethodController;
 use App\Http\Controllers\PembelianController;
 use App\Http\Controllers\PengeluaranController;
 use App\Http\Controllers\PenjualanController;
+use App\Http\Controllers\PriceCheckerController;
 use App\Http\Controllers\PromotionController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\ProductMinimumAdjustmentController;
@@ -39,6 +40,14 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', function () {
     return redirect('/dashboard');
 });
+
+// Public in-store product price and promotion checker. The kiosk does not
+// require a customer account; the optional outlet_id keeps the result tied to
+// the store where the checker is installed.
+Route::get('/price-checker', [PriceCheckerController::class, 'index'])->name('price-checker.index');
+Route::get('/price-checker/lookup', [PriceCheckerController::class, 'lookup'])
+    ->middleware('throttle:120,1')
+    ->name('price-checker.lookup');
 
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
