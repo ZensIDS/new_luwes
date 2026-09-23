@@ -85,6 +85,9 @@ class CashierPrintController extends Controller
                 $rule,
                 $product
             );
+            $product->setAttribute('print_price_strike', $calculator->money(
+                $price['hpp_setelah_pajak'] + $price['margin_amount']
+            ));
             $product->setAttribute('print_price_net', $price['price']);
             $product->setAttribute('print_qty', max(1, min(100, (int) $this->quantityFor($product->id, $request))));
         });

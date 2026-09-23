@@ -11,7 +11,6 @@
             --ink: #27253d;
             --muted: #77758b;
             --purple: #6251d8;
-            --purple-dark: #4f3ec4;
             --purple-soft: #f0eeff;
             --line: #e8e6f2;
             --surface: #ffffff;
@@ -167,36 +166,6 @@
 
         .scan-input::placeholder { color: #aaa8b7; }
 
-        .scan-button, .clear-button {
-            flex: 0 0 auto;
-            padding: 13px 19px;
-            border-radius: 11px;
-            font: inherit;
-            font-size: 14px;
-            font-weight: 750;
-            cursor: pointer;
-            transition: transform .15s ease, background .15s ease, border-color .15s ease;
-        }
-
-        .scan-button {
-            color: #fff;
-            background: var(--purple);
-            border: 1px solid var(--purple);
-        }
-
-        .scan-button:hover { background: var(--purple-dark); }
-
-        .clear-button {
-            color: var(--muted);
-            background: #fff;
-            border: 1px solid var(--line);
-        }
-
-        .clear-button:hover { color: var(--danger); border-color: #e7b7c1; }
-
-        button:active { transform: scale(.98); }
-        button:disabled { cursor: wait; opacity: .65; }
-
         .scan-help {
             display: flex;
             align-items: center;
@@ -205,15 +174,6 @@
             padding: 5px 14px 3px;
             color: var(--muted);
             font-size: 12px;
-        }
-
-        .scan-help kbd {
-            padding: 2px 6px;
-            color: #5f5c74;
-            background: #f5f4fa;
-            border: 1px solid #e4e2ed;
-            border-radius: 4px;
-            font-size: 11px;
         }
 
         .notice {
@@ -308,9 +268,7 @@
             .checker-shell { width: min(100% - 24px, 1160px); padding-top: 18px; }
             .topbar { align-items: flex-start; flex-direction: column; gap: 16px; margin-bottom: 36px; }
             .store-label { width: 100%; justify-content: flex-end; }
-            .scan-form { flex-wrap: wrap; }
-            .scan-input-wrap { flex: 1 1 100%; padding: 0 10px; }
-            .scan-button, .clear-button { flex: 1; }
+            .scan-input-wrap { padding: 0 10px; }
             .scan-help { flex-direction: column; align-items: flex-start; }
             .results-heading { padding: 18px; }
             th, td { padding: 15px 18px; }
@@ -354,12 +312,10 @@
                     </svg>
                     <input class="scan-input" id="barcode-input" type="text" inputmode="none" autocomplete="off" autofocus placeholder="Scan barcode produk di sini" aria-label="Barcode produk">
                 </div>
-                <button class="scan-button" id="scan-button" type="submit">Cek harga</button>
-                <button class="clear-button" id="clear-button" type="button">Kosongkan</button>
             </form>
             <div class="scan-help">
-                <span>Gunakan scanner barcode. Hasil akan muncul otomatis setelah scan.</span>
-                <span>Tekan <kbd>Enter</kbd> jika perlu</span>
+                <span>Gunakan scanner barcode. Pencarian berjalan otomatis setelah scan.</span>
+                <span>Hasil dikosongkan setelah 30 detik tanpa scan baru.</span>
             </div>
         </section>
 
@@ -407,14 +363,15 @@
             const input = document.getElementById('barcode-input');
             const outletId = @json($selectedOutletId);
             const form = document.getElementById('scan-form');
-            const scanButton = document.getElementById('scan-button');
-            const clearButton = document.getElementById('clear-button');
             const notice = document.getElementById('notice');
             const emptyState = document.getElementById('empty-state');
             const tableWrap = document.getElementById('table-wrap');
             const resultsBody = document.getElementById('results-body');
             const resultCount = document.getElementById('result-count');
             const results = new Map();
+            let lookupTimer = null;
+            let inactivityTimer = null;
+            let lookupInProgress = null;
 
             const rupiah = (value) => 'Rp ' + new Intl.NumberFormat('id-ID').format(Number(value || 0));
             const escapeHtml = (value) => String(value ?? '')
@@ -432,6 +389,19 @@
             const hideNotice = () => {
                 notice.textContent = '';
                 notice.classList.remove('is-visible');
+            };
+
+            const clearResults = () => {
+                results.clear();
+                input.value = '';
+                hideNotice();
+                render();
+                input.focus();
+            };
+
+            const resetInactivityTimer = () => {
+                clearTimeout(inactivityTimer);
+                inactivityTimer = setTimeout(clearResults, 30000);
             };
 
             const render = () => {
@@ -465,11 +435,12 @@
             };
 
             const lookup = async (barcode) => {
+                if (lookupInProgress === barcode) return;
+
+                lookupInProgress = barcode;
                 const params = new URLSearchParams({ barcode });
                 if (outletId) params.set('outlet_id', outletId);
 
-                scanButton.disabled = true;
-                scanButton.textContent = 'Mengecek…';
                 hideNotice();
 
                 try {
@@ -490,30 +461,35 @@
                     });
                     render();
                     input.value = '';
+                    resetInactivityTimer();
                 } catch (error) {
                     showNotice(error.message || 'Terjadi kendala saat mengecek produk.');
                 } finally {
-                    scanButton.disabled = false;
-                    scanButton.textContent = 'Cek harga';
+                    lookupInProgress = null;
                     input.focus();
                 }
             };
 
+            input.addEventListener('input', () => {
+                resetInactivityTimer();
+                clearTimeout(lookupTimer);
+                const barcode = input.value.trim();
+                if (!barcode || lookupInProgress) return;
+
+                // Most cashier scanners send an Enter key, but the short
+                // debounce also supports scanners that only send characters.
+                lookupTimer = setTimeout(() => lookup(input.value.trim()), 120);
+            });
+
             form.addEventListener('submit', (event) => {
                 event.preventDefault();
+                clearTimeout(lookupTimer);
                 const barcode = input.value.trim();
                 if (barcode) lookup(barcode);
             });
 
-            clearButton.addEventListener('click', () => {
-                results.clear();
-                input.value = '';
-                hideNotice();
-                render();
-                input.focus();
-            });
-
             render();
+            input.focus();
         })();
     </script>
 </body>

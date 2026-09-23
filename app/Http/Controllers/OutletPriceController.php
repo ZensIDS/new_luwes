@@ -6,18 +6,29 @@ use App\Http\Requests\OutletPriceRequest;
 use App\Models\OutletPrice;
 use App\Models\OwnerStock;
 use App\Models\Product;
+use App\Services\PriceCalculator;
 use App\Support\OutletAccess;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 
 class OutletPriceController extends Controller
 {
-    public function index(Request $request)
+    public function index(Request $request, PriceCalculator $calculator)
     {
         $this->ensureManagementAccess();
         $outletId = OutletAccess::id($request, false);
         $prices = $outletId
-            ? OutletPrice::with(['outlet', 'product'])
+            ? OutletPrice::with([
+                'outlet',
+                'product.ownerStocks' => fn ($query) => $query
+                    ->where('owner_id', $outletId)
+                    ->where('qty', '>', 0)
+                    ->where(function ($expiryQuery) {
+                        $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                    })
+                    ->orderBy('created_at')
+                    ->orderBy('id'),
+            ])
                 ->where('outlet_id', $outletId)
                 ->when($request->filled('search'), fn ($query) => $query->whereHas('product', fn ($productQuery) => $productQuery
                     ->where('name', 'like', '%' . $request->search . '%')
@@ -26,6 +37,24 @@ class OutletPriceController extends Controller
                 ->paginate(25)
                 ->withQueryString()
             : new LengthAwarePaginator([], 0, 25);
+
+        if ($outletId) {
+            $prices->getCollection()->each(function (OutletPrice $price) use ($calculator) {
+                $product = $price->product;
+                $stock = $product?->ownerStocks?->first();
+                $calculated = $calculator->calculateItem(
+                    (float) ($stock?->hpp ?? $product?->harga_beli ?? 0),
+                    $price,
+                    $product
+                );
+
+                $price->setAttribute('print_price_hpp_after_tax', $calculated['hpp_setelah_pajak']);
+                $price->setAttribute('print_price_strike', $calculator->money(
+                    $calculated['hpp_setelah_pajak'] + $calculated['margin_amount']
+                ));
+                $price->setAttribute('print_price_net', $calculated['price']);
+            });
+        }
 
         return view('outlet-prices.index', [
             'prices' => $prices,

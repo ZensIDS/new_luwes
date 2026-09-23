@@ -19,6 +19,8 @@
         .label-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:4mm; width:100%; max-width:194mm; margin:0 auto; }
         .voucher-label { min-height:39mm; padding:3.5mm; border:1px dashed #777; background:#fff; text-align:center; overflow:hidden; break-inside:avoid; }
         .voucher-name { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; height:9mm; font-size:13px; font-weight:700; line-height:4.5mm; }
+        .voucher-barcode { height:13mm; margin:2mm 0 1mm; overflow:hidden; display:flex; justify-content:center; align-items:flex-start; }
+        .voucher-barcode svg { display:block; width:auto; max-width:100%; height:13mm; shape-rendering:crispEdges; }
         .voucher-discount { min-height:6mm; margin:2mm 0; font-size:14px; font-weight:700; }
         .code { width:100%; margin-top:1mm; font-size:9px; letter-spacing:1px; text-align:center; }
         @page { size:A4 portrait; margin:8mm; }
@@ -84,8 +86,11 @@
             @foreach ($printItems as $voucher)
                 @for ($index = 0; $index < $voucher->print_qty; $index++)
                     <div class="voucher-label">
-                        <div class="code">{{ $voucher->barcode }}</div>
                         <div class="voucher-name" title="{{ $voucher->name }}">{{ $voucher->name }}</div>
+                        <div class="voucher-barcode">
+                            {!! DNS1D::getBarcodeSVG((string) $voucher->code, 'C128', 1, 30, 'black', false, false) !!}
+                        </div>
+                        <div class="code">{{ $voucher->code }}</div>
                         <div class="voucher-discount">
                             @if ($voucher->print_discount_amount !== null)
                                 Potongan Rp {{ number_format($voucher->print_discount_amount, 0, ',', '.') }}

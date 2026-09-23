@@ -38,24 +38,6 @@
                         <button class="btn btn-sm bg-orange" data-toggle="modal" data-target="#modalImportMinStock">
                             <i class="fa fa-upload"></i> Import Min Stock
                         </button>
-                        <form id="product-label-print-form" method="POST" action="{{ route('cashier.print.products') }}"
-                            target="_blank" style="display:inline-block; margin-left:8px;">
-                            @csrf
-                            <input type="hidden" name="print" value="1">
-                            <input type="hidden" name="select_all" id="select-all-products-flag" value="0">
-                            <input type="hidden" name="search" value="{{ $search ?? '' }}">
-                            <input type="hidden" name="status_produk" value="{{ $selectedStatusProduk }}">
-                            <input type="hidden" name="category_id" value="{{ $selectedCategoryId ?? '' }}">
-                            <input type="hidden" name="lokasi" value="{{ $selectedLokasi ?? '' }}">
-                            <span id="product-print-exclusions"></span>
-                            @if (request()->filled('outlet_id'))
-                                <input type="hidden" name="outlet_id" value="{{ request('outlet_id') }}">
-                            @endif
-                            <button type="submit" id="print-selected-products" class="btn btn-sm bg-purple" disabled>
-                                <i class="fa fa-print"></i> Cetak label terpilih
-                                (<span id="selected-products-count">0</span>)
-                            </button>
-                        </form>
                         <form method="GET" action="{{ route('product.index') }}" class="row" style="margin-top:10px;">
                             <div class="col-xs-12" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                                 <input type="text" name="search" value="{{ $search }}" class="form-control input-sm"
@@ -206,11 +188,6 @@
                         <table id="products-table" class="table table-bordered table-striped">
                             <thead>
                                 <tr>
-                                    <th class="text-center">
-                                        <input type="checkbox" id="select-all-products"
-                                            data-total-products="{{ $products->total() }}"
-                                            title="Pilih semua produk sesuai filter">
-                                    </th>
                                     <td>No</td>
                                     <td>Barcode</td>
                                     {{-- <td>Nama Outlet</td> --}}
@@ -235,15 +212,6 @@
                             <tbody>
                                 @foreach ($products as $value)
                                     <tr>
-                                        <td class="text-center">
-                                            @if ($value->code)
-                                                <input type="checkbox" class="product-print-checkbox"
-                                                    form="product-label-print-form" name="product_ids[]"
-                                                    value="{{ $value->id }}" aria-label="Pilih {{ $value->name }}">
-                                            @else
-                                                <span class="text-muted" title="Produk belum memiliki barcode">—</span>
-                                            @endif
-                                        </td>
                                         <td>{{ ($products->firstItem() ?? 1) + $loop->index }}</td>
                                         <td>{{ $value->code }}</td>
                                         {{-- <td>{{ $value->outlet?->name }}</td> --}}
@@ -423,49 +391,6 @@
                 });
             });
 
-            function updateSelectedProducts() {
-                var selectAll = $('#select-all-products-flag').val() === '1';
-                var excluded = $('.product-print-exclusion').length;
-                var selected = selectAll
-                    ? Math.max(0, Number($('#select-all-products').data('total-products')) - excluded)
-                    : $('.product-print-checkbox:checked').length;
-                $('#selected-products-count').text(selected);
-                $('#print-selected-products').prop('disabled', selected === 0);
-
-                var total = $('.product-print-checkbox').length;
-                $('#select-all-products').prop('checked', selectAll && excluded === 0);
-                $('#select-all-products').prop('indeterminate', selectAll && excluded > 0 || (!selectAll && selected > 0 && selected < total));
-            }
-
-            $('#select-all-products').on('change', function() {
-                $('#select-all-products-flag').val(this.checked ? '1' : '0');
-                $('#product-print-exclusions').empty();
-                $('.product-print-checkbox').prop('checked', this.checked);
-                updateSelectedProducts();
-            });
-
-            $(document).on('change', '.product-print-checkbox', function() {
-                var selectAll = $('#select-all-products-flag').val() === '1';
-                var id = String($(this).val());
-                var exclusion = $('#product-print-exclusions').find('[data-product-exclusion="' + id + '"]');
-
-                if (selectAll) {
-                    if (this.checked) {
-                        exclusion.remove();
-                    } else if (!exclusion.length) {
-                        $('<input>', {
-                            type: 'hidden',
-                            name: 'excluded_product_ids[]',
-                            value: id,
-                            class: 'product-print-exclusion',
-                            'data-product-exclusion': id
-                        }).appendTo('#product-print-exclusions');
-                    }
-                }
-
-                updateSelectedProducts();
-            });
-            updateSelectedProducts();
         });
     </script>
 @endsection
