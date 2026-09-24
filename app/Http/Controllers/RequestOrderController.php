@@ -835,6 +835,55 @@ class RequestOrderController extends Controller
         }
     }
 
+    /**
+     * Qty yang sudah di-reserve OLEH RO INI per stock (stock_id => qty).
+     * Reservasi dibuat saat verifikasi / admin memilih SKU (Stock::reserve) dan tercatat di
+     * request_order_items (stock_id + qty_approved, status approved/partial). Setelah picking
+     * selesai statusnya menjadi 'picked' sehingga tidak dihitung lagi.
+     */
+    protected function ownReservedByStock(RequestOrder $requestOrder, ?int $productId = null): array
+    {
+        return RequestOrderItem::where('request_order_id', $requestOrder->id)
+            ->when($productId, fn ($q) => $q->where('product_id', $productId))
+            ->whereNotNull('stock_id')
+            ->whereIn('item_status', ['approved', 'partial'])
+            ->where('qty_approved', '>', 0)
+            ->selectRaw('stock_id, SUM(qty_approved) as q')
+            ->groupBy('stock_id')
+            ->pluck('q', 'stock_id')
+            ->map(fn ($v) => (int) $v)
+            ->all();
+    }
+
+    /**
+     * Stock yang bisa dipick untuk RO ini (urut FEFO lalu FIFO), dengan atribut `pick_available`:
+     * qty_available + reservasi milik RO ini sendiri (maksimal sebesar qty_reserved & tidak
+     * melebihi qty fisik). Reservasi RO lain tetap tidak bisa dipakai.
+     */
+    protected function pickableStocks(RequestOrder $requestOrder, int $productId)
+    {
+        $own = $this->ownReservedByStock($requestOrder, $productId);
+
+        return Stock::where('product_id', $productId)
+            ->where('status', 'available')
+            ->where(function ($q) use ($own) {
+                $q->where('qty_available', '>', 0);
+                if (! empty($own)) {
+                    $q->orWhereIn('id', array_keys($own));
+                }
+            })
+            ->orderByRaw('expired_at IS NULL ASC') // Expired_at yang ada nilainya didahulukan
+            ->orderBy('expired_at', 'asc')         // Expired terdekat (FEFO)
+            ->orderBy('id', 'asc')                 // Pembelian terlama (FIFO)
+            ->get()
+            ->each(function ($s) use ($own) {
+                $ownQty = min((int) ($own[$s->id] ?? 0), (int) $s->qty_reserved);
+                $s->pick_available = min((int) $s->qty, (int) $s->qty_available + $ownQty);
+            })
+            ->filter(fn ($s) => $s->pick_available > 0)
+            ->values();
+    }
+
     public function scanPick(Request $request, RequestOrder $requestOrder)
     {
         $request->validate([
@@ -881,15 +930,11 @@ class RequestOrderController extends Controller
         // 3. Ambil SEMUA stock available untuk produk ini, diurutkan berdasarkan FEFO & FIFO
         // Prioritas 1: Expired terdekat (FEFO)
         // Prioritas 2: Pembelian/Pembuatan terlama (FIFO / id asc)
-        $availableStocks = Stock::where('product_id', $item->product_id)
-            ->where('qty_available', '>', 0)
-            ->where('status', 'available')
-            ->orderByRaw('expired_at IS NULL ASC') // Expired_at yang ada nilainya didahulukan
-            ->orderBy('expired_at', 'asc')         // Expired terdekat
-            ->orderBy('id', 'asc')                 // Pembelian terlama (menggunakan ID atau created_at)
-            ->get();
+        // Stok yang tersedia UNTUK RO INI = qty_available + reservasi milik RO ini sendiri
+        // (reservasi dari verifikasi/pilih SKU sebelumnya tidak boleh memblokir picking RO yang sama).
+        $availableStocks = $this->pickableStocks($requestOrder, $item->product_id);
 
-        $totalStockAvailable = $availableStocks->sum('qty_available');
+        $totalStockAvailable = $availableStocks->sum('pick_available');
         $qtyNeeded = $item->qty_to_pick; // Contoh: 60 pcs
 
         if ($totalStockAvailable < $qtyNeeded) {
@@ -908,7 +953,7 @@ class RequestOrderController extends Controller
                 if ($remainingToPick <= 0) break;
 
                 // Tentukan berapa jumlah yang bisa diambil dari SKU/Batch ini
-                $take = min($stock->qty_available, $remainingToPick);
+                $take = min($stock->pick_available, $remainingToPick);
 
                 if ($remainingToPick == $qtyNeeded) {
                     // JIKA INI SKU PERTAMA: Update baris draf asli yang sudah ada di tabel
@@ -1082,15 +1127,10 @@ class RequestOrderController extends Controller
                 ]);
             }
 
-            $availableStocks = Stock::where('product_id', $item->product_id)
-                ->where('qty_available', '>', 0)
-                ->where('status', 'available')
-                ->orderByRaw('expired_at IS NULL ASC')
-                ->orderBy('expired_at', 'asc')
-                ->orderBy('id', 'asc')
-                ->get();
+            // Termasuk reservasi milik RO ini sendiri (lihat pickableStocks)
+            $availableStocks = $this->pickableStocks($requestOrder, $item->product_id);
 
-            $totalAvailable = $availableStocks->sum('qty_available');
+            $totalAvailable = $availableStocks->sum('pick_available');
 
             if ($totalAvailable < $newTotalQty) {
                 DB::rollBack();
@@ -1108,7 +1148,7 @@ class RequestOrderController extends Controller
             foreach ($availableStocks as $stock) {
                 if ($remaining <= 0) break;
 
-                $take = min($stock->qty_available, $remaining);
+                $take = min($stock->pick_available, $remaining);
 
                 if ($isFirst) {
                     $item->update([
@@ -1175,6 +1215,9 @@ class RequestOrderController extends Controller
         // Hitung jumlah item yang belum sempat di-scan (hanya untuk info di pesan akhir)
         $unpickedCount = $pickingList->items()->where('is_picked', 0)->count();
 
+        // Reservasi milik RO ini (harus dibaca SEBELUM status item diubah jadi 'picked'/'rejected')
+        $ownReserved = $this->ownReservedByStock($requestOrder);
+
         DB::beginTransaction();
         try {
             // 1. Proses SEMUA item picking list, tapi potong stok HANYA yang sudah di-pick
@@ -1202,6 +1245,21 @@ class RequestOrderController extends Controller
                             'qty_approved' => 0,
                             'item_status'  => 'rejected',
                         ]);
+                }
+            }
+
+            // 1b. Lepas sisa reservasi milik RO ini yang tidak terpakai. allocate() sudah mengurangi
+            // qty_reserved sebesar qty yang dipick; sisanya (mis. SKU yang dicadangkan berbeda dari
+            // SKU hasil FEFO, atau item yang tidak jadi dipick) harus dilepas supaya tidak nyangkut.
+            $pickedByStock = $pickingList->items
+                ->where('is_picked', 1)
+                ->groupBy('stock_id')
+                ->map(fn ($rows) => (int) $rows->sum('qty_picked'));
+
+            foreach ($ownReserved as $stockId => $reservedQty) {
+                $leftover = (int) $reservedQty - (int) ($pickedByStock[$stockId] ?? 0);
+                if ($leftover > 0) {
+                    Stock::find($stockId)?->unreserve($leftover);
                 }
             }
 
