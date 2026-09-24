@@ -12,7 +12,6 @@
         .stock-filter.product-filter .select2-container { width:100% !important; }
         .stock-filter-actions { display:flex; gap:6px; align-items:flex-end; flex-wrap:wrap; }
         .stock-table th, .stock-table td { vertical-align:middle !important; }
-        .stock-table .btn { margin:1px 0; }
         .stock-info { margin:15px 0; }
         .stock-info td:first-child { width:150px; font-weight:600; }
         .stock-breakdown { margin-top:20px; }
@@ -107,7 +106,7 @@
                                 </tbody>
                                 <tfoot>
                                     <tr id="rowTotalStokProduk" style="display:none;">
-                                        <th colspan="8" class="text-right">TOTAL STOK PRODUK (SEMUA SKU)</th>
+                                        <th colspan="8" class="text-right">TOTAL STOK GUDANG (SEMUA SKU)</th>
                                         <th id="totalStokProduk">0</th><th></th>
                                     </tr>
                                     <tr>
@@ -122,10 +121,24 @@
                             <h4>Rincian Stok per SKU <small>(Produk: <span id="breakdownProductName">-</span>)</small></h4>
                             <div class="table-responsive">
                                 <table class="table table-bordered table-condensed">
-                                    <thead><tr><th>SKU</th><th>Supplier</th><th class="text-right">Qty Tersedia</th></tr></thead>
+                                    <thead>
+                                        <tr>
+                                            <th>SKU</th>
+                                            <th>Supplier</th>
+                                            <th class="text-right">Stok Fisik</th>
+                                            <th class="text-right">Reserved</th>
+                                            <th class="text-right">Saldo Kartu</th>
+                                            <th class="text-right">Selisih</th>
+                                        </tr>
+                                    </thead>
                                     <tbody id="breakdownBody"></tbody>
+                                    <tfoot id="breakdownFoot"></tfoot>
                                 </table>
                             </div>
+                            <p class="text-muted" style="font-size:12px;">
+                                <b>Stok Fisik</b> = stok gudang; <b>Saldo Kartu</b> = total masuk dikurangi keluar.
+                                <b>Selisih</b> bukan nol berarti ada perubahan stok yang belum tercatat atau tercatat terlambat.
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -137,9 +150,9 @@
 @section('page-script')
     <script>
         $(function () {
-            let productMeta = {};
-            let allTransactions = [];
-            let kartuTable = null;
+            var productMeta = {};
+            var allTransactions = [];
+            var kartuTable = null;
 
             function escapeHtml(value) {
                 return $('<div>').text(value == null ? '' : value).html();
@@ -162,7 +175,11 @@
             }
 
             function formatRupiah(amount) {
-                return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(amount || 0);
+                return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(Number(amount) || 0);
+            }
+
+            function fmtQtyStandalone(qty) {
+                return fmtQty(qty);
             }
 
             function resetKartuTable(message) {
@@ -171,7 +188,8 @@
                     kartuTable = null;
                 }
                 $('#tableBody').html('<tr><td colspan="10" class="text-center">' + escapeHtml(message) + '</td></tr>');
-                $('#totalPersediaan').text('0');
+                $('#totalStokProduk').text('0');
+                $('#totalPersediaan').text(formatRupiah(0));
             }
 
             function renderKartuTable() {
@@ -180,52 +198,81 @@
                     kartuTable = null;
                 }
 
-                var rows = allTransactions;
                 var tbody = $('#tableBody').empty();
-                if (!rows.length) {
+                if (!allTransactions.length) {
                     tbody.html('<tr><td colspan="10" class="text-center">Tidak ada transaksi untuk produk ini.</td></tr>');
-                } else {
-                    rows.forEach(function (item) {
-                        tbody.append('<tr>' +
-                            '<td></td>' +
-                            '<td>' + escapeHtml(item.tanggal) + '</td>' +
-                            '<td><span class="label label-default">' + escapeHtml(item.sku) + '</span></td>' +
-                            '<td class="text-right">' + fmtQty(item.stok_awal) + '</td>' +
-                            '<td class="text-right">' + fmtQty(item.masuk) + '</td>' +
-                            '<td class="text-right">' + fmtQty(item.keluar) + '</td>' +
-                            '<td class="text-right"><strong>' + fmtQty(item.stok_akhir) + '</strong></td>' +
-                            '<td class="text-right">' + escapeHtml(formatRupiah(item.harga)) + '</td>' +
-                            '<td class="text-right"><strong>' + escapeHtml(formatRupiah(item.nilai)) + '</strong></td>' +
-                            '<td><small>' + escapeHtml(item.keterangan || '-') + '</small></td>' +
-                            '</tr>');
-                    });
-                    kartuTable = $('#kartuTable').DataTable({
-                        order: [[1, 'asc']],
-                        columnDefs: [{ targets: [0], orderable: false, searchable: false }],
-                        columns: [{ data: null, render: function (data, type, row, meta) { return meta.row + 1; } }, null, null, null, null, null, null, null, null, null]
-                    });
+                    return;
                 }
 
-                var latest = rows.length ? rows[rows.length - 1].nilai : 0;
-                $('#totalPersediaan').text(formatRupiah(latest));
+                allTransactions.forEach(function (item) {
+                    tbody.append(
+                        '<tr>' +
+                        '<td></td>' +
+                        '<td>' + escapeHtml(item.tanggal) + '</td>' +
+                        '<td><span class="label label-default">' + escapeHtml(item.sku) + '</span></td>' +
+                        '<td class="text-right">' + fmtQty(item.stok_awal) + '</td>' +
+                        '<td class="text-right">' + fmtQty(item.masuk) + '</td>' +
+                        '<td class="text-right">' + fmtQty(item.keluar) + '</td>' +
+                        '<td class="text-right"><strong>' + fmtQty(item.stok_akhir) + '</strong></td>' +
+                        '<td class="text-right">' + escapeHtml(formatRupiah(item.harga)) + '</td>' +
+                        '<td class="text-right"><strong>' + escapeHtml(formatRupiah(item.nilai)) + '</strong></td>' +
+                        '<td><small>' + escapeHtml(item.keterangan || '-') + '</small></td>' +
+                        '</tr>'
+                    );
+                });
+
+                kartuTable = $('#kartuTable').DataTable({
+                    order: [[1, 'asc']],
+                    columnDefs: [{ targets: [0], orderable: false, searchable: false }],
+                    columns: [{ data: null, render: function (data, type, row, meta) {
+                        return meta.row + 1;
+                    } }, null, null, null, null, null, null, null, null, null]
+                });
             }
 
             function renderProductStockSummary(summary, product) {
-                $('#productSummary').html('<strong>' + escapeHtml(product.name) + '</strong> — ' +
-                    fmtQtyStandalone(summary.total_qty) + ' tersedia dari ' + (summary.breakdown || []).length + ' SKU.').show();
-                $('#totalStokProduk').html(fmtQtyStandalone(summary.total_qty));
-                $('#rowTotalStokProduk').show();
-                $('#breakdownProductName').text(product.name);
-                var breakdown = (summary.breakdown || []).map(function (item) {
-                    return '<tr><td>' + escapeHtml(item.sku) + '</td><td>' + escapeHtml(item.supplier) + '</td><td class="text-right">' + fmtQtyStandalone(item.qty_available) + '</td></tr>';
-                }).join('');
-                $('#breakdownBody').html(breakdown || '<tr><td colspan="3" class="text-center">Tidak ada data SKU.</td></tr>');
-                $('#productStockBreakdown').show();
-            }
+                summary = summary || {};
+                var totalQty = Number(summary.total_qty) || 0;
+                var breakdown = summary.breakdown || [];
 
-            function fmtQtyStandalone(qty) {
-                var converted = konversiDisplay(qty, productMeta.konversi_qty, productMeta.satuan_besar, productMeta.satuan);
-                return escapeHtml(qty) + (converted ? ' <span class="label label-info">' + escapeHtml(converted) + '</span>' : '');
+                $('#productSummary').html(
+                    '<strong>' + escapeHtml(product.name || '-') + '</strong> — ' +
+                    fmtQtyStandalone(totalQty) + ' stok fisik dari ' + breakdown.length + ' SKU.'
+                ).show();
+                $('#totalStokProduk').html(fmtQtyStandalone(totalQty));
+                $('#totalPersediaan').text(formatRupiah(summary.total_nilai || 0));
+                $('#rowTotalStokProduk').show();
+                $('#breakdownProductName').text(product.name || '-');
+
+                function selisihCell(value) {
+                    var difference = Number(value) || 0;
+                    var cls = difference === 0 ? '' : 'text-danger';
+                    var sign = difference > 0 ? '+' : '';
+                    return '<td class="text-right ' + cls + '"><strong>' + sign + escapeHtml(difference) + '</strong></td>';
+                }
+
+                var body = breakdown.map(function (item) {
+                    return '<tr>' +
+                        '<td>' + escapeHtml(item.sku || '-') + '</td>' +
+                        '<td>' + escapeHtml(item.supplier || '-') + '</td>' +
+                        '<td class="text-right">' + fmtQtyStandalone(item.qty || 0) + '</td>' +
+                        '<td class="text-right">' + fmtQtyStandalone(item.qty_reserved || 0) + '</td>' +
+                        '<td class="text-right">' + fmtQtyStandalone(item.saldo_kartu || 0) + '</td>' +
+                        selisihCell(item.selisih) +
+                        '</tr>';
+                }).join('');
+
+                $('#breakdownBody').html(body || '<tr><td colspan="6" class="text-center">Tidak ada data SKU.</td></tr>');
+                $('#breakdownFoot').html(
+                    '<tr>' +
+                    '<th colspan="2" class="text-right">TOTAL</th>' +
+                    '<th class="text-right">' + fmtQtyStandalone(summary.total_qty || 0) + '</th>' +
+                    '<th class="text-right">' + fmtQtyStandalone(summary.total_reserved || 0) + '</th>' +
+                    '<th class="text-right">' + fmtQtyStandalone(summary.total_saldo_kartu || 0) + '</th>' +
+                    selisihCell(summary.total_selisih) +
+                    '</tr>'
+                );
+                $('#productStockBreakdown').show();
             }
 
             $('#selectProduct').select2({
@@ -246,7 +293,9 @@
                             supplier_id: $('#filterSupplier').val()
                         };
                     },
-                    processResults: function (data) { return { results: data.results, pagination: data.pagination }; },
+                    processResults: function (data) {
+                        return { results: data.results, pagination: data.pagination };
+                    },
                     cache: true
                 }
             });
@@ -266,6 +315,7 @@
             $('#btnLoadKartu').on('click', function () {
                 var productId = $('#selectProduct').val();
                 if (!productId) return;
+
                 var button = $(this);
                 button.prop('disabled', true).html('<i class="fa fa-spinner fa-spin"></i> Loading...');
                 resetKartuTable('Memuat data...');
@@ -278,13 +328,19 @@
                         $('#displayCode').text(productMeta.code || '-');
                         $('#displaySupplier').text(productMeta.suppliers || '-');
                         $('#productInfoTable').show();
-                        renderProductStockSummary(response.product_summary || { total_qty: 0, breakdown: [] }, productMeta);
+                        renderProductStockSummary(response.product_summary, productMeta);
                         renderKartuTable();
-                        $('#btnExportKartu').attr('href', '{{ route('laporan.kartu-stok') }}/' + productId).css({ 'pointer-events': 'auto', opacity: 1 });
-                        $('#btnExportPdfKartu').attr('href', '{{ url('laporan/pdf/kartu-stok') }}/' + productId).css({ 'pointer-events': 'auto', opacity: 1 });
+                        $('#btnExportKartu').attr('href', '{{ route('laporan.kartu-stok') }}/' + productId)
+                            .css({ 'pointer-events': 'auto', opacity: 1 });
+                        $('#btnExportPdfKartu').attr('href', '{{ url('laporan/pdf/kartu-stok') }}/' + productId)
+                            .css({ 'pointer-events': 'auto', opacity: 1 });
                     })
-                    .fail(function () { alert('Gagal memuat data kartu stok.'); })
-                    .always(function () { button.prop('disabled', false).html('<i class="fa fa-search"></i> Tampilkan Kartu'); });
+                    .fail(function () {
+                        alert('Gagal memuat data kartu stok.');
+                    })
+                    .always(function () {
+                        button.prop('disabled', false).html('<i class="fa fa-search"></i> Tampilkan Kartu');
+                    });
             });
         });
     </script>

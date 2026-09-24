@@ -232,9 +232,13 @@
         }
 
         // ---- header autosave (supplier) ----
+        // headerPending: true selama menunggu debounce ATAU selama request-nya berjalan.
+        // Dipakai supaya tombol "Selesai" tahu harus menunggu sebelum submit (lihat flushPendingAutosaves).
         let headerTimeout;
+        let headerPending = false;
         function autosaveHeader() {
             clearTimeout(headerTimeout);
+            headerPending = true;
             headerTimeout = setTimeout(function() {
                 $.ajax({
                     url: routes.autosaveHeader,
@@ -248,6 +252,7 @@
                         showIndicator('Tersimpan otomatis ✓');
                     },
                     error: function() { showIndicator('Gagal menyimpan', true); },
+                    complete: function() { headerPending = false; },
                 });
             }, 400);
         }
@@ -571,6 +576,7 @@
 
         function autosaveRow($row) {
             clearTimeout($row.data('debounce'));
+            $row.data('debouncePending', false);
             if ($row.data('removed') || !document.contains($row[0])) return;
 
             const productId = rowProductId($row);
@@ -687,6 +693,7 @@
             updateKonversiDisplay($row);
             updateRowSubtotal($row);
             clearTimeout($row.data('debounce'));
+            $row.data('debouncePending', true);
             $row.data('debounce', setTimeout(function() {
                 autosaveRow($row);
             }, 600));
@@ -936,6 +943,95 @@
         $('#btn-owner-reject').on('click', function() {
             $('#owner-reject-note-hidden').val($('#owner-reject-note').val().trim());
             $('#owner-reject-form').trigger('submit');
+        });
+
+        // ---- Pastikan semua autosave (header + tiap baris) benar-benar selesai ----
+        // sebelum tombol "Selesai" boleh submit & pindah halaman.
+        // BUG LAMA: "Selesai" adalah submit form biasa (navigasi penuh). Kalau ada baris yang
+        // masih menunggu debounce (belum 600ms) atau requestnya masih jalan/di-antrekan (lock per PO
+        // di server memproses satu-persatu), maka begitu halaman pindah, browser MEMBATALKAN semua
+        // request yang belum selesai itu — produk yang baru saja "kelihatan" tersimpan jadi
+        // hilang di database, terutama saat user menambah banyak produk sekaligus lalu langsung klik Selesai.
+        function isRowBusy($row) {
+            return !!($row.data('debouncePending') || $row.data('saving') || $row.data('dirty'));
+        }
+
+        function anyPendingAutosave() {
+            if (headerPending) return true;
+            let busy = false;
+            $('#product-repeater tr').each(function() {
+                if (isRowBusy($(this))) { busy = true; return false; }
+            });
+            return busy;
+        }
+
+        function anyRowFailed() {
+            return $('#product-repeater .row-status .label-danger').length > 0;
+        }
+
+        function flushPendingAutosaves(onSettled) {
+            // Paksa jalankan lebih dulu semua debounce yang masih menunggu, supaya tidak perlu
+            // menunggu sisa waktu debounce-nya (600ms/400ms) satu-satu.
+            clearTimeout(headerTimeout);
+            if (headerPending) {
+                // headerTimeout sudah di-clear di atas, jadi panggil ulang requestnya sekarang juga.
+                headerPending = false;
+                $.ajax({
+                    url: routes.autosaveHeader,
+                    method: 'POST',
+                    headers: { 'X-CSRF-TOKEN': csrfToken },
+                    data: { supplier_id: $('#supplier_id').val() },
+                    complete: function() {},
+                });
+            }
+            $('#product-repeater tr').each(function() {
+                const $row = $(this);
+                if ($row.data('debouncePending')) {
+                    autosaveRow($row); // langsung simpan, tidak usah tunggu debounce
+                }
+            });
+
+            const start = Date.now();
+            const maxWaitMs = 15000;
+            (function poll() {
+                if (!anyPendingAutosave()) {
+                    onSettled();
+                    return;
+                }
+                if (Date.now() - start > maxWaitMs) {
+                    // Jangan biarkan user menunggu tanpa batas — tetap hentikan submit dan beri tahu.
+                    onSettled(true);
+                    return;
+                }
+                setTimeout(poll, 150);
+            })();
+        }
+
+        $('#finish-form').on('submit', function(e) {
+            if (!anyPendingAutosave() && !anyRowFailed()) {
+                return; // tidak ada yang tertunda, biarkan submit seperti biasa
+            }
+
+            e.preventDefault();
+            const $btn = $(this).find('button[type="submit"]');
+            const originalText = $btn.text();
+            $btn.prop('disabled', true).text('Menyimpan sisa perubahan...');
+
+            flushPendingAutosaves((timedOut) => {
+                $btn.prop('disabled', false).text(originalText);
+
+                if (anyRowFailed()) {
+                    alert('Ada produk yang gagal tersimpan (lihat status "Gagal" pada tabel). Perbaiki dulu baris tersebut sebelum klik Selesai, supaya produk tidak hilang.');
+                    return;
+                }
+                if (timedOut) {
+                    alert('Masih ada perubahan yang belum selesai tersimpan. Coba klik Selesai sekali lagi dalam beberapa detik.');
+                    return;
+                }
+
+                showIndicator('Semua tersimpan ✓');
+                $('#finish-form').off('submit').trigger('submit');
+            });
         });
     </script>
 @endsection

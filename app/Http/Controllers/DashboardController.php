@@ -53,13 +53,15 @@ class DashboardController extends Controller
             ->sortBy('next_deadline')
             ->values();
 
+        // Semua angka stok di dashboard memakai SUM(stocks.qty) = stok fisik gudang
+        // (sama dengan menu Stok, Produk, dan Laporan).
         $nearExpiryStocks = Stock::with('product:id,name,code')
-            ->where('qty_available', '>', 0)
+            ->where('qty', '>', 0)
             ->whereNotNull('expired_at')
             ->whereDate('expired_at', '>=', now()->toDateString())
             ->whereDate('expired_at', '<=', now()->addDays(60)->toDateString())
             ->orderBy('expired_at')
-            ->get(['id', 'product_id', 'qty_available', 'expired_at', 'batch_number', 'sku']);
+            ->get(['id', 'product_id', 'qty', 'expired_at', 'batch_number', 'sku']);
 
         $activeAdjustments = \App\Models\ProductMinimumAdjustment::query()
             ->activeOn()
@@ -69,7 +71,7 @@ class DashboardController extends Controller
             ->groupBy('product_id');
 
         $lowVelocityProducts = Product::select('id', 'code', 'name', 'min_stock')
-            ->withSum('stocks', 'qty_available')
+            ->withSum('stocks', 'qty')
             ->where('min_stock', '>', 0)
             ->orderBy('name')
             ->get()
@@ -78,7 +80,7 @@ class DashboardController extends Controller
                 $effectiveMin = $adj
                     ? (int) ceil($product->min_stock * (1 + $adj->adjustment_percentage / 100))
                     : (int) $product->min_stock;
-                $currentStock = (int) ($product->stocks_sum_qty_available ?? 0);
+                $currentStock = (int) ($product->stocks_sum_qty ?? 0);
 
                 $product->effective_min         = $effectiveMin;
                 $product->current_stock         = $currentStock;
@@ -92,7 +94,7 @@ class DashboardController extends Controller
             ->values();
 
         // Stat cards
-        $totalStock        = (int) Stock::sum('qty_available');
+        $totalStock        = (int) Stock::sum('qty');
         $pendingOrdersCount = RequestOrder::where('status', 'pending')->count();
         $deliveredCount    = DeliveryOrder::where('status', 'delivered')->count();
         $refundCount       = RefundPembelian::count();
@@ -102,8 +104,8 @@ class DashboardController extends Controller
             ->limit(5)
             ->get();
 
-        // Top 5 products by available stock (inventory chart)
-        $inventoryChart = Stock::selectRaw('product_id, SUM(qty_available) as total_qty')
+        // Top 5 products by stok gudang (inventory chart)
+        $inventoryChart = Stock::selectRaw('product_id, SUM(qty) as total_qty')
             ->with('product:id,name,code')
             ->groupBy('product_id')
             ->orderByDesc('total_qty')
@@ -138,9 +140,9 @@ class DashboardController extends Controller
             ->pluck('product_id');
 
         $slowMovingProducts = Product::select('id', 'code', 'name')
-            ->withSum('stocks', 'qty_available')
+            ->withSum('stocks', 'qty')
             ->whereNotIn('id', $recentlyDeliveredIds)
-            ->orderByDesc('stocks_sum_qty_available')
+            ->orderByDesc('stocks_sum_qty')
             ->limit(5)
             ->get();
 
@@ -155,14 +157,14 @@ class DashboardController extends Controller
         }
 
         $adjustmentProducts = Product::select('id', 'code', 'name', 'min_stock')
-            ->withSum('stocks', 'qty_available')
+            ->withSum('stocks', 'qty')
             ->orderBy('name')
             ->get()
             ->map(function ($p) use ($activeAdjustments) {
                 $adj = $activeAdjustments->get($p->id)?->first();
                 $p->active_from   = $adj?->active_from;
                 $p->active_until  = $adj?->active_until;
-                $p->current_stock = (int) ($p->stocks_sum_qty_available ?? 0);
+                $p->current_stock = (int) ($p->stocks_sum_qty ?? 0);
                 $p->effective_min = $adj
                     ? (int) ceil($p->min_stock * (1 + $adj->adjustment_percentage / 100))
                     : (int) $p->min_stock;

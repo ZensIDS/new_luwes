@@ -45,7 +45,8 @@ class PembelianController extends Controller
             ->select('products.id', 'code', 'name', 'is_serialized', 'harga_beli', 'konversi_qty', 'satuan_besar', 'satuan')
             ->get()
             ->map(function ($product) {
-                $product->stock_count = $product->stocks()->sum('qty_available');
+                // stok fisik gudang = SUM(stocks.qty) (sama dengan menu Stok/Produk/Dashboard)
+                $product->stock_count = (int) $product->stocks()->sum('qty');
 
                 return $product;
             });
@@ -56,7 +57,7 @@ class PembelianController extends Controller
     public function getAllProducts()
     {
         $products = Product::select('id', 'code', 'name', 'is_serialized', 'harga_beli', 'min_stock', 'konversi_qty', 'satuan_besar', 'satuan')
-            ->withSum('stocks', 'qty_available')
+            ->withSum('stocks', 'qty')
             ->orderBy('name');
 
         if (request()->filled('supplier_id')) {
@@ -66,7 +67,7 @@ class PembelianController extends Controller
 
         $products = $products->get()
             ->map(function ($product) {
-                $currentStock = (int) ($product->stocks_sum_qty_available ?? 0);
+                $currentStock = (int) ($product->stocks_sum_qty ?? 0);
                 $effectiveMin = $product->effective_min_stock;   // ← compute once
                 $product->stock_count      = $currentStock;
                 $product->effective_min    = $effectiveMin;      // ← expose as 'effective_min'
@@ -937,10 +938,15 @@ class PembelianController extends Controller
                 // Check if updating existing stock or creating new
                 if (! empty($itemData['stock_id'])) {
                     // UPDATE existing stock
-                    $stock = Stock::find($itemData['stock_id']);
+                    $stock = Stock::lockForUpdate()->find($itemData['stock_id']);
 
                     if ($stock && $stock->pembelian_id == $pembelian->id) {
                         $oldQty = $stock->qty;
+
+                        // Jangan timpa qty fisik kalau batch ini sudah dipakai transaksi lain
+                        if ((int) $oldQty !== $qtyDiterima && $this->stockAlreadyUsed($stock)) {
+                            throw new \Exception($this->stockUsedMessage($stock, $oldQty, $qtyDiterima));
+                        }
 
                         $stock->update([
                             'sku' => $sku,
@@ -1117,7 +1123,7 @@ class PembelianController extends Controller
 
             if (!empty($validated['stock_id'])) {
                 // UPDATE existing stock
-                $stock = Stock::find($validated['stock_id']);
+                $stock = Stock::lockForUpdate()->find($validated['stock_id']);
 
                 if (!$stock || $stock->pembelian_id != $pembelian->id) {
                     DB::rollBack();
@@ -1128,6 +1134,15 @@ class PembelianController extends Controller
                 }
 
                 $oldQty = $stock->qty;
+
+                // Jangan timpa qty fisik kalau batch ini sudah dipakai transaksi lain
+                if ((int) $oldQty !== $qtyDiterima && $this->stockAlreadyUsed($stock)) {
+                    DB::rollBack();
+                    return response()->json([
+                        'success' => false,
+                        'message' => $this->stockUsedMessage($stock, $oldQty, $qtyDiterima),
+                    ], 422);
+                }
 
                 $stock->update([
                     'sku'         => $sku,
@@ -1239,6 +1254,25 @@ class PembelianController extends Controller
             'expired_at' => $stock->expired_at?->format('Y-m-d'),
             'message'    => 'Tanggal expired berhasil diperbarui.',
         ]);
+    }
+
+    /**
+     * Batch (stock) dianggap sudah dipakai jika sudah masuk picking list, delivery order,
+     * stok outlet, atau retur. Setelah itu stocks.qty adalah SISA fisik, bukan qty yang
+     * diterima, jadi tidak boleh ditimpa lewat form penerimaan (bisa memunculkan stok hantu).
+     */
+    private function stockAlreadyUsed(Stock $stock): bool
+    {
+        return \App\Models\PickingListItem::where('stock_id', $stock->id)->where('is_picked', 1)->exists()
+            || \App\Models\DeliveryOrderItem::where('stock_id', $stock->id)->exists()
+            || \App\Models\OwnerStock::where('stock_id', $stock->id)->exists()
+            || \App\Models\RefundPembelianItem::where('stock_id', $stock->id)->exists();
+    }
+
+    private function stockUsedMessage(Stock $stock, $oldQty, $newQty): string
+    {
+        return "SKU {$stock->sku} sudah dipakai transaksi (picking/pengiriman/retur), sisa stok saat ini {$oldQty} dan tidak bisa diubah menjadi {$newQty} dari form penerimaan. "
+            . 'Muat ulang halaman; jika memang perlu dikoreksi, gunakan Stock Opname.';
     }
 
     private function updateStock($request, $pembelian)

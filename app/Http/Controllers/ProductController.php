@@ -153,9 +153,9 @@ class ProductController extends Controller
 
         $products = $products
             ->with('category:id,name')
+            ->withSum('stocks as stock_qty', 'qty')
             ->withSum(['ownerStocks as owner_stock_qty' => $ownerStockScope], 'qty')
             ->withSum('stocks as reserved_stock_qty', 'qty_reserved')
-            ->withSum('stocks as available_stock_qty', 'qty_available')
             ->withSum([
                 'stockPembelians as approved_stock_pembelians_qty' => function ($query) {
                     $query->whereHas('pembelian', fn($pembelian) => $pembelian->where('owner_approval_status', 'approved'));

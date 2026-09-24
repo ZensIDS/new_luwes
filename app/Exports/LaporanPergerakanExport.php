@@ -51,18 +51,32 @@ class LaporanPergerakanExport implements FromCollection, WithHeadings, WithTitle
             ->get()
             ->keyBy('product_id');
 
-        $stocks = Stock::with(['product.category'])->get();
+        // Per PRODUK dengan stok fisik = SUM(stocks.qty) semua batch (bukan per baris batch)
+        $products = \App\Models\Product::with('category')
+            ->withSum('stocks as stock_qty', 'qty')
+            ->whereHas('stocks')
+            ->orderBy('code')
+            ->get();
+
+        $activeAdjs = \App\Models\ProductMinimumAdjustment::activeOn(now()->toDateString())
+            ->orderByDesc('active_from')
+            ->orderByDesc('id')
+            ->get()
+            ->keyBy('product_id');
 
         $rows = collect();
         $no = 1;
 
-        foreach ($stocks as $s) {
+        foreach ($products as $p) {
+            $s = (object) ['product_id' => $p->id, 'product' => $p, 'qty' => (int) ($p->stock_qty ?? 0)];
             $stat = $movementStats[$s->product_id] ?? null;
             $totalOut = (int) ($stat?->total_out ?? 0);
             $months = max(1, (int) Carbon::parse($stat?->first_date ?? now())->diffInMonths(now()) + 1);
             $avgKeluar = round($totalOut / $months, 1);
             $hariTanpa = $stat ? now()->diffInDays(Carbon::parse($stat->last_date)) : 0;
-            $minStok = $s->product?->min_stock ?? 0;
+            $baseMin = $s->product?->min_stock ?? 0;
+            $adj     = $activeAdjs->get($s->product_id);
+            $minStok = $adj ? (int) ceil($baseMin * (1 + $adj->adjustment_percentage / 100)) : (int) $baseMin;
 
             $kategori = $avgKeluar >= 10 ? 'Fast Moving' : ($avgKeluar >= 3 ? 'Medium Moving' : 'Slow Moving');
             $statusStok = ($s->qty ?? 0) > $minStok ? 'Aman' : (($s->qty ?? 0) > 0 ? 'Kritis' : 'Habis');

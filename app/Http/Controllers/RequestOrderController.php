@@ -365,15 +365,17 @@ class RequestOrderController extends Controller
             'requestOrder' => $requestOrder,
             'outlets'      => Outlet::get(),
             'categories'   => Category::orderBy('name')->get(),
+            // Angka stok di form RO = stok fisik gudang (SUM stocks.qty), sama dengan menu Stok/Produk.
+            // (Validasi alokasi SKU saat picking tetap memakai qty_available.)
             'products'     => Product::with(['stocks' => function ($q) {
-                $q->where('qty_available', '>=', 0)->where('status', 'available');
+                $q->where('qty', '>=', 0);
             }])
                 ->whereHas('stocks', function ($q) {
-                    $q->where('qty_available', '>=', 0)->where('status', 'available');
+                    $q->where('qty', '>=', 0);
                 })
                 ->get()
                 ->map(function ($product) {
-                    $product->total_available = (int) $product->stocks->sum('qty_available');
+                    $product->total_available = (int) $product->stocks->sum('qty');
                     return $product;
                 }),
         ]);

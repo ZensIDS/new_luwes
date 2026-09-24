@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Exports\StockOpnameTemplateExport;
+use App\Models\Pembelian;
 use App\Models\Product;
 use App\Models\OwnerStock;
 use App\Models\RefundPembelian;
@@ -59,49 +60,64 @@ class StockController extends Controller
         $supplier    = $request->input('supplier_id');
         $status      = $request->input('status');
 
-        $orderColIndex = (int) $request->input('order.0.column', 3);
+        $orderColIndex = (int) $request->input('order.0.column', 2);
         $orderDir      = strtolower($request->input('order.0.dir', 'asc')) === 'desc' ? 'desc' : 'asc';
 
-        // Kolom yang boleh dipakai untuk sorting (mapping index kolom DataTables -> kolom SQL asli)
-        // Kolom lain (Konversi, Stock Outlet, Action) sengaja tidak sortable karena
-        // datanya computed/relasi terpisah, bukan kolom langsung.
+        // Mapping index kolom DataTables (urutan kolom di stocks/index.blade.php) -> ekspresi SQL.
+        // 0 No | 1 Code | 2 Product | 3 Konversi | 4 Harga Beli | 5 Stock Outlet |
+        // 6 Qty Reserved | 7 Qty Warehouse | 8 Created | 9 Expired | 10 Status | 11 Action
+        // (Mapping lama masih pakai urutan kolom sebelum kolom SKU dihapus, sehingga
+        //  sort di kolom Qty Warehouse malah mengurutkan berdasarkan qty_reserved.)
         $sortableColumns = [
-            2 => 'products.code',
-            3 => 'products.name',
-            5 => 's.harga_beli',
-            7 => 's.qty_reserved',
-            8 => 'g.total_qty',
-            9 => 's.created_at',
-            10 => 's.expired_at',
-            11 => 's.status',
+            1  => 'products.code',
+            2  => 'products.name',
+            3  => 'g.total_qty',
+            4  => 's.harga_beli',
+            5  => 'COALESCE(o.total_owner_qty, 0)',
+            6  => 'g.total_reserved',
+            7  => 'g.total_qty',
+            8  => 's.created_at',
+            9  => 's.expired_at',
+            10 => 's.status',
         ];
         $orderBy = $sortableColumns[$orderColIndex] ?? 'products.name';
 
-        // Grouping per product: satu baris representatif (stok terakhir) + total qty (SUM),
-        // dihitung SEKALI lewat SQL groupBy -- bukan N query terpisah per baris seperti sebelumnya.
+        // ==== SUMBER KEBENARAN STOK: SUM(stocks.qty) per produk (semua batch/SKU) ====
+        // Angka ini sama dengan Product::withStockTotals() dan Product::total_stock.
+        //  - total_qty      = SUM(qty)          -> stok fisik gudang (semua batch, bukan cuma 1 baris)
+        //  - total_reserved = SUM(qty_reserved) -> reservasi (sudah termasuk di total_qty)
+        //  - last_stock_id  = baris "representatif" (batch terakhir yang MASIH ada isinya) untuk
+        //                     kolom harga/created/expired/status
+        // Produk dengan total 0 disembunyikan; total negatif sengaja tetap muncul supaya anomali kelihatan.
         $grouped = Stock::query()
             ->select('product_id')
-            ->selectRaw('MAX(id) as last_stock_id')
+            ->selectRaw('COALESCE(MAX(CASE WHEN qty > 0 THEN id END), MAX(id)) as last_stock_id')
             ->selectRaw('SUM(qty) as total_qty')
-            ->where('qty', '>', 0)
+            ->selectRaw('SUM(qty_reserved) as total_reserved')
+            ->groupBy('product_id')
+            ->havingRaw('SUM(qty) <> 0')
+            ->toBase(); // toBase() = global scope SoftDeletes ikut diterapkan
+
+        // Stok di outlet: SUM semua owner_stocks per produk (bukan hanya dari 1 baris stock)
+        $ownerTotals = DB::table('owner_stocks')
+            ->whereNull('deleted_at')
+            ->select('product_id')
+            ->selectRaw('SUM(qty) as total_owner_qty')
             ->groupBy('product_id');
 
-        // recordsTotal: total produk (tanpa filter search/kategori/lokasi) yang masih punya stock > 0
-        $recordsTotal = DB::table(DB::raw("({$grouped->toSql()}) as g"))
-            ->mergeBindings($grouped->getQuery())
-            ->count();
+        // recordsTotal: total produk (tanpa filter search/kategori/lokasi) yang punya stok
+        $recordsTotal = DB::query()->fromSub($grouped, 'g')->count();
 
         // Join ke products, categories, dan stocks (baris representatif) langsung di SQL
         // supaya search/filter/sort semuanya jalan di database.
-        // leftJoin ke pembelians + suppliers ditambahkan supaya search bisa menjangkau
-        // nama supplier (kolom itu ditampilkan di tabel tapi dulu tidak ikut ter-search
-        // sama sekali). Tetap leftJoin (bukan inner) supaya stock tanpa pembelian_id
-        // (mis. stok opname manual) tidak ikut hilang dari listing.
-        $base = DB::table(DB::raw("({$grouped->toSql()}) as g"))
-            ->mergeBindings($grouped->getQuery())
+        // leftJoin ke pembelians + suppliers supaya search bisa menjangkau nama supplier,
+        // dan stock tanpa pembelian_id (mis. stok opname manual) tidak ikut hilang.
+        $base = DB::query()->fromSub($grouped, 'g')
             ->join('products', 'products.id', '=', 'g.product_id')
+            ->whereNull('products.deleted_at')
             ->leftJoin('categories', 'categories.id', '=', 'products.category_id')
             ->join('stocks as s', 's.id', '=', 'g.last_stock_id')
+            ->leftJoinSub($ownerTotals, 'o', 'o.product_id', '=', 'g.product_id')
             ->leftJoin('pembelians', 'pembelians.id', '=', 's.pembelian_id')
             ->leftJoin('suppliers', 'suppliers.id', '=', 'pembelians.supplier_id');
 
@@ -122,22 +138,8 @@ class StockController extends Controller
         }
 
         // ==== SEARCH: meniru "smart search" DataTables, tapi tetap ringan ====
-        // DataTables (client-side) memecah input jadi kata per kata dan mencari baris
-        // yang mengandung SEMUA kata itu di kolom manapun, tidak peduli urutan/kerapatan.
-        // Contoh: "wing surya" tetap match "Wings Surya" karena "wing" dan "surya"
-        // masing-masing ketemu sebagai substring, walau tidak nempel persis.
-        //
-        // LIKE '%wing surya%' (satu string utuh) TIDAK match "Wings Surya" karena
-        // butuh substring persis "wing surya" -> data terasa "hilang" di versi lama.
-        //
-        // Fix: pecah $searchValue jadi per kata, AND-kan syarat antar kata (tiap kata
-        // wajib match di salah satu kolom), OR-kan antar kolom untuk kata yang sama.
-        // Ditambahkan juga 'suppliers.name' karena kolom itu tampil di tabel tapi
-        // sebelumnya tidak ikut ter-cover oleh search sama sekali.
-        //
-        // Ini query builder (bukan Eloquent), jadi semua kolom sudah di-JOIN langsung
-        // di $base -- tidak perlu whereHas/subquery seperti di controller lain, dan
-        // tetap satu query flat yang ringan untuk ratusan ribu baris.
+        // Input dipecah per kata; SEMUA kata harus ketemu (AND) di salah satu kolom (OR),
+        // jadi "wing surya" tetap match "Wings Surya".
         if ($searchValue !== '') {
             $searchWords = preg_split('/\s+/', $searchValue, -1, PREG_SPLIT_NO_EMPTY);
             $searchWords = array_slice($searchWords, 0, 5); // batasi biar tidak disalahgunakan
@@ -158,24 +160,20 @@ class StockController extends Controller
         $recordsFiltered = (clone $base)->count();
 
         $rows = $base
-            ->orderBy($orderBy, $orderDir)
-            // Tie-breaker unik. g.product_id unik per baris (hasil groupBy per product),
-            // jadi dipakai sebagai secondary sort supaya urutan baris dengan nilai kolom
-            // utama yang sama (mis. banyak produk dengan status/harga sama) tetap
-            // konsisten antar query. Tanpa ini, saat DataTables pindah halaman atau
-            // re-query gara-gara search, ada baris yang bisa terlewat (tidak pernah
-            // muncul di offset manapun) atau malah dobel.
+            ->orderByRaw("{$orderBy} {$orderDir}") // $orderBy dari whitelist, $orderDir sudah divalidasi
+            // Tie-breaker unik (g.product_id unik per baris) supaya paging tidak menggandakan/melewatkan baris.
             ->orderBy('g.product_id', $orderDir)
             ->offset($start)
             ->limit($length)
             ->get([
                 'g.product_id',
                 'g.total_qty',
+                'g.total_reserved',
+                DB::raw('COALESCE(o.total_owner_qty, 0) as total_owner_qty'),
                 's.id as stock_id',
                 's.sku',
                 's.serial_number',
                 's.harga_beli',
-                's.qty_reserved',
                 's.created_at',
                 's.expired_at',
                 's.status',
@@ -231,13 +229,12 @@ class StockController extends Controller
                 'stock_id'       => $row->stock_id,
                 'code'           => $row->serial_number ?: $row->product_code,
                 'product_name'   => $row->product_name,
-                'konversi'       => $konversiDisplay($row->total_qty) ? '' : '', // ditangani di frontend via konversi_qty dsb
-                'konversi_qty'   => $konversiQty,
-                'satuan_besar'   => $satuanBesar,
-                'satuan'         => $satuan,
+                'konversi_qty'   => $row->konversi_qty,
+                'satuan_besar'   => $row->satuan_besar,
+                'satuan'         => $row->satuan ?? 'PCS',
                 'harga_beli'     => (float) $row->harga_beli,
                 'stock_outlet'   => (int) $stockOutlet,
-                'qty_reserved'   => (int) $row->qty_reserved,
+                'qty_reserved'   => (int) $row->total_reserved,
                 'qty_warehouse'  => (int) $row->total_qty,
                 'created_at'     => $row->created_at ? \Carbon\Carbon::parse($row->created_at)->format('h:i a / d-M-Y') : '-',
                 'expired_at'     => $row->expired_at ? \Carbon\Carbon::parse($row->expired_at)->format('d-M-Y') : '-',
@@ -352,8 +349,9 @@ class StockController extends Controller
         $page = max((int) $request->get('page', 1), 1);
         $perPage = 20;
 
-        $query = Product::query()
-            ->whereHas('stocks', fn($q) => $q->whereNotNull('sku'));
+        // Semua produk yang punya baris stok (termasuk batch tanpa SKU), supaya
+        // totalnya sama dengan menu Stok / Produk.
+        $query = Product::query()->whereHas('stocks');
 
         if ($kategori) {
             $query->whereHas('category', fn ($q) => $q->where('name', $kategori));
@@ -411,198 +409,7 @@ class StockController extends Controller
             return response()->json(['error' => 'Produk tidak ditemukan'], 404);
         }
 
-        // Ambil semua stok (semua SKU/batch) untuk produk ini
-        $stocks = Stock::with('pembelian.supplier')
-            ->where('product_id', $product->id)
-            ->whereNotNull('sku')
-            ->orderBy('sku')
-            ->get();
-
-        $productStocks = $stocks->map(function ($s) {
-            return [
-                'stock_id'      => $s->id,
-                'sku'           => $s->sku,
-                'qty_available' => (int) ($s->qty_available ?? 0),
-                'status'        => $s->status,
-                'supplier'      => $s->pembelian?->supplier?->name ?? '-',
-            ];
-        });
-
-        $totalProductStock = $productStocks->sum('qty_available');
-
-        $suppliersDisplay = $productStocks
-            ->pluck('supplier')
-            ->filter(fn($s) => $s && $s !== '-')
-            ->unique()
-            ->values()
-            ->implode(', ');
-
-        // Gabungkan transaksi dari semua SKU/batch produk ini,
-        // running balance tetap dihitung per SKU (batch) secara independen
-        $allTransactions = collect();
-
-        foreach ($stocks as $stock) {
-            $movements = StockMovement::where('product_id', $product->id)
-                ->whereNull('owner_id')
-                ->where(function ($q) use ($stock) {
-                    $q->where('notes', 'like', "%SKU: {$stock->sku}%")
-                        ->orWhere(function ($q2) use ($stock) {
-                            $q2->where('reference_type', 'App\Models\Pembelian')
-                                ->where('reference_id', $stock->pembelian_id);
-                        });
-                })
-                ->orderBy('created_at', 'asc')
-                ->get();
-
-            $keteranganMap = $this->buildKeteranganMap($movements, $stock);
-
-            $runningStock = 0;
-            $currentPrice = $stock->harga_beli;
-
-            foreach ($movements as $movement) {
-                $stokAwal = $runningStock;
-                $masuk = $movement->qty_in ?? 0;
-                $keluar = $movement->qty_out ?? 0;
-                $stokAkhir = $stokAwal + $masuk - $keluar;
-                $nilai = $stokAkhir * $currentPrice;
-
-                $allTransactions->push([
-                    'sort_key'   => $movement->created_at->format('Y-m-d H:i:s') . '-' . str_pad($movement->id, 10, '0', STR_PAD_LEFT),
-                    'tanggal'    => $movement->created_at->format('Y-m-d'),
-                    'sku'        => $stock->sku,
-                    'stok_awal'  => $stokAwal,
-                    'masuk'      => $masuk,
-                    'keluar'     => $keluar,
-                    'stok_akhir' => $stokAkhir,
-                    'harga'      => $currentPrice,
-                    'nilai'      => $nilai,
-                    'keterangan' => $keteranganMap[$movement->id] ?? '-',
-                ]);
-
-                $runningStock = $stokAkhir;
-            }
-        }
-
-        $result = $allTransactions
-            ->sortBy('sort_key')
-            ->values()
-            ->map(function ($t) {
-                unset($t['sort_key']);
-                return $t;
-            });
-
-        return response()->json([
-            'product' => [
-                'id'           => $product->id,
-                'name'         => $product->name,
-                'code'         => $product->code,
-                'suppliers'    => $suppliersDisplay ?: '-',
-                'konversi_qty' => $product->konversi_qty,
-                'satuan_besar' => $product->satuan_besar,
-                'satuan'       => $product->satuan,
-            ],
-            'transactions' => $result->values(),
-            'product_summary' => [
-                'total_qty' => $totalProductStock,
-                'breakdown' => $productStocks->values(),
-            ],
-        ]);
-    }
-
-    /**
-     * Ganti buildKartuKeterangan() lama yang query per baris.
-     * Fungsi ini query StockAdjustment & RefundPembelianItem SEKALI SAJA
-     * (pakai whereIn), lalu hasilnya dipetakan per movement_id di memory.
-     */
-    protected function buildKeteranganMap($movements, Stock $stock): array
-    {
-        $map = [];
-
-        // Kelompokkan reference_id per tipe, supaya bisa 1x query per tipe (bukan per baris)
-        $adjustmentIds = $movements
-            ->where('reference_type', StockAdjustment::class)
-            ->pluck('reference_id')
-            ->unique()
-            ->values();
-
-        $refundMovementIds = $movements
-            ->where('reference_type', RefundPembelian::class)
-            ->pluck('reference_id')
-            ->unique()
-            ->values();
-
-        // 1x query untuk semua StockAdjustment terkait
-        $adjustments = $adjustmentIds->isNotEmpty()
-            ? StockAdjustment::whereIn('id', $adjustmentIds)
-            ->where('stock_id', $stock->id)
-            ->get()
-            ->keyBy('id')
-            : collect();
-
-        // 1x query untuk semua RefundPembelianItem terkait
-        $refundItems = $refundMovementIds->isNotEmpty()
-            ? RefundPembelianItem::whereIn('refund_pembelian_id', $refundMovementIds)
-            ->where('product_id', $stock->product_id)
-            ->where(function ($query) use ($stock) {
-                $query->where('stock_id', $stock->id)
-                    ->orWhere('sku', $stock->sku);
-            })
-            ->orderByDesc('id')
-            ->get()
-            ->groupBy('refund_pembelian_id') // ambil yang 'latest' per refund_pembelian_id nanti
-            : collect();
-
-        foreach ($movements as $movement) {
-            $parts = [];
-
-            $this->appendKeteranganPart($parts, $movement->notes);
-
-            if ($movement->reference_type === StockAdjustment::class) {
-                $adjustment = $adjustments->get($movement->reference_id);
-
-                if ($adjustment) {
-                    $this->appendKeteranganPart($parts, $adjustment->keterangan);
-                    $this->appendKeteranganPart($parts, $adjustment->reason);
-                }
-            }
-
-            if ($movement->reference_type === RefundPembelian::class) {
-                $refundItem = optional($refundItems->get($movement->reference_id))->first();
-
-                if ($refundItem && ! empty($refundItem->alasan)) {
-                    $this->appendKeteranganPart($parts, 'Alasan retur: ' . $refundItem->alasan);
-                }
-            }
-
-            $map[$movement->id] = ! empty($parts) ? implode(' | ', $parts) : '-';
-        }
-
-        return $map;
-    }
-
-    protected function appendKeteranganPart(array &$parts, ?string $value): void
-    {
-        $value = trim((string) $value);
-
-        if ($value === '') {
-            return;
-        }
-
-        $normalizedValue = mb_strtolower($value);
-
-        foreach ($parts as $part) {
-            $normalizedPart = mb_strtolower($part);
-
-            if (
-                $normalizedPart === $normalizedValue
-                || str_contains($normalizedPart, $normalizedValue)
-                || str_contains($normalizedValue, $normalizedPart)
-            ) {
-                return;
-            }
-        }
-
-        $parts[] = $value;
+        return response()->json(app(\App\Services\KartuStokBuilder::class)->build($product));
     }
 
     //opname
