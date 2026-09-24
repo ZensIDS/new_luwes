@@ -760,12 +760,14 @@
                 const isUnder = p.is_under_minimum;
                 const code = p.code ? String(p.code).trim() : '';
                 const alreadyInPo = used.ids.has(String(p.id)) || (code && used.codes.has(code));
+                const suggestedQty = Math.max(1, (p.effective_min || p.min_stock || 0) - (p.stock_count || 0));
 
                 const $tr = $('<tr>').addClass(alreadyInPo ? 'text-muted' : (isUnder ? 'danger' : ''));
 
                 const $checkTd = $('<td>').addClass('text-center').append(
                     $('<input>').attr({ type: 'checkbox', class: 'cek-product-check', value: p.id })
                         .prop('disabled', !!alreadyInPo)
+                        .prop('checked', !alreadyInPo && isUnder)
                         .data('name', p.name).data('harga', p.harga_beli || 0)
                 );
                 const $statusBadge = $('<span>').addClass('label')
@@ -778,7 +780,7 @@
                     })
                     .css('width', '70px')
                     .prop('disabled', !!alreadyInPo)
-                    .val(0) // Nilai awal kembali ke 0
+                    .val(!alreadyInPo && isUnder ? suggestedQty : 0)
                     .on('input', function() {
                         // 1. Hapus semua karakter yang bukan angka (termasuk tanda minus '-')
                         let value = $(this).val().replace(/[^0-9]/g, '');

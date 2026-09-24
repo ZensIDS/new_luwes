@@ -197,7 +197,7 @@
 
         {{-- Laporan --}}
         @if (in_array($role, ['superadmin', 'admin-gudang', 'staff-outlet', 'owner']))
-        <li class="{{ in_array(Route::currentRouteName(), ['laporan.index']) ? 'active' : '' }}">
+        <li class="{{ in_array(Route::currentRouteName(), ['laporan.index', 'laporan.outlet.index']) ? 'active' : '' }}">
             <a href="/laporan"><i class="fa fa-file-excel-o"></i><span>Laporan</span></a>
         </li>
         @endif

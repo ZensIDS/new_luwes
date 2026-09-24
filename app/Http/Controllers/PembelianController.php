@@ -71,7 +71,7 @@ class PembelianController extends Controller
                 $effectiveMin = $product->effective_min_stock;   // ← compute once
                 $product->stock_count      = $currentStock;
                 $product->effective_min    = $effectiveMin;      // ← expose as 'effective_min'
-                $product->is_under_minimum = $currentStock <= $effectiveMin;
+                $product->is_under_minimum = $currentStock < $effectiveMin;
 
                 return $product;
             });

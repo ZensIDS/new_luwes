@@ -168,6 +168,12 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::resource('/refundPembelian', RefundPembelianController::class);
 
     Route::get('/laporan', [LaporanController::class, 'index'])->name('laporan.index');
+    Route::get('/laporan/outlet', [LaporanController::class, 'indexOutlet'])->name('laporan.outlet.index');
+    Route::get('/laporan/outlet/minimal-stock', [LaporanController::class, 'exportOutletMinimalStock'])->name('laporan.outlet.minimal-stock');
+    Route::get('/laporan/outlet/penjualan', [LaporanController::class, 'exportOutletPenjualan'])->name('laporan.outlet.penjualan');
+    Route::get('/laporan/outlet/rafaksi', [LaporanController::class, 'exportOutletRafaksi'])->name('laporan.outlet.rafaksi');
+    Route::get('/laporan/outlet/retur', [LaporanController::class, 'exportOutletRetur'])->name('laporan.outlet.retur');
+    Route::get('/laporan/outlet/all-stock', [LaporanController::class, 'exportOutletAllStock'])->name('laporan.outlet.all-stock');
     Route::get('/laporan/pembelian/{id?}', [LaporanController::class, 'exportPembelian'])->name('laporan.pembelian');
     Route::get('/laporan/pickinglist/{id?}', [LaporanController::class, 'exportPickingList'])->name('laporan.pickinglist');
     Route::get('/laporan/request-order/{id?}', [LaporanController::class, 'exportRequestOrder'])->name('laporan.request-order');
@@ -301,6 +307,11 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
 
     Route::get('/laporan/pdf/retur-supplier', [LaporanController::class, 'pdfReturSupplier'])->name('laporan.pdf.retur-supplier');
     Route::get('/laporan/pdf/retur-outlet', [LaporanController::class, 'pdfReturOutlet'])->name('laporan.pdf.retur-outlet');
+    Route::get('/laporan/pdf/outlet/minimal-stock', [LaporanController::class, 'pdfOutletMinimalStock'])->name('laporan.pdf.outlet.minimal-stock');
+    Route::get('/laporan/pdf/outlet/penjualan', [LaporanController::class, 'pdfOutletPenjualan'])->name('laporan.pdf.outlet.penjualan');
+    Route::get('/laporan/pdf/outlet/rafaksi', [LaporanController::class, 'pdfOutletRafaksi'])->name('laporan.pdf.outlet.rafaksi');
+    Route::get('/laporan/pdf/outlet/retur', [LaporanController::class, 'pdfOutletRetur'])->name('laporan.pdf.outlet.retur');
+    Route::get('/laporan/pdf/outlet/all-stock', [LaporanController::class, 'pdfOutletAllStock'])->name('laporan.pdf.outlet.all-stock');
 });
 
 Route::middleware(['role:superadmin'])->group(function () {

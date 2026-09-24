@@ -463,6 +463,7 @@
 
                 const $checkTd = $('<td>').addClass('text-center').append(
                     $('<input>').attr({ type: 'checkbox', class: 'cek-product-check', value: p.id })
+                        .prop('checked', isUnder)
                         .data('name', p.name).data('harga', p.harga_beli || 0)
                 );
                 const $statusBadge = $('<span>').addClass('label')
@@ -474,7 +475,7 @@
                         class: 'form-control input-sm cek-qty'
                     })
                     .css('width', '70px')
-                    .val(0) // Nilai awal kembali ke 0
+                    .val(isUnder ? suggestedQty : 0)
                     .on('input', function() {
                         // 1. Hapus semua karakter yang bukan angka (termasuk tanda minus '-')
                         let value = $(this).val().replace(/[^0-9]/g, '');

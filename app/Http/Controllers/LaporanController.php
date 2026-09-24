@@ -31,6 +31,11 @@ use App\Exports\ReturPembelianSingleExport;
 use App\Exports\ReturSupplierExport;
 use App\Exports\StockExport;
 use App\Exports\StockOpnameExport;
+use App\Exports\OutletAllStockExport;
+use App\Exports\OutletMinimalStockExport;
+use App\Exports\OutletPenjualanExport;
+use App\Exports\OutletRafaksiExport;
+use App\Exports\OutletReturExport;
 use App\Models\DeliveryOrder;
 use App\Models\Outlet;
 use App\Models\Pembelian;
@@ -44,6 +49,8 @@ use App\Models\StockAdjustment;
 use App\Models\StockMovement;
 use App\Models\Supplier;
 use App\Models\User;
+use App\Services\OutletLaporanService;
+use App\Support\OutletAccess;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -57,6 +64,15 @@ class LaporanController extends Controller
             'cashiers' => User::where('role', 'staff-outlet')->get(),
             'outlets' => Outlet::get(),
             'suppliers' => Supplier::get(),
+        ]);
+    }
+
+    public function indexOutlet()
+    {
+        return view('laporan.outlet', [
+            'cashiers' => User::whereIn('role', ['staff-outlet', 'kasir'])->orderBy('name')->get(),
+            'outlets' => OutletAccess::outlets(),
+            'rafaksis' => \App\Models\Promotion::query()->orderByDesc('start_at')->orderBy('name')->get(),
         ]);
     }
 
@@ -223,6 +239,31 @@ class LaporanController extends Controller
     public function exportLabaRugi()
     {
         return Excel::download(new LabaRugiExport, 'laporan-laba-rugi.xlsx');
+    }
+
+    public function exportOutletMinimalStock(Request $request)
+    {
+        return Excel::download(new OutletMinimalStockExport($request), 'laporan-outlet-minimal-stock.xlsx');
+    }
+
+    public function exportOutletPenjualan(Request $request)
+    {
+        return Excel::download(new OutletPenjualanExport($request), 'laporan-outlet-penjualan.xlsx');
+    }
+
+    public function exportOutletRafaksi(Request $request)
+    {
+        return Excel::download(new OutletRafaksiExport($request), 'laporan-outlet-rafaksi.xlsx');
+    }
+
+    public function exportOutletRetur(Request $request)
+    {
+        return Excel::download(new OutletReturExport($request), 'laporan-outlet-retur.xlsx');
+    }
+
+    public function exportOutletAllStock(Request $request)
+    {
+        return Excel::download(new OutletAllStockExport($request), 'laporan-outlet-all-stock.xlsx');
     }
 
     public function exportReturSupplier(Request $request)
@@ -814,5 +855,40 @@ class LaporanController extends Controller
     public function exportPergerakan(Request $request)
     {
         return Excel::download(new LaporanPergerakanExport($request), 'laporan-pergerakan-stok.xlsx');
+    }
+
+    public function pdfOutletMinimalStock(Request $request)
+    {
+        return $this->outletPdf($request, 'minimumStock', 'exports.pdf.outlet.minimal-stock', 'Laporan_Outlet_Minimal_Stock.pdf');
+    }
+
+    public function pdfOutletPenjualan(Request $request)
+    {
+        return $this->outletPdf($request, 'sales', 'exports.pdf.outlet.penjualan', 'Laporan_Outlet_Penjualan.pdf');
+    }
+
+    public function pdfOutletRafaksi(Request $request)
+    {
+        return $this->outletPdf($request, 'rafaksi', 'exports.pdf.outlet.rafaksi', 'Laporan_Outlet_Rafaksi.pdf');
+    }
+
+    public function pdfOutletRetur(Request $request)
+    {
+        return $this->outletPdf($request, 'returns', 'exports.pdf.outlet.retur', 'Laporan_Outlet_Retur.pdf');
+    }
+
+    public function pdfOutletAllStock(Request $request)
+    {
+        return $this->outletPdf($request, 'allStock', 'exports.pdf.outlet.all-stock', 'Laporan_Outlet_All_Stock.pdf');
+    }
+
+    protected function outletPdf(Request $request, string $method, string $view, string $filename)
+    {
+        $data = app(OutletLaporanService::class)->{$method}($request);
+        $data['settings'] = $this->getSettings();
+
+        return Pdf::loadView($view, $data)
+            ->setPaper('a4', 'landscape')
+            ->stream($filename);
     }
 }

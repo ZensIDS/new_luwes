@@ -3,6 +3,10 @@
 @section('container')
 <section class="content-header">
     <h1>Laporan & Export Data</h1>
+    <ul class="nav nav-tabs" style="margin-top:15px;">
+        <li class="active"><a href="{{ route('laporan.index') }}"><i class="fa fa-building"></i> Laporan Gudang / Warehouse</a></li>
+        <li><a href="{{ route('laporan.outlet.index') }}"><i class="fa fa-home"></i> Laporan Outlet</a></li>
+    </ul>
 </section>
 <section class="content">
 
