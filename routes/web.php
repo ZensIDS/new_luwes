@@ -132,6 +132,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/pembelian/cek-stok-produk', [PembelianController::class, 'getAllProducts'])->name('pembelian.all-products');
     Route::get('pembelian/data', [PembelianController::class, 'getIndexData'])->name('pembelian.index.data');
     Route::get('pembelian/penerimaan/data', [PembelianController::class, 'getPenerimaanIndexData'])->name('pembelian.penerimaan.index.data');
+    Route::post('pembelian/draft', [PembelianController::class, 'createDraft'])->name('pembelian.draft');
     Route::resource('/pembelian', PembelianController::class);
     Route::prefix('pembelian/{pembelian}')->group(function () {
         Route::post('autosave-header', [PembelianController::class, 'autosaveHeader'])->name('pembelian.autosave-header');

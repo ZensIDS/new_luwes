@@ -11,9 +11,12 @@
                 <div class="box box-primary">
                     <div class="box-header with-border">
                         <h3 class="box-title">Tambah PO</h3>
+                        <div class="box-tools">
+                            <span id="autosave-indicator" class="text-muted small"></span>
+                        </div>
                     </div><!-- /.box-header -->
                     <!-- form start -->
-                    <form action="{{ route('pembelian.store') }}" method="POST" enctype="multipart/form-data">
+                    <form action="{{ route('pembelian.store') }}" method="POST" enctype="multipart/form-data" id="pembelian-form">
                         @csrf
                         <div class="box-body">
                             {{--<div class="form-group">
@@ -52,6 +55,7 @@
                                         <td>Qty</td>
                                         <td>Harga Beli</td>
                                         <td>Sub Total</td>
+                                        <td width="90">Status</td>
                                         <td>Aksi</td>
                                     </tr>
                                 </thead>
@@ -76,6 +80,7 @@
                                             <input class="form-control subtotal" name="product[0][subtotal]" required
                                                 readonly>
                                         </td>
+                                        <td class="text-center row-status"><span class="label label-default">Belum tersimpan</span></td>
                                         <td>
                                             <button class="btn btn-sm btn-danger" onclick="removeBahanBaku(this)"
                                                 type="button">Remove</button>
@@ -101,7 +106,7 @@
 
                         <div class="box-footer">
                             <a href="{{ route('pembelian.index') }}" class="btn btn-default">Kembali</a>
-                            <button type="submit" class="btn btn-primary">Simpan</button>
+                            <button type="submit" class="btn btn-primary" id="finish-button">Simpan</button>
                         </div>
 
                         <!-- Modal Cek Barang -->
@@ -157,6 +162,63 @@
         let supplierRequest = null;
         let selectedSupplierId = $('[name="supplier_id"]').val() || null;
 
+        const csrfToken = '{{ csrf_token() }}';
+        const draftRoute = '{{ route('pembelian.draft') }}';
+        let pembelianId = null;
+        let draftRequest = null;
+        let autosaveRoutes = {
+            autosaveHeader: null,
+            autosaveItem: null,
+            destroyItem: null,
+            finish: null,
+        };
+
+        function showIndicator(message, isError = false) {
+            const $indicator = $('#autosave-indicator');
+            $indicator.removeClass('text-danger text-success')
+                .addClass(isError ? 'text-danger' : 'text-success')
+                .text(message);
+            clearTimeout(showIndicator._timeout);
+            showIndicator._timeout = setTimeout(() => $indicator.text(''), 2500);
+        }
+
+        function setDraft(response) {
+            pembelianId = response.id;
+            autosaveRoutes.autosaveHeader = response.autosave_header_url;
+            autosaveRoutes.autosaveItem = response.autosave_item_url;
+            autosaveRoutes.destroyItem = (itemId) => `/pembelian/${pembelianId}/items/${itemId}`;
+            autosaveRoutes.finish = response.finish_url;
+            $('#pembelian-form').attr('action', autosaveRoutes.finish);
+            $('#finish-button').text('Selesai');
+            if (response.edit_url && window.history.replaceState) {
+                window.history.replaceState({}, '', response.edit_url);
+            }
+            if (response.code) {
+                $('.box-title').first().text('Edit PO — ' + response.code);
+            }
+        }
+
+        function ensureDraft() {
+            if (pembelianId) return $.Deferred().resolve().promise();
+            if (draftRequest) return draftRequest;
+
+            draftRequest = $.ajax({
+                url: draftRoute,
+                method: 'POST',
+                headers: { 'X-CSRF-TOKEN': csrfToken },
+                data: { supplier_id: $('[name="supplier_id"]').val() || null },
+            }).done(function(response) {
+                setDraft(response);
+                showIndicator('Draft dibuat ✓');
+            }).fail(function(xhr) {
+                showIndicator(xhr.responseJSON?.message || 'Gagal membuat draft', true);
+            }).always(function() {
+                draftRequest = null;
+            });
+
+            return draftRequest;
+        }
+
         //TODO use product's konversiDisplay instead
         function konversiDisplay(qty, konversiQty, satuanBesar, satuan) {
             satuan = satuan || 'PCS';
@@ -196,6 +258,7 @@
                     </td>
                     <td><input required type="text" inputmode="numeric" data-currency-input data-currency-decimals="0" class="form-control harga_beli" name="product[${index}][harga_beli]"></td>
                     <td><input type="text" required class="form-control subtotal" name="product[${index}][subtotal]" readonly></td>
+                    <td class="text-center row-status"><span class="label label-default">Belum tersimpan</span></td>
                     <td><button class="btn btn-sm btn-danger" onclick="removeBahanBaku(this)" type="button">Remove</button></td>
                 </tr>`;
         }
@@ -239,7 +302,8 @@
                     $select.append($('<option>', {
                         value: product.id,
                         text: product.code + ' ' + product.name + stockText,
-                        'data-serialized': product.is_serialized ? 1 : 0
+                        'data-serialized': product.is_serialized ? 1 : 0,
+                        'data-harga': product.harga_beli || 0,
                     }));
                 });
 
@@ -265,8 +329,11 @@
             initializeProductRow($('#product-repeater tr:last'));
         }
 
-        $(document).on('change', '.qty, .harga_beli', function() {
+        $(document).on('input change', '.qty, .harga_beli', function() {
+            const $row = $(this).closest('tr');
+            updateKonversiDisplay($row);
             updateSubtotalAndTotal();
+            if ($row.find('.product').val()) queueRowAutosave($row);
         });
 
         // Handle serial number input changes
@@ -301,6 +368,203 @@
             $('#total').val(formatRupiah(total));
         }
 
+        function rowHargaBeli($row) {
+            const $input = $row.find('.harga_beli');
+            return window.parseIdNumber
+                ? (window.parseIdNumber($input.val()) || 0)
+                : (parseFloat($input.val()) || 0);
+        }
+
+        function setRowStatus($row, label, className) {
+            $row.find('.row-status').html('<span class="label label-' + className + '">' + label + '</span>');
+        }
+
+        const pendingItemRequests = new Set();
+        const pendingDeletes = new Set();
+        let deleteFailed = false;
+        let headerTimeout = null;
+        let headerXhr = null;
+        let headerDirty = false;
+        let headerFailed = false;
+
+        function flushHeaderAutosave() {
+            clearTimeout(headerTimeout);
+            headerTimeout = null;
+
+            if (!headerDirty || headerXhr) return;
+
+            if (!pembelianId) {
+                ensureDraft()
+                    .done(flushHeaderAutosave)
+                    .fail(function() {
+                        headerDirty = false;
+                        headerFailed = true;
+                    });
+                return;
+            }
+
+            headerDirty = false;
+            headerXhr = $.ajax({
+                url: autosaveRoutes.autosaveHeader,
+                method: 'POST',
+                headers: { 'X-CSRF-TOKEN': csrfToken },
+                data: { supplier_id: $('[name="supplier_id"]').val() || null },
+            }).done(function(response) {
+                headerFailed = false;
+                if (response.code) {
+                    $('.box-title').first().text('Edit PO — ' + response.code);
+                }
+                showIndicator('Tersimpan otomatis ✓');
+            }).fail(function() {
+                headerFailed = true;
+                showIndicator('Gagal menyimpan supplier', true);
+            }).always(function() {
+                headerXhr = null;
+                if (headerDirty) flushHeaderAutosave();
+                else if (!headerFailed) resumeRowsWaitingForHeader();
+            });
+        }
+
+        function autosaveHeader() {
+            clearTimeout(headerTimeout);
+            headerDirty = true;
+            headerFailed = false;
+            headerTimeout = setTimeout(flushHeaderAutosave, 400);
+        }
+
+        function deleteItemRequest(itemId, onDone) {
+            if (!pembelianId || !itemId) {
+                if (onDone) onDone();
+                return;
+            }
+
+            const requestKey = String(itemId) + ':' + Date.now() + ':' + Math.random();
+            pendingDeletes.add(requestKey);
+            $.ajax({
+                url: autosaveRoutes.destroyItem(itemId),
+                method: 'POST',
+                headers: { 'X-CSRF-TOKEN': csrfToken },
+                data: { _method: 'DELETE' },
+                success: function(response) {
+                    setTotalFromServer(response.total);
+                    if (onDone) onDone(response);
+                },
+                error: function() {
+                    deleteFailed = true;
+                    showIndicator('Gagal menghapus item', true);
+                },
+                complete: function() { pendingDeletes.delete(requestKey); },
+            });
+        }
+
+        function setTotalFromServer(total) {
+            $('#total').val(formatRupiah(total || 0));
+        }
+
+        function autosaveRow($row) {
+            clearTimeout($row.data('debounce'));
+            $row.data('debouncePending', false);
+            if ($row.data('removed') || !document.contains($row[0])) return;
+
+            const productId = $row.find('.product').val();
+            const qty = parseFloat($row.find('.qty').val()) || 0;
+            updateSubtotalAndTotal();
+
+            if (!productId || qty <= 0) return;
+            if (headerDirty || headerXhr) {
+                $row.data('waitingForHeader', true).data('dirty', true);
+                if (headerDirty && !headerXhr) flushHeaderAutosave();
+                return;
+            }
+            if ($row.data('saving')) {
+                $row.data('dirty', true);
+                return;
+            }
+
+            $row.data('saving', true).data('dirty', false);
+            setRowStatus($row, 'Menyimpan...', 'warning');
+
+            const send = function() {
+                if ($row.data('removed')) {
+                    $row.data('saving', false);
+                    return;
+                }
+
+                const currentProductId = $row.find('.product').val();
+                const currentQty = parseFloat($row.find('.qty').val()) || 0;
+                const data = {
+                    id: $row.data('item-id') || null,
+                    product_id: currentProductId,
+                    qty: currentQty,
+                    harga_beli: rowHargaBeli($row),
+                };
+
+                const requestKey = String($row.data('item-id') || 'new') + ':' + Date.now() + ':' + Math.random();
+                pendingItemRequests.add(requestKey);
+
+                $.ajax({
+                    url: autosaveRoutes.autosaveItem,
+                    method: 'POST',
+                    headers: { 'X-CSRF-TOKEN': csrfToken },
+                    data: data,
+                    success: function(response) {
+                        if ($row.data('removed')) {
+                            deleteItemRequest(response.item_id);
+                            return;
+                        }
+
+                        $row.data('item-id', response.item_id).attr('data-item-id', response.item_id);
+                        setRowStatus($row, 'Tersimpan', 'success');
+                        setTotalFromServer(response.total);
+                        showIndicator('Item tersimpan ✓');
+                    },
+                    error: function(xhr) {
+                        if ($row.data('removed')) return;
+                        const message = xhr.responseJSON?.message || 'Gagal menyimpan item';
+                        setRowStatus($row, xhr.status === 422 ? 'Duplikat' : 'Gagal', 'danger');
+                        showIndicator(message, true);
+                    },
+                    complete: function() {
+                        pendingItemRequests.delete(requestKey);
+                        $row.data('saving', false);
+                        if ($row.data('dirty') && !$row.data('removed')) {
+                            $row.data('dirty', false);
+                            autosaveRow($row);
+                        }
+                    },
+                });
+            };
+
+            if (pembelianId) {
+                send();
+            } else {
+                ensureDraft().done(send).fail(function() {
+                    $row.data('saving', false);
+                    setRowStatus($row, 'Gagal', 'danger');
+                });
+            }
+        }
+
+        function resumeRowsWaitingForHeader() {
+            $('#product-repeater tr').each(function() {
+                const $row = $(this);
+                if (!$row.data('waitingForHeader')) return;
+                $row.data('waitingForHeader', false);
+                if ($row.data('dirty') && !$row.data('removed')) {
+                    $row.data('dirty', false);
+                    autosaveRow($row);
+                }
+            });
+        }
+
+        function queueRowAutosave($row) {
+            clearTimeout($row.data('debounce'));
+            $row.data('debouncePending', true);
+            $row.data('debounce', setTimeout(function() {
+                autosaveRow($row);
+            }, 600));
+        }
+
         $('.numeral-mask').mask("#,##0", {
             reverse: true
         });
@@ -308,8 +572,26 @@
 
         function removeBahanBaku(button) {
             if ($('#example tbody tr').length > 1) {
-                $(button).closest('tr').remove();
-                updateSubtotalAndTotal();
+                const $row = $(button).closest('tr');
+                const itemId = $row.data('item-id');
+                clearTimeout($row.data('debounce'));
+                $row.data('removed', true);
+                $(button).prop('disabled', true);
+
+                const finish = function() {
+                    $row.remove();
+                    updateSubtotalAndTotal();
+                };
+
+                if (itemId) {
+                    setRowStatus($row, 'Menghapus...', 'warning');
+                    deleteItemRequest(itemId, function() {
+                        finish();
+                        showIndicator('Item dihapus ✓');
+                    });
+                } else {
+                    finish();
+                }
             }
         }
 
@@ -345,11 +627,11 @@
 
             updateKonversiDisplay($row);
 
-            $.get('/product/' + product_id, function(data) {
-                // Set raw value and trigger input to apply mask formatting
-                harga_beli.val(data.harga_beli).trigger('input');
-                updateSubtotalAndTotal();
-            });
+            if (!product_id) return;
+            const hargaFromOption = $(this).find('option:selected').data('harga') || 0;
+            harga_beli.val(hargaFromOption).trigger('input');
+            updateSubtotalAndTotal();
+            queueRowAutosave($row);
         });
 
         $(document).on('change input', '.qty', function() {
@@ -410,6 +692,7 @@
 
             selectedSupplierId = nextSupplierId;
             loadProductsForSupplier(selectedSupplierId);
+            autosaveHeader();
         });
 
         $('#kas').prop('disabled', true);
@@ -589,11 +872,12 @@
                 const $hargaInput = $newRow.find('.harga_beli');
                 const $qtyInput = $newRow.find('.qty');
 
-                $productSelect.val(item.product_id).trigger('change.select2');
+                $productSelect.val(item.product_id).trigger('change');
                 $hargaInput.val(item.harga).trigger('input');
-                $qtyInput.val(item.qty);
+                $qtyInput.val(item.qty).trigger('input');
 
                 updateSubtotalAndTotal();
+                queueRowAutosave($newRow);
             });
 
             $('#modalCekBarang').modal('hide');
@@ -603,6 +887,83 @@
                 $(node).find('.cek-product-check').prop('checked', false);
             });
             $('#checkAll').prop('checked', false);
+        });
+
+        function isRowBusy($row) {
+            return !!($row.data('debouncePending') || $row.data('saving') || $row.data('dirty'));
+        }
+
+        function anyPendingAutosave() {
+            if (draftRequest || headerDirty || headerXhr || headerTimeout || pendingItemRequests.size > 0 || pendingDeletes.size > 0) {
+                return true;
+            }
+
+            let busy = false;
+            $('#product-repeater tr').each(function() {
+                if (isRowBusy($(this))) {
+                    busy = true;
+                    return false;
+                }
+            });
+            return busy;
+        }
+
+        function anyAutosaveFailed() {
+            return headerFailed || deleteFailed || $('#product-repeater .row-status .label-danger').length > 0;
+        }
+
+        function flushPendingAutosaves(onSettled) {
+            if (headerFailed && !headerXhr) {
+                headerFailed = false;
+                headerDirty = true;
+            }
+            flushHeaderAutosave();
+
+            $('#product-repeater tr').each(function() {
+                const $row = $(this);
+                if ($row.data('debouncePending')) autosaveRow($row);
+            });
+
+            const startedAt = Date.now();
+            const maxWaitMs = 15000;
+            (function poll() {
+                if (!anyPendingAutosave()) {
+                    onSettled(false);
+                    return;
+                }
+                if (Date.now() - startedAt > maxWaitMs) {
+                    onSettled(true);
+                    return;
+                }
+                setTimeout(poll, 150);
+            })();
+        }
+
+        let submitInProgress = false;
+        $('#pembelian-form').on('submit', function(event) {
+            if (submitInProgress || (!anyPendingAutosave() && !anyAutosaveFailed())) return;
+
+            event.preventDefault();
+            const form = this;
+            const $button = $('#finish-button');
+            const originalText = $button.text();
+            $button.prop('disabled', true).text('Menyimpan perubahan...');
+
+            flushPendingAutosaves(function(timedOut) {
+                $button.prop('disabled', false).text(originalText);
+
+                if (anyAutosaveFailed()) {
+                    alert('Ada perubahan yang gagal disimpan. Periksa status pada tabel lalu coba lagi.');
+                    return;
+                }
+                if (timedOut) {
+                    alert('Masih ada perubahan yang belum selesai tersimpan. Coba klik Simpan lagi.');
+                    return;
+                }
+
+                submitInProgress = true;
+                form.submit();
+            });
         });
     </script>
 @endsection

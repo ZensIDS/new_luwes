@@ -232,29 +232,47 @@
         }
 
         // ---- header autosave (supplier) ----
-        // headerPending: true selama menunggu debounce ATAU selama request-nya berjalan.
-        // Dipakai supaya tombol "Selesai" tahu harus menunggu sebelum submit (lihat flushPendingAutosaves).
-        let headerTimeout;
-        let headerPending = false;
+        // Keep the debounce state and the actual request state separate. A
+        // response from an older request must not make a newer change look
+        // saved while it is still in flight.
+        let headerTimeout = null;
+        let headerXhr = null;
+        let headerDirty = false;
+        let headerFailed = false;
+
+        function flushHeaderAutosave() {
+            clearTimeout(headerTimeout);
+            headerTimeout = null;
+
+            if (!headerDirty || headerXhr) return;
+
+            headerDirty = false;
+            headerXhr = $.ajax({
+                url: routes.autosaveHeader,
+                method: 'POST',
+                headers: { 'X-CSRF-TOKEN': csrfToken },
+                data: { supplier_id: $('#supplier_id').val() },
+            }).done(function(res) {
+                headerFailed = false;
+                if (res.code) {
+                    $('.box-title').first().text('Edit PO — ' + res.code);
+                }
+                showIndicator('Tersimpan otomatis ✓');
+            }).fail(function() {
+                headerFailed = true;
+                showIndicator('Gagal menyimpan supplier', true);
+            }).always(function() {
+                headerXhr = null;
+                if (headerDirty) flushHeaderAutosave();
+                else if (!headerFailed) resumeRowsWaitingForHeader();
+            });
+        }
+
         function autosaveHeader() {
             clearTimeout(headerTimeout);
-            headerPending = true;
-            headerTimeout = setTimeout(function() {
-                $.ajax({
-                    url: routes.autosaveHeader,
-                    method: 'POST',
-                    headers: { 'X-CSRF-TOKEN': csrfToken },
-                    data: { supplier_id: $('#supplier_id').val() },
-                    success: function(res) {
-                        if (res.code) {
-                            $('.box-title').first().text('Edit PO — ' + res.code);
-                        }
-                        showIndicator('Tersimpan otomatis ✓');
-                    },
-                    error: function() { showIndicator('Gagal menyimpan', true); },
-                    complete: function() { headerPending = false; },
-                });
-            }, 400);
+            headerDirty = true;
+            headerFailed = false;
+            headerTimeout = setTimeout(flushHeaderAutosave, 400);
         }
 
         let currentProducts = null;
@@ -560,7 +578,14 @@
         // Aturan penting: 1 baris = maksimal 1 request simpan yang sedang berjalan.
         // Kalau ada perubahan saat request masih jalan, disimpan lagi SETELAH request selesai
         // (dengan item_id yang sudah ada). Ini mencegah 1 baris tersimpan 2x (produk dobel).
+        const pendingItemRequests = new Set();
+        const pendingDeletes = new Set();
+        let deleteFailed = false;
+
         function deleteItemRequest(itemId, onDone) {
+            const requestKey = String(itemId) + ':' + Date.now() + ':' + Math.random();
+            pendingDeletes.add(requestKey);
+
             $.ajax({
                 url: routes.destroyItem(itemId),
                 method: 'POST',
@@ -570,7 +595,11 @@
                     setTotal(res.total);
                     if (onDone) onDone(res);
                 },
-                error: function() { showIndicator('Gagal menghapus item', true); },
+                error: function() {
+                    deleteFailed = true;
+                    showIndicator('Gagal menghapus item', true);
+                },
+                complete: function() { pendingDeletes.delete(requestKey); },
             });
         }
 
@@ -597,6 +626,14 @@
                 return;
             }
 
+            // Supplier changes clear the old items on the server. Do not let
+            // a new item request overtake that header request.
+            if (headerDirty || headerXhr) {
+                $row.data('waitingForHeader', true).data('dirty', true);
+                if (headerDirty && !headerXhr) flushHeaderAutosave();
+                return;
+            }
+
             if ($row.data('saving')) {
                 $row.data('dirty', true);
                 return;
@@ -605,6 +642,9 @@
             $row.data('saving', true);
             $row.data('dirty', false);
             $row.find('.row-status').html('<span class="label label-warning">Menyimpan...</span>');
+
+            const requestKey = String($row.data('item-id') || 'new') + ':' + Date.now() + ':' + Math.random();
+            pendingItemRequests.add(requestKey);
 
             $.ajax({
                 url: routes.autosaveItem,
@@ -636,12 +676,25 @@
                     showIndicator(msg, true);
                 },
                 complete: function() {
+                    pendingItemRequests.delete(requestKey);
                     $row.data('saving', false);
                     if ($row.data('dirty') && !$row.data('removed')) {
                         $row.data('dirty', false);
                         autosaveRow($row);
                     }
                 },
+            });
+        }
+
+        function resumeRowsWaitingForHeader() {
+            $('#product-repeater tr').each(function() {
+                const $row = $(this);
+                if (!$row.data('waitingForHeader')) return;
+                $row.data('waitingForHeader', false);
+                if ($row.data('dirty') && !$row.data('removed')) {
+                    $row.data('dirty', false);
+                    autosaveRow($row);
+                }
             });
         }
 
@@ -713,6 +766,7 @@
             };
 
             clearTimeout($row.data('debounce'));
+            $row.data('removed', true);
 
             if (itemId) {
                 deleteItemRequest(itemId, function() {
@@ -721,7 +775,6 @@
                 });
             } else {
                 // Belum punya item_id, tapi mungkin request simpan pertamanya masih jalan
-                if ($row.data('saving')) $row.data('removed', true);
                 finish();
             }
         });
@@ -959,7 +1012,7 @@
         }
 
         function anyPendingAutosave() {
-            if (headerPending) return true;
+            if (headerDirty || headerXhr || headerTimeout || pendingItemRequests.size > 0 || pendingDeletes.size > 0) return true;
             let busy = false;
             $('#product-repeater tr').each(function() {
                 if (isRowBusy($(this))) { busy = true; return false; }
@@ -968,24 +1021,17 @@
         }
 
         function anyRowFailed() {
-            return $('#product-repeater .row-status .label-danger').length > 0;
+            return headerFailed || deleteFailed || $('#product-repeater .row-status .label-danger').length > 0;
         }
 
         function flushPendingAutosaves(onSettled) {
             // Paksa jalankan lebih dulu semua debounce yang masih menunggu, supaya tidak perlu
             // menunggu sisa waktu debounce-nya (600ms/400ms) satu-satu.
-            clearTimeout(headerTimeout);
-            if (headerPending) {
-                // headerTimeout sudah di-clear di atas, jadi panggil ulang requestnya sekarang juga.
-                headerPending = false;
-                $.ajax({
-                    url: routes.autosaveHeader,
-                    method: 'POST',
-                    headers: { 'X-CSRF-TOKEN': csrfToken },
-                    data: { supplier_id: $('#supplier_id').val() },
-                    complete: function() {},
-                });
+            if (headerFailed && !headerXhr) {
+                headerFailed = false;
+                headerDirty = true;
             }
+            flushHeaderAutosave();
             $('#product-repeater tr').each(function() {
                 const $row = $(this);
                 if ($row.data('debouncePending')) {
