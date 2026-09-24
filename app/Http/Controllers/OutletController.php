@@ -59,7 +59,10 @@ class OutletController extends Controller
     {
         $request->merge(['outlet_id' => $outlet->id]);
         OutletAccess::id($request);
-        $cashierSession = CashierSession::with(['drawerEntries' => fn ($query) => $query->latest('recorded_at')])
+        $cashierSession = CashierSession::with([
+            'drawerEntries' => fn ($query) => $query->latest('recorded_at'),
+            'cashier', 'activeShifts',
+        ])
             ->where('outlet_id', $outlet->id)
             ->where('cashier_id', $request->user()->getAuthIdentifier())
             ->where('status', 'open')

@@ -62,7 +62,7 @@
                         @endif
                         <select id="campaign-type" class="form-control" required @if (!$isEdit) name="campaign_type" @endif {{ $isEdit ? 'disabled' : '' }}>
                             <option value="voucher" {{ $selectedType === 'voucher' ? 'selected' : '' }}>Voucher</option>
-                            <option value="flash_sale" {{ $selectedType === 'flash_sale' ? 'selected' : '' }}>Flash Sale</option>
+                            <option value="flash_sale" {{ $selectedType === 'flash_sale' ? 'selected' : '' }}>Rafaksi</option>
                             <option value="bundle" {{ $selectedType === 'bundle' ? 'selected' : '' }}>Bundle + Bonus</option>
                         </select>
                         <small class="help-block" id="campaign-help"></small>

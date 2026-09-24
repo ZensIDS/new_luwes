@@ -90,7 +90,7 @@ const CartTable = ({
                             <td className="text-right">{formatRupiah(getBaseSubtotal(cart))}</td>
                         </tr>
                         {promotionTotal > 0 && <tr>
-                            <td colSpan="4">Potongan promo flash sale / bundling</td>
+                            <td colSpan="4">Potongan promo rafaksi / bundling</td>
                             <td className="text-right text-danger">-{formatRupiah(promotionTotal)}</td>
                         </tr>}
                         <tr>

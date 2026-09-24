@@ -65,7 +65,6 @@
                             <th>Diskon Toko</th>
                             <th>Pajak</th>
                             <th>Penyesuaian Outlet</th>
-                            <th>Aktif</th>
                             <th>Aksi</th>
                         </tr>
                     </thead>
@@ -88,7 +87,7 @@
                                 <td>{{ $price->product?->code }} — {{ $price->product?->name }}</td>
                                 <td>
                                     <del>@currency($price->print_price_strike ?? 0)</del>
-                                    <small class="text-muted">HPP setelah pajak + margin</small>
+                                    <small class="text-muted">HPP: @currency($price->print_price_hpp_after_tax ?? 0) + Margin: @currency($price->print_price_margin ?? 0)</small>
                                 </td>
                                 <td><strong>@currency($price->print_price_net ?? 0)</strong></td>
                                 <td>{{ $price->disc_brand_value }}{{ $price->disc_brand_type === 'percentage' ? '%' : '' }}
@@ -100,7 +99,6 @@
                                 </td>
                                 <td>{{ $price->pajak_value ?? 0 }}{{ $price->pajak_type === 'percentage' ? '%' : '' }}</td>
                                 <td>{{ $price->outlet_adjustment_value ?? 0 }}{{ $price->outlet_adjustment_type === 'percentage' ? '%' : '' }}</td>
-                                <td>{{ $price->is_active ? 'Ya' : 'Tidak' }}</td>
                                 <td><a class="btn btn-xs btn-warning"
                                         href="{{ route('outlet-prices.edit', $price) }}">Edit</a>
                                     <form action="{{ route('outlet-prices.destroy', $price) }}" method="POST"
@@ -110,7 +108,7 @@
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="{{ $selectedOutletId ? 13 : 12 }}" class="text-center">
+                                <td colspan="{{ $selectedOutletId ? 12 : 11 }}" class="text-center">
                                     {{ $selectedOutletId ? 'Belum ada master harga untuk outlet ini.' : 'Pilih outlet terlebih dahulu untuk melihat master harga.' }}
                                 </td>
                             </tr>

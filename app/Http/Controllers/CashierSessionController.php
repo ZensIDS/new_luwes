@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\CashierDrawerEntry;
 use App\Models\CashierSession;
+use App\Models\CashierShift;
 use App\Models\Outlet;
 use App\Support\OutletAccess;
 use Illuminate\Http\Request;
@@ -16,10 +17,14 @@ class CashierSessionController extends Controller
     {
         $request->merge(['outlet_id' => $outlet->id]);
         OutletAccess::id($request);
+        $request->merge([
+            'opening_cashier_name' => trim((string) $request->input('opening_cashier_name')),
+        ]);
 
         $data = $request->validate([
             'opening_cash' => ['required', 'numeric', 'min:0'],
             'opening_note' => ['nullable', 'string', 'max:1000'],
+            'opening_cashier_name' => ['required', 'string', 'max:150'],
         ]);
 
         if (CashierSession::query()
@@ -31,17 +36,58 @@ class CashierSessionController extends Controller
                 ->with('toast_error', 'Kasir untuk user ini sudah terbuka.');
         }
 
-        CashierSession::create([
-            'outlet_id' => $outlet->id,
-            'cashier_id' => $request->user()->getAuthIdentifier(),
-            'status' => 'open',
-            'opening_cash' => $data['opening_cash'],
-            'opening_note' => $data['opening_note'] ?? null,
-            'opened_at' => now(),
-        ]);
+        DB::transaction(function () use ($request, $outlet, $data): void {
+            $session = CashierSession::create([
+                'outlet_id' => $outlet->id,
+                'cashier_id' => $request->user()->getAuthIdentifier(),
+                'status' => 'open',
+                'opening_cash' => $data['opening_cash'],
+                'opening_note' => $data['opening_note'] ?? null,
+                'opened_at' => now(),
+            ]);
+
+            CashierShift::create([
+                'cashier_session_id' => $session->id,
+                'created_by' => $request->user()->getAuthIdentifier(),
+                'name' => trim($data['opening_cashier_name']),
+                'started_at' => now(),
+            ]);
+        });
 
         return redirect()->route('outlet.show', $outlet)
             ->with('toast_success', 'Kasir berhasil dibuka. Periksa cash drawer sebelum mulai menjual.');
+    }
+
+    public function changeShift(Request $request, CashierSession $cashierSession)
+    {
+        $this->ensureOperationAccess($cashierSession);
+        abort_unless($cashierSession->status === 'open', 422, 'Sesi kasir sudah ditutup.');
+        $request->merge(['name' => trim((string) $request->input('name'))]);
+
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:150'],
+        ]);
+
+        DB::transaction(function () use ($request, $cashierSession, $data): void {
+            $session = CashierSession::query()->lockForUpdate()->findOrFail($cashierSession->id);
+            abort_unless($session->status === 'open', 422, 'Sesi kasir sudah ditutup.');
+
+            $now = now();
+            CashierShift::query()
+                ->where('cashier_session_id', $session->id)
+                ->whereNull('ended_at')
+                ->update(['ended_at' => $now]);
+
+            CashierShift::create([
+                'cashier_session_id' => $session->id,
+                'created_by' => $request->user()->getAuthIdentifier(),
+                'name' => trim($data['name']),
+                'started_at' => $now,
+            ]);
+        });
+
+        return redirect()->route('outlet.show', $cashierSession->outlet_id)
+            ->with('toast_success', 'Shift berhasil diganti tanpa logout dari akun kassa.');
     }
 
     public function entry(Request $request, CashierSession $cashierSession)
@@ -97,6 +143,10 @@ class CashierSessionController extends Controller
             $cashierSession = CashierSession::query()->lockForUpdate()->findOrFail($cashierSession->id);
             abort_unless($cashierSession->status === 'open', 422, 'Sesi kasir sudah ditutup.');
             $summary = $cashierSession->summary();
+            CashierShift::query()
+                ->where('cashier_session_id', $cashierSession->id)
+                ->whereNull('ended_at')
+                ->update(['ended_at' => now()]);
             $cashierSession->update([
                 'status' => 'closed',
                 'closing_cash' => $closingCash,
@@ -119,7 +169,9 @@ class CashierSessionController extends Controller
     public function history(Request $request)
     {
         $outletId = OutletAccess::id($request, false);
-        $query = CashierSession::with(['outlet', 'cashier', 'drawerEntries'])
+        $query = CashierSession::with([
+            'outlet', 'cashier', 'shifts', 'drawerEntries',
+        ])
             ->orderByDesc('opened_at');
         if ($outletId) {
             $query->where('outlet_id', $outletId);

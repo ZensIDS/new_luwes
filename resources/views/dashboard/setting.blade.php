@@ -47,6 +47,14 @@
                                     </div>
                                 @endif
                             </div>
+                            @if(auth()->user()?->role === 'superadmin')
+                                <div class="form-group">
+                                    <label for="return_pin">PIN Retur Penjualan :</label>
+                                    <input class="form-control" type="password" name="return_pin" id="return_pin" inputmode="numeric" pattern="[0-9]{4,8}" minlength="4" maxlength="8" placeholder="Masukkan PIN baru (4–8 digit)">
+                                    <small class="help-block">PIN ini wajib dimasukkan saat memproses retur penjualan. Kosongkan untuk mempertahankan PIN lama.</small>
+                                    @if($returnPinConfigured)<span class="text-success"><i class="fa fa-check"></i> PIN retur sudah dikonfigurasi.</span>@else<span class="text-danger"><i class="fa fa-warning"></i> PIN retur belum dikonfigurasi.</span>@endif
+                                </div>
+                            @endif
                             <button type="submit" class="btn btn-primary">Simpan</button>
                         </form>
                     </div><!-- /.box-body -->

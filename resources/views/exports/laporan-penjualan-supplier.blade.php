@@ -3,7 +3,7 @@
         <tr>
             <th>Code</th>
             <th>Customer</th>
-            <th>Kasir</th>
+            <th>Kassa (akun)</th>
             <th>Disc Toko</th>
             <th>Promo Otomatis</th>
             <th>Voucher</th>

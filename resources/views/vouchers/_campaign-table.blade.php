@@ -58,7 +58,7 @@
                             <br><small class="text-muted">{{ $voucherCount }} kode voucher</small>
                         @endif
                     </td>
-                    <td>{{ $isVoucher ? 'Voucher' : ($campaign->type === 'flash_sale' ? 'Flash Sale' : 'Bundle + Bonus') }}</td>
+                    <td>{{ $isVoucher ? 'Voucher' : ($campaign->type === 'flash_sale' ? 'Rafaksi' : 'Bundle + Bonus') }}</td>
                     <td>{{ $productNames }}</td>
                     <td>
                         @if ($isVoucher || $campaign->type === 'flash_sale')
@@ -104,7 +104,7 @@
                 </tr>
             @empty
                 <tr>
-                    <td colspan="10" class="text-center text-muted">{{ $emptyMessage }}</td>
+                    <td colspan="11" class="text-center text-muted">{{ $emptyMessage }}</td>
                 </tr>
             @endforelse
         </tbody>

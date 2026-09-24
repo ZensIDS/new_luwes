@@ -236,7 +236,7 @@ const Vouchers = ({
                             <button type="button" className="btn btn-primary btn-lg" onClick={() => lookupCode(voucherSearch)}>Pakai</button>
                         </span>
                     </div>
-                    <p className="text-muted small">Voucher dipilih manual atau melalui scanner. Promo flash sale/bundling aktif otomatis bila syaratnya terpenuhi.</p>
+                    <p className="text-muted small">Voucher dipilih manual atau melalui scanner. Promo rafaksi/bundling aktif otomatis bila syaratnya terpenuhi.</p>
 
                     {appliedVouchers.length > 0 && (
                         <div className="alert alert-success">
@@ -313,7 +313,7 @@ const Vouchers = ({
                                     return (
                                         <tr key={promotion.code} className={condition.eligible ? "success" : ""}>
                                             <td><strong>{promotion.name}</strong><br /><small>{promotion.code}</small></td>
-                                            <td>{promotion.type === "flash_sale" ? "Flash Sale" : "Bundling"}</td>
+                                            <td>{promotion.type === "flash_sale" ? "Rafaksi" : "Bundling"}</td>
                                             <td>{condition.eligible ? configuredPromotionText(promotion) : condition.text}</td>
                                             <td>
                                                 <span className={condition.eligible ? "text-success" : "text-warning"}>

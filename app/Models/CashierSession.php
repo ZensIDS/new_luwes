@@ -56,6 +56,19 @@ class CashierSession extends Model
         return $this->belongsTo(User::class, 'cashier_id');
     }
 
+    public function shifts()
+    {
+        return $this->hasMany(CashierShift::class, 'cashier_session_id')
+            ->orderBy('started_at');
+    }
+
+    public function activeShifts()
+    {
+        return $this->hasMany(CashierShift::class, 'cashier_session_id')
+            ->whereNull('ended_at')
+            ->orderByDesc('started_at');
+    }
+
     public function sales()
     {
         return $this->hasMany(Penjualan::class, 'cashier_session_id');

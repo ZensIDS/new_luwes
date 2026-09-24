@@ -4,7 +4,11 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Cetak Label Produk</title>
+    <title>Cetak Label Harga</title>
+    @php
+        $labelName = strtoupper($selectedOutlet?->name ?? 'LUWES');
+        $labelStrip = str_repeat($labelName . ' • ', 9);
+    @endphp
     <style>
         * { box-sizing: border-box; }
         body { margin: 0; padding: 20px; font: 14px Arial, sans-serif; color: #222; background: #f4f6f9; }
@@ -18,23 +22,31 @@
         table { width: 100%; border-collapse: collapse; margin-top: 14px; }
         th, td { padding: 7px; border: 1px solid #ddd; text-align: left; }
         th { background: #f5f5f5; }
-        .label-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4mm; width: 100%; max-width: 194mm; margin: 0 auto; }
-        .product-label { min-height: 38mm; padding: 3.5mm; border: 1px dashed #777; background: #fff; text-align: center; overflow: hidden; break-inside: avoid; }
-        .product-name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; height: 9mm; font-size: 12px; font-weight: 700; line-height: 4.5mm; }
-        .old-price { margin-top: 1mm; color: #777; font-size: 10px; }
-        .old-price del { text-decoration-thickness: 1px; }
-        .net-price { margin-top: .5mm; font-size: 17px; font-weight: 700; }
-        .barcode { width: 100%; height: 13mm; margin-top: 2mm; overflow: hidden; display: flex; justify-content: center; align-items: flex-start; }
-        .barcode svg { display: block; width: auto; max-width: 100%; height: 13mm; shape-rendering: crispEdges; }
-        .code { width: 100%; margin-top: 2mm; font-size: 10px; letter-spacing: 1px; text-align: center; }
-        @page { size: A4 portrait; margin: 8mm; }
+
+        .label-outer { width: 80mm; padding: 2.5mm; page-break-inside: avoid; }
+        .frame { display: grid; grid-template-columns: 3mm 1fr 3mm; grid-template-rows: 3mm 1fr 3mm; border: 1px solid #000; }
+        .strip { background: #fff; color: #000; overflow: hidden; white-space: nowrap; font-size: 5.5px; font-weight: 800; letter-spacing: .5px; }
+        .strip-top, .strip-bottom { grid-column: 1 / 4; display: flex; align-items: center; border-bottom: 1px solid #000; }
+        .strip-bottom { border-bottom: none; border-top: 1px solid #000; }
+        .strip-left, .strip-right { display: flex; align-items: center; justify-content: center; border-right: 1px solid #000; }
+        .strip-right { border-right: none; border-left: 1px solid #000; }
+        .strip-left span, .strip-right span { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; }
+        .label-content { padding: 3mm 4mm 3.5mm; text-align: center; }
+        .product-name { font-size: 14px; font-weight: 800; text-transform: uppercase; letter-spacing: .2px; line-height: 1.15; max-height: 2.3em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; margin-bottom: 2mm; }
+        .old-price-wrap { display: inline-flex; align-items: center; gap: 5px; margin-bottom: 1.5mm; border: 1.5px solid #000; padding: .8mm 3mm; }
+        .discount-badge { font-size: 9px; font-weight: 900; letter-spacing: 1px; }
+        .old-price { font-size: 14px; font-weight: 800; text-decoration: line-through; text-decoration-thickness: 1.8px; }
+        .net-price { font-size: 26px; font-weight: 900; line-height: 1.05; letter-spacing: .2px; margin-bottom: 2mm; }
+        .net-price.no-discount { margin-top: 6mm; }
+        .net-price .rp { font-size: 13px; font-weight: 700; vertical-align: 3px; margin-right: 1px; }
+        hr.separator { border: none; border-top: 1px dashed #000; margin: 0 0 2mm; }
+        .product-code { font-family: 'Courier New', monospace; font-size: 11px; font-weight: 700; letter-spacing: 1.5px; }
+        .cut-line { width: 80mm; text-align: center; font-size: 8px; color: #555; padding: 1.5mm 0; letter-spacing: 1px; }
+
+        @page { size: 80mm auto; margin: 0; }
         @media print {
-            body { padding: 0; background: #fff; }
+            body { width: 80mm; margin: 0 auto; padding: 0; background: #fff; }
             .toolbar { display: none !important; }
-            .label-grid { max-width: none; }
-        }
-        @media (max-width: 700px) {
-            .label-grid { grid-template-columns: repeat(2, 1fr); }
         }
     </style>
 </head>
@@ -43,18 +55,13 @@
     @if (! $printing)
         <div class="toolbar">
             <h2>Cetak label harga produk</h2>
-            <p class="muted">
-                Harga coret = HPP setelah pajak + margin. Harga jual = harga netto POS.
-                Barcode dicetak sebagai kode saja.
-            </p>
+            <p class="muted">Harga coret dihitung dari HPP setelah pajak + margin. Label thermal memakai format 80mm dan menampilkan barcode sebagai tulisan saja.</p>
             <form method="GET" action="{{ route('cashier.print.products') }}" target="_blank">
                 @if ($outlets->count() > 1)
                     <label>Outlet
                         <select name="outlet_id">
                             @foreach ($outlets as $outlet)
-                                <option value="{{ $outlet->id }}" {{ (int) $outletId === (int) $outlet->id ? 'selected' : '' }}>
-                                    {{ $outlet->name }}
-                                </option>
+                                <option value="{{ $outlet->id }}" {{ (int) $outletId === (int) $outlet->id ? 'selected' : '' }}>{{ $outlet->name }}</option>
                             @endforeach
                         </select>
                     </label>
@@ -68,9 +75,7 @@
             @if ($products->isNotEmpty())
                 <form method="POST" action="{{ route('cashier.print.products') }}" target="_blank" style="display:block;">
                     @csrf
-                    @if ($outletId)
-                        <input type="hidden" name="outlet_id" value="{{ $outletId }}">
-                    @endif
+                    @if ($outletId)<input type="hidden" name="outlet_id" value="{{ $outletId }}">@endif
                     <input type="hidden" name="print" value="1">
                     <table>
                         <thead>
@@ -85,14 +90,14 @@
                         <tbody>
                             @foreach ($products as $product)
                                 <tr>
-                                    <td>
-                                        <input class="product-check" type="checkbox" name="product_ids[]"
-                                            value="{{ $product->id }}">
-                                    </td>
+                                    <td><input class="product-check" type="checkbox" name="product_ids[]" value="{{ $product->id }}"></td>
                                     <td>{{ $product->code }}</td>
                                     <td>{{ $product->name }}</td>
-                                    <td><del>@currency($product->print_price_strike ?? 0)</del></td>
-                                    <td>@currency($product->print_price_net ?? 0)</td>
+                                    <td>
+                                        @if ($product->print_has_discount)<del>@currency($product->print_price_strike)</del>@endif
+                                        <small class="muted">HPP: @currency($product->print_price_hpp_after_tax) + Margin: @currency($product->print_price_margin)</small>
+                                    </td>
+                                    <td>@currency($product->print_price_net)</td>
                                 </tr>
                             @endforeach
                         </tbody>
@@ -104,22 +109,32 @@
             @endif
         </div>
     @else
-        <div class="label-grid">
-            @foreach ($printItems as $product)
-                @for ($index = 0; $index < $product->print_qty; $index++)
-                    <div class="product-label">
-                        <div class="product-name" title="{{ $product->name }}">{{ $product->name }}</div>
-                        <div class="old-price"><del>@currency($product->print_price_strike ?? 0)</del></div>
-                        <div class="net-price">@currency($product->print_price_net ?? 0)</div>
-                        <div class="barcode">{!! DNS1D::getBarcodeSVG((string) $product->code, 'C128', 1, 34, 'black', false, true) !!}</div>
-                        <div class="code">{{ $product->code }}</div>
+        @foreach ($printItems as $product)
+            @for ($index = 0; $index < $product->print_qty; $index++)
+                <div class="label-outer">
+                    <div class="frame">
+                        <div class="strip strip-top"><span>{{ $labelStrip }}</span></div>
+                        <div class="strip strip-left"><span>{{ $labelName }} • </span></div>
+                        <div class="label-content">
+                            <div class="product-name" title="{{ $product->name }}">{{ $product->name }}</div>
+                            @if ($product->print_has_discount)
+                                <div class="old-price-wrap">
+                                    <span class="discount-badge">DISKON</span>
+                                    <span class="old-price">Rp {{ number_format($product->print_price_strike, 0, ',', '.') }}</span>
+                                </div>
+                            @endif
+                            <div class="net-price {{ $product->print_has_discount ? '' : 'no-discount' }}"><span class="rp">Rp</span>{{ number_format($product->print_price_net, 0, ',', '.') }}</div>
+                            <hr class="separator">
+                            <div class="product-code">{{ $product->code }}</div>
+                        </div>
+                        <div class="strip strip-right"><span>{{ $labelName }} • </span></div>
+                        <div class="strip strip-bottom"><span>{{ $labelStrip }}</span></div>
                     </div>
-                @endfor
-            @endforeach
-        </div>
-        <script>
-            window.addEventListener('load', function () { window.print(); });
-        </script>
+                </div>
+                <div class="cut-line">- - - - - - - - - - - - - - - - - - - - - - - -</div>
+            @endfor
+        @endforeach
+        <script>window.addEventListener('load', function () { window.print(); });</script>
     @endif
 </body>
 

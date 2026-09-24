@@ -126,6 +126,11 @@
                                 <label for="notes">Catatan <small>(opsional)</small></label>
                                 <textarea name="notes" id="notes" rows="2" class="form-control"></textarea>
                             </div>
+                            <div class="form-group">
+                                <label for="return_pin">PIN retur <span class="text-danger">*</span></label>
+                                <input type="password" name="return_pin" id="return_pin" class="form-control" inputmode="numeric" pattern="[0-9]{4,8}" minlength="4" maxlength="8" autocomplete="off" required>
+                                <small class="help-block">Masukkan PIN yang diatur oleh superadmin untuk mengonfirmasi retur.</small>
+                            </div>
                             <div id="formError" class="alert alert-danger" style="display:none"></div>
                             <button type="submit" class="btn btn-success btn-lg btn-block" id="submitButton" disabled><i class="fa fa-check"></i> Simpan Retur</button>
                             <a href="{{ route('refundPenjualan.index') }}" class="btn btn-default btn-block">Batal</a>

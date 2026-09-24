@@ -16,6 +16,8 @@ use App\Services\PriceCalculator;
 use App\Support\OutletAccess;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Throwable;
 
@@ -219,6 +221,7 @@ class RefundPenjualanController extends Controller
             'payment_method_name' => ['nullable', 'string', 'max:100'],
             'payment_reference' => ['nullable', 'string', 'max:150'],
             'notes' => ['nullable', 'string', 'max:1000'],
+            'return_pin' => ['required', 'digits_between:4,8'],
         ], [
             'code.unique' => 'Kode retur penjualan sudah digunakan.',
             'penjualan_id.exists' => 'Invoice tidak ditemukan.',
@@ -227,6 +230,15 @@ class RefundPenjualanController extends Controller
             'replacements.required' => 'Scan minimal satu barang pengganti.',
             'replacements.min' => 'Scan minimal satu barang pengganti.',
         ]);
+
+        $settings = json_decode(Storage::disk('public')->get('settings.json') ?? '{}', true) ?? [];
+        $returnPinHash = $settings['return_pin_hash'] ?? null;
+        if (! $returnPinHash) {
+            throw ValidationException::withMessages(['return_pin' => 'PIN retur belum dikonfigurasi oleh superadmin.']);
+        }
+        if (! Hash::check((string) $data['return_pin'], $returnPinHash)) {
+            throw ValidationException::withMessages(['return_pin' => 'PIN retur salah.']);
+        }
 
         try {
             $refund = DB::transaction(function () use ($request, $data, $outletId, $calculator, $stockService) {

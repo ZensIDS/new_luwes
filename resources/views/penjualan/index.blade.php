@@ -23,7 +23,7 @@
                                     {{-- <td>Customer</td> --}}
                                     {{-- <td>Kas/Metode Pembayaran</td> --}}
                                     <th>Outlet</th>
-                                    <th>Kasir</th>
+                                    <th>Kassa (akun)</th>
                                     <th>Salesman</th>
                                     <th>Detail</th>
                                     <th>Aksi</th>

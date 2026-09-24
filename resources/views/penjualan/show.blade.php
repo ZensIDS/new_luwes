@@ -39,8 +39,12 @@
                                     </tr>
                                 @endif
                                 <tr>
-                                    <td colspan="2">Kasir</td>
+                                    <td colspan="2">Kassa (akun)</td>
                                     <td colspan="2">{{ $penjualan->kasir->name ?? '___customer' }}</td>
+                                </tr>
+                                <tr>
+                                    <td colspan="2">Nama kasir shift</td>
+                                    <td colspan="2">{{ $penjualan->cashierShift?->name ?? '—' }}</td>
                                 </tr>
                                 <tr>
                                     <td colspan="2">Outlet</td>
@@ -69,7 +73,7 @@
                                     <th colspan="4" class="text-sm text-right">Subtotal setelah Disc Toko : @currency(($penjualan->subtotal ?? $totalCost) + ($penjualan->promotion_total ?? 0))</th>
                                 </tr>
                                 <tr>
-                                    <th colspan="4" class="text-sm text-right">Promo Flash Sale / Bundling : -@currency($penjualan->promotion_total ?? 0)</th>
+                                    <th colspan="4" class="text-sm text-right">Promo Rafaksi / Bundling : -@currency($penjualan->promotion_total ?? 0)</th>
                                 </tr>
                                 <tr>
                                     <th colspan="4" class="text-sm text-right">Subtotal setelah promo : @currency($penjualan->subtotal ?? $totalCost)</th>

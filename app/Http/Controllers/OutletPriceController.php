@@ -49,6 +49,7 @@ class OutletPriceController extends Controller
                 );
 
                 $price->setAttribute('print_price_hpp_after_tax', $calculated['hpp_setelah_pajak']);
+                $price->setAttribute('print_price_margin', $calculated['margin_amount']);
                 $price->setAttribute('print_price_strike', $calculator->money(
                     $calculated['hpp_setelah_pajak'] + $calculated['margin_amount']
                 ));

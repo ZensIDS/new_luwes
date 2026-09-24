@@ -1,9 +1,9 @@
 @extends('layouts.master')
 
-@section('title', 'Promo Flash Sale & Bundle')
+@section('title', 'Promo Rafaksi & Bundle')
 
 @section('container')
-<section class="content-header"><h1>Promo Flash Sale &amp; Bundle</h1></section>
+<section class="content-header"><h1>Promo Rafaksi &amp; Bundle</h1></section>
 <section class="content">
     <div class="box">
         <div class="box-header">

@@ -6,6 +6,7 @@
 
 @section('container')
     @php($summary = $cashierSummary ?? [])
+    @php($activeShift = $cashierSession?->activeShifts?->first())
     <section class="content">
         <div class="pos-header">
             <div>
@@ -17,6 +18,8 @@
                 @endif
                 @if ($cashierSession)
                     <div class="pos-cash-summary">
+                        <span>Kassa <b>{{ $cashierSession->cashier?->name ?? '—' }}</b></span>
+                        <span>Nama kasir <b>{{ $activeShift?->name ?? '—' }}</b></span>
                         <span>Saldo awal <b>Rp {{ number_format($summary['opening_cash'] ?? 0, 0, ',', '.') }}</b></span>
                         <span>Penjualan tunai <b>Rp {{ number_format($summary['cash_sales'] ?? 0, 0, ',', '.') }}</b></span>
                         <span>BON <b class="text-danger">Rp {{ number_format($summary['cash_out'] ?? 0, 0, ',', '.') }}</b></span>
@@ -35,6 +38,9 @@
                     </button>
                     <button type="button" class="btn btn-xs btn-default" data-toggle="modal" data-target="#drawerCheckModal">
                         <i class="fa fa-calculator"></i> Cek drawer
+                    </button>
+                    <button type="button" class="btn btn-xs btn-warning" data-toggle="modal" data-target="#changeShiftModal">
+                        <i class="fa fa-refresh"></i> Ganti shift
                     </button>
                     <a class="btn btn-xs btn-default" href="{{ route('cashier.print.products', ['outlet_id' => $outlet->id]) }}" target="_blank">
                         <i class="fa fa-tags"></i> Label produk
@@ -60,6 +66,11 @@
                     <p class="text-muted">Cek uang fisik di cash drawer sebelum mulai transaksi, lalu simpan sebagai saldo awal sesi.</p>
                     <form action="{{ route('cashier.open', $outlet) }}" method="POST">
                         @csrf
+                        <div class="form-group text-left">
+                            <label for="opening_cashier_name">Nama kasir</label>
+                            <input id="opening_cashier_name" type="text" name="opening_cashier_name" class="form-control" value="{{ old('opening_cashier_name') }}" maxlength="150" placeholder="Contoh: Siti" required autofocus>
+                            <small class="help-block">Isi manual nama kasir yang sedang bertugas. Akun login tetap menjadi identitas kassa.</small>
+                        </div>
                         <div class="form-group text-left">
                             <label for="opening_cash">Nominal cash drawer saat buka</label>
                             <div class="input-group input-group-lg">
@@ -143,6 +154,31 @@
                         <div class="modal-footer">
                             <button type="button" class="btn btn-default" data-dismiss="modal">Batal</button>
                             <button type="submit" class="btn btn-primary"><i class="fa fa-save"></i> Simpan cek</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="modal fade" id="changeShiftModal" tabindex="-1" role="dialog" aria-labelledby="changeShiftModalLabel">
+            <div class="modal-dialog modal-sm" role="document">
+                <div class="modal-content">
+                    <form action="{{ route('cashier.change-shift', $cashierSession) }}" method="POST">
+                        @csrf
+                        <div class="modal-header">
+                            <button type="button" class="close" data-dismiss="modal">&times;</button>
+                            <h4 class="modal-title" id="changeShiftModalLabel"><i class="fa fa-refresh"></i> Ganti shift</h4>
+                        </div>
+                        <div class="modal-body">
+                            <p class="text-muted small">Akun kassa tetap login. Pergantian ini hanya mengganti nama kasir dan dapat dilakukan berkali-kali dalam satu sesi.</p>
+                            <div class="form-group">
+                                <label for="shift_cashier_name">Nama kasir baru</label>
+                                <input id="shift_cashier_name" type="text" name="name" class="form-control" maxlength="150" placeholder="Contoh: Budi" required>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-default" data-dismiss="modal">Batal</button>
+                            <button type="submit" class="btn btn-warning"><i class="fa fa-refresh"></i> Simpan ganti shift</button>
                         </div>
                     </form>
                 </div>

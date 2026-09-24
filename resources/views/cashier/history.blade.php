@@ -17,7 +17,7 @@
                     <thead>
                         <tr>
                             <th>Periode</th>
-                            <th>Outlet / Kasir</th>
+                            <th>Outlet / Kassa</th>
                             <th>Saldo awal</th>
                             <th>Penjualan tunai</th>
                             <th>BON</th>
@@ -40,7 +40,16 @@
                                     {{ $session->opened_at?->format('d/m/Y H:i') }}<br>
                                     <small class="text-muted">{{ $session->closed_at?->format('d/m/Y H:i') ?? 'masih berjalan' }}</small>
                                 </td>
-                                <td>{{ $session->outlet?->name }}<br><small>{{ $session->cashier?->name ?? 'User dihapus' }}</small></td>
+                                <td>
+                                    {{ $session->outlet?->name }}<br>
+                                    <small>Kassa (akun): {{ $session->cashier?->name ?? 'User dihapus' }}</small><br>
+                                    <small>Nama kasir:</small>
+                                    @forelse ($session->shifts as $shift)
+                                        <br><small>&bull; {{ $shift->name }} ({{ $shift->started_at?->format('H:i') }}–{{ $shift->ended_at?->format('H:i') ?? 'sekarang' }})</small>
+                                    @empty
+                                        <small>—</small>
+                                    @endforelse
+                                </td>
                                 <td>@currency($session->opening_cash)</td>
                                 <td>@currency($sessionSummary['cash_sales'] ?? 0)</td>
                                 <td class="text-danger">@currency($sessionSummary['cash_out'] ?? 0)</td>

@@ -84,6 +84,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::match(['get', 'post'], '/cashier/print/products', [CashierPrintController::class, 'products'])->name('cashier.print.products');
     Route::get('/cashier/print/vouchers', [CashierPrintController::class, 'vouchers'])->name('cashier.print.vouchers');
     Route::post('/outlet/{outlet}/cashier/open', [CashierSessionController::class, 'open'])->name('cashier.open');
+    Route::post('/cashier-sessions/{cashierSession}/change-shift', [CashierSessionController::class, 'changeShift'])->name('cashier.change-shift');
     Route::post('/cashier-sessions/{cashierSession}/drawer-entry', [CashierSessionController::class, 'entry'])->name('cashier.drawer-entry');
     Route::post('/cashier-sessions/{cashierSession}/close', [CashierSessionController::class, 'close'])->name('cashier.close');
     Route::resource('/customer', CustomerController::class);

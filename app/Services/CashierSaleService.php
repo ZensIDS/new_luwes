@@ -2,9 +2,9 @@
 
 namespace App\Services;
 
-use App\Models\OwnerStock;
-use App\Models\OutletPrice;
 use App\Models\CashierSession;
+use App\Models\OutletPrice;
+use App\Models\OwnerStock;
 use App\Models\Penjualan;
 use App\Models\Transaction;
 use App\Models\Voucher;
@@ -19,9 +19,7 @@ class CashierSaleService
         private readonly PriceCalculator $calculator,
         private readonly OutletStockService $stockService,
         private readonly PromotionService $promotionService
-    )
-    {
-    }
+    ) {}
 
     public function checkout(Authenticatable $user, array $data): Penjualan
     {
@@ -44,6 +42,10 @@ class CashierSaleService
                 ->first();
             if (! $cashierSession) {
                 throw new RuntimeException('Buka kasir dan input saldo awal cash drawer sebelum memproses penjualan.');
+            }
+            $cashierShift = $cashierSession->activeShifts()->first();
+            if (! $cashierShift) {
+                throw new RuntimeException('Isi nama kasir atau lakukan ganti shift sebelum memproses penjualan.');
             }
 
             $rules = OutletPrice::with('outlet')->where('outlet_id', $outletId)
@@ -135,7 +137,7 @@ class CashierSaleService
                 ->latest('id')
                 ->first();
             $nextNumber = $lastOrder ? ((int) preg_replace('/\D+/', '', (string) $lastOrder->code) + 1) : 1;
-            $code = 'INV' . str_pad((string) $nextNumber, 6, '0', STR_PAD_LEFT);
+            $code = 'INV'.str_pad((string) $nextNumber, 6, '0', STR_PAD_LEFT);
 
             $order = Penjualan::create([
                 'code' => $code,
@@ -143,6 +145,7 @@ class CashierSaleService
                 'outlet_id' => $outletId,
                 'kasir_id' => $user->getAuthIdentifier(),
                 'cashier_session_id' => $cashierSession->id,
+                'cashier_shift_id' => $cashierShift->id,
                 'voucher_id' => $vouchers->first()?->id,
                 'salesman_id' => $data['salesman_id'] ?? null,
                 'discount' => $discountTotal,
@@ -219,7 +222,7 @@ class CashierSaleService
 
             $user->cart()->wherePivot('outlet_id', (string) $outletId)->detach();
 
-            return $order->load(['items.product', 'vouchers', 'promotionApplications.promotion', 'paymentMethod']);
+            return $order->load(['items.product', 'cashierShift', 'vouchers', 'promotionApplications.promotion', 'paymentMethod']);
         });
     }
 

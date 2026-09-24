@@ -45,7 +45,7 @@ class PenjualanController extends Controller
     public function index(Request $request)
     {
         $outletId = OutletAccess::id($request, false);
-        $query = Penjualan::with(['items.product', 'outlet', 'kasir', 'vouchers', 'promotionApplications'])
+        $query = Penjualan::with(['items.product', 'outlet', 'kasir', 'cashierShift', 'vouchers', 'promotionApplications'])
             ->orderBy('created_at', 'desc');
         if ($outletId) {
             $query->where('outlet_id', $outletId);
@@ -60,6 +60,7 @@ class PenjualanController extends Controller
     {
         if (in_array(auth()->user()->role, ['kasir', 'staff-outlet'], true)) {
             abort_unless(auth()->user()->outlet_id, 422, 'User belum memiliki outlet.');
+
             return redirect()->route('outlet.show', auth()->user()->outlet_id);
         }
 
@@ -120,16 +121,18 @@ class PenjualanController extends Controller
     public function show(Penjualan $penjualan)
     {
         $this->ensureSaleAccess($penjualan);
+
         return view('penjualan.show', [
-            'penjualan' => $penjualan->load(['kasir', 'customer', 'outlet', 'items.product', 'vouchers', 'promotionApplications.promotion', 'paymentMethod']),
+            'penjualan' => $penjualan->load(['kasir', 'cashierShift', 'customer', 'outlet', 'items.product', 'vouchers', 'promotionApplications.promotion', 'paymentMethod']),
         ]);
     }
 
     public function print(Penjualan $penjualan)
     {
         $this->ensureSaleAccess($penjualan);
+
         return view('penjualan.print', [
-            'penjualan' => $penjualan->load(['kasir', 'customer', 'outlet', 'items.product', 'vouchers', 'promotionApplications.promotion', 'paymentMethod']),
+            'penjualan' => $penjualan->load(['kasir', 'cashierShift', 'customer', 'outlet', 'items.product', 'vouchers', 'promotionApplications.promotion', 'paymentMethod']),
         ]);
     }
 

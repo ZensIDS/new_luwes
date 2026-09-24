@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Outlet;
 use App\Models\Product;
 use App\Models\Promotion;
 use App\Models\Voucher;
@@ -14,6 +15,7 @@ class CashierPrintController extends Controller
     public function products(Request $request, PriceCalculator $calculator)
     {
         $outletId = OutletAccess::id($request, false);
+        $selectedOutlet = $outletId ? Outlet::find($outletId) : null;
         $selectedIds = collect((array) $request->input('product_ids', []))
             ->map(fn ($id) => (int) $id)
             ->filter()
@@ -85,10 +87,12 @@ class CashierPrintController extends Controller
                 $rule,
                 $product
             );
-            $product->setAttribute('print_price_strike', $calculator->money(
-                $price['hpp_setelah_pajak'] + $price['margin_amount']
-            ));
+            $priceStrike = $calculator->money($price['hpp_setelah_pajak'] + $price['margin_amount']);
+            $product->setAttribute('print_price_hpp_after_tax', $price['hpp_setelah_pajak']);
+            $product->setAttribute('print_price_margin', $price['margin_amount']);
+            $product->setAttribute('print_price_strike', $priceStrike);
             $product->setAttribute('print_price_net', $price['price']);
+            $product->setAttribute('print_has_discount', $priceStrike > $price['price']);
             $product->setAttribute('print_qty', max(1, min(100, (int) $this->quantityFor($product->id, $request))));
         });
 
@@ -97,6 +101,7 @@ class CashierPrintController extends Controller
             'printItems' => $printing ? $products : collect(),
             'outlets' => OutletAccess::outlets(),
             'outletId' => $outletId,
+            'selectedOutlet' => $selectedOutlet,
             'search' => $request->input('search'),
             'printing' => $printing,
         ]);
