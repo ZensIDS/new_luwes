@@ -12,24 +12,28 @@
 
     <!-- Bootstrap 3.3.5 -->
     <link rel="stylesheet" href="{{ asset('assets/adminlte/bootstrap/css/bootstrap.min.css') }}">
-    <!-- DataTables -->
-    <link rel="stylesheet" href="{{ asset('assets/adminlte/plugins/datatables/dataTables.bootstrap.css') }}">
-    <link rel="stylesheet"
-        href="{{ asset('assets/adminlte/plugins/datatables/extensions/Responsive/css/dataTables.responsive.css') }}">
-    <!-- Datetimepicker -->
-    <link href="{{ asset('assets/adminlte/plugins/datepicker/bootstrap-datepicker.min.css') }}" rel="stylesheet"
-        type="text/css" />
-    <link href="{{ asset('assets/adminlte/plugins/datepicker/datepicker3.css') }}" rel="stylesheet" type="text/css" />
-    <!-- Daterangepicker -->
-    <link href="{{ asset('assets/adminlte/plugins/daterangepicker/daterangepicker-bs3.css') }}" rel="stylesheet"
-        type="text/css" />
+    @if (!request()->routeIs('outlet.show'))
+        <!-- DataTables -->
+        <link rel="stylesheet" href="{{ asset('assets/adminlte/plugins/datatables/dataTables.bootstrap.css') }}">
+        <link rel="stylesheet"
+            href="{{ asset('assets/adminlte/plugins/datatables/extensions/Responsive/css/dataTables.responsive.css') }}">
+        <!-- Datetimepicker -->
+        <link href="{{ asset('assets/adminlte/plugins/datepicker/bootstrap-datepicker.min.css') }}" rel="stylesheet"
+            type="text/css" />
+        <link href="{{ asset('assets/adminlte/plugins/datepicker/datepicker3.css') }}" rel="stylesheet" type="text/css" />
+        <!-- Daterangepicker -->
+        <link href="{{ asset('assets/adminlte/plugins/daterangepicker/daterangepicker-bs3.css') }}" rel="stylesheet"
+            type="text/css" />
+    @endif
 
     <!-- Ionicons -->
     <link rel="stylesheet" href="https://code.ionicframework.com/ionicons/2.0.1/css/ionicons.min.css">
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.4.0/css/font-awesome.min.css">
-    <!-- Select2 -->
-    <link rel="stylesheet" href="{{ asset('assets/adminlte/plugins/select2/select2.min.css') }}">
+    @if (!request()->routeIs('outlet.show'))
+        <!-- Select2 -->
+        <link rel="stylesheet" href="{{ asset('assets/adminlte/plugins/select2/select2.min.css') }}">
+    @endif
     <!-- Theme style -->
     {{-- <link rel="stylesheet" href="{{ asset('/AdminLTE-2/dist/css/AdminLTE.min.css') }}"> --}}
     <!-- AdminLTE Skins. Choose a skin from the css/skins folder instead of downloading all of them to reduce the load. -->
@@ -45,7 +49,7 @@
     <link rel="stylesheet" href="{{ asset('assets/zenTheme/css/custom.css') }}">
     <link rel="stylesheet" href="{{ asset('assets/zenTheme/css/admin-style.css') }}">
     @viteReactRefresh
-    @vite(['resources/js/app.js'])
+    @vite(['resources/js/site.js'])
 </head>
 
 <body class="hold-transition skin-purple sidebar-mini @yield('body_class')">
@@ -154,36 +158,40 @@
     <script src="{{ asset('assets/adminlte/plugins/jQuery/jQuery-2.1.4.min.js') }}"></script>
     <!-- Bootstrap 3.3.5 -->
     <script src="{{ asset('assets/adminlte/bootstrap/js/bootstrap.min.js') }}"></script>
-    <!-- Select2 -->
-    <script src="{{ asset('assets/adminlte/plugins/select2/select2.full.min.js') }}"></script>
-    <!-- Datepicker -->
-    <script src="{{ asset('assets/adminlte/plugins/datepicker/bootstrap-datepicker.min.js') }}"></script>
-    <!-- AdminLTE App -->
-    <script src="{{ asset('assets/adminlte/dist/js/app.min.js') }}"></script>
-    <!-- DataTables -->
-    <script src="{{ asset('assets/adminlte/plugins/datatables/jquery.dataTables.min.js') }}"></script>
-    <script src="{{ asset('assets/adminlte/plugins/datatables/dataTables.bootstrap.min.js') }}"></script>
-    <!-- SlimScroll -->
-    <script src="{{ asset('assets/adminlte/plugins/slimScroll/jquery.slimscroll.min.js') }}"></script>
-    <!-- FastClick -->
-    <script src="{{ asset('assets/adminlte/plugins/fastclick/fastclick.min.js') }}"></script>
-    <!-- bootstrap time picker -->
-    <script src="{{ asset('assets/adminlte/plugins/datepicker/bootstrap-datepicker.min.js') }}"></script>
-    <script src="{{ asset('assets/adminlte/plugins/datepicker/bootstrap-datepicker.js') }}"></script>
-    <!-- datetimerange -->
-    <script src="{{ asset('assets/adminlte/plugins/daterangepicker/moment.js') }}"></script>
-    <script src="{{ asset('assets/adminlte/plugins/daterangepicker/daterangepicker.js') }}"></script>
+    @if (!request()->routeIs('outlet.show'))
+        <!-- Select2 -->
+        <script src="{{ asset('assets/adminlte/plugins/select2/select2.full.min.js') }}"></script>
+        <!-- Datepicker -->
+        <script src="{{ asset('assets/adminlte/plugins/datepicker/bootstrap-datepicker.min.js') }}"></script>
+        <!-- AdminLTE App -->
+        <script src="{{ asset('assets/adminlte/dist/js/app.min.js') }}"></script>
+        <!-- DataTables -->
+        <script src="{{ asset('assets/adminlte/plugins/datatables/jquery.dataTables.min.js') }}"></script>
+        <script src="{{ asset('assets/adminlte/plugins/datatables/dataTables.bootstrap.min.js') }}"></script>
+        <!-- SlimScroll -->
+        <script src="{{ asset('assets/adminlte/plugins/slimScroll/jquery.slimscroll.min.js') }}"></script>
+        <!-- FastClick -->
+        <script src="{{ asset('assets/adminlte/plugins/fastclick/fastclick.min.js') }}"></script>
+        <!-- bootstrap time picker -->
+        <script src="{{ asset('assets/adminlte/plugins/datepicker/bootstrap-datepicker.min.js') }}"></script>
+        <script src="{{ asset('assets/adminlte/plugins/datepicker/bootstrap-datepicker.js') }}"></script>
+        <!-- datetimerange -->
+        <script src="{{ asset('assets/adminlte/plugins/daterangepicker/moment.js') }}"></script>
+        <script src="{{ asset('assets/adminlte/plugins/daterangepicker/daterangepicker.js') }}"></script>
+    @endif
     <!-- page script -->
     <script>
-        $(function() {
-            $(".select2").select2();
-            $("#example1").DataTable();
+        @if (!request()->routeIs('outlet.show'))
+            $(function() {
+                $(".select2").select2();
+                $("#example1").DataTable();
 
-            //Date picker
-            $('#datepicker').datepicker({
-                autoclose: true
-            })
-        });
+                //Date picker
+                $('#datepicker').datepicker({
+                    autoclose: true
+                })
+            });
+        @endif
 
         $(document).on('input', 'input[type="number"]', function() {
             var value = $(this).val();

@@ -35,6 +35,7 @@ class ProductController extends Controller
         $request->merge([
             'outlet_id' => $outlet->id,
             'status_produk' => 'all',
+            'compact' => true,
         ]);
         $request->headers->set('Accept', 'application/json');
 
@@ -102,26 +103,44 @@ class ProductController extends Controller
         }
 
         if (request()->wantsJson()) {
+            $compact = $request->boolean('compact');
             $relations = [
-                'category:id,name',
-                'outletPrices' => function ($query) use ($outletId) {
+                'outletPrices' => function ($query) use ($outletId, $compact) {
                     if ($outletId) {
                         $query->where('outlet_id', $outletId);
                     }
-                    $query->with('outlet')->currentlyActive();
+                    if (! $compact) {
+                        $query->with('outlet');
+                    }
+                    $query->currentlyActive();
                 },
             ];
+
+            if (! $compact) {
+                $relations['category'] = 'category:id,name';
+            }
 
             if ($outletId) {
                 // Cashier searches only need stock owned by this outlet. Do not
                 // hydrate warehouse stocks for every search result.
-                $relations['ownerStocks'] = function ($query) use ($outletId) {
+                $relations['ownerStocks'] = function ($query) use ($outletId, $compact) {
                     $query->where('owner_id', $outletId)
                         ->where('qty', '>', 0)
                         ->where(function ($expiryQuery) {
                             $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
-                        })
-                        ->with('stock');
+                        });
+
+                    if ($compact) {
+                        $query->select([
+                            'owner_stocks.id',
+                            'owner_stocks.owner_id',
+                            'owner_stocks.product_id',
+                            'owner_stocks.qty',
+                            'owner_stocks.hpp',
+                        ]);
+                    } else {
+                        $query->with('stock');
+                    }
                 };
             } else {
                 $relations['stocks'] = function ($query) {
@@ -132,6 +151,19 @@ class ProductController extends Controller
             }
 
             $perPage = min(max($request->integer('per_page', 25), 1), 50);
+            if ($compact) {
+                $products->select([
+                    'products.id',
+                    'products.name',
+                    'products.code',
+                    'products.harga_beli',
+                    'products.harga_jual',
+                    'products.pic',
+                    'products.is_serialized',
+                    'products.created_at',
+                ]);
+            }
+
             $products = $products
                 ->with($relations)
                 ->latest()

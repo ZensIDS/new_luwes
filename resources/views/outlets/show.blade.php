@@ -238,6 +238,9 @@
         window.POS_PRODUCTS_URL = @json(route('outlet.products', ['outlet' => $outlet->id]));
         window.user = @json(auth()->user());
     </script>
+    @if ($cashierSession)
+        @vite(['resources/js/pos.js'])
+    @endif
     <style>
         html:has(body.pos-mode), body.pos-mode { height:100%; overflow:hidden; }
         .pos-mode .wrapper { height:100vh; min-height:0; overflow:hidden; }

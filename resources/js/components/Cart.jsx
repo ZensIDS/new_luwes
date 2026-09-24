@@ -164,7 +164,7 @@ const Cart = () => {
             productsRequestRef.current?.abort();
             const controller = new AbortController();
             productsRequestRef.current = controller;
-            const params = new URLSearchParams({ status_produk: "all", per_page: "25" });
+            const params = new URLSearchParams({ status_produk: "all", per_page: "25", compact: "1" });
             const normalizedTerm = String(term || "").trim();
             if (normalizedTerm) params.set("search", normalizedTerm);
 
@@ -237,7 +237,7 @@ const Cart = () => {
         const localProduct = products.find((item) => item.barcode === code || item.code === code);
         const productRequest = localProduct
             ? Promise.resolve(localProduct)
-            : axios.get(`${outletProductsUrl}?` + new URLSearchParams({ search: code, status_produk: "all", per_page: "25" }), {
+            : axios.get(`${outletProductsUrl}?` + new URLSearchParams({ search: code, status_produk: "all", per_page: "25", compact: "1" }), {
                 headers: { Accept: "application/json" },
             })
                 .then((response) => (response.data.data || []).find((item) => item.barcode === code || item.code === code));

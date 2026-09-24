@@ -45,7 +45,7 @@
     <link rel="stylesheet" href="{{ asset('assets/zenTheme/css/custom.css') }}">
     <link rel="stylesheet" href="{{ asset('assets/zenTheme/css/admin-style.css') }}">
     @viteReactRefresh
-    @vite(['resources/js/app.js'])
+    @vite(['resources/js/site.js'])
 
     <style type="text/css">
         body {

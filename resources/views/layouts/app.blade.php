@@ -14,7 +14,7 @@
 
     <!-- Scripts -->
     @viteReactRefresh
-    @vite(['resources/js/app.js'])
+    @vite(['resources/js/site.js'])
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 

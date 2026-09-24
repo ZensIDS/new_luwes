@@ -25,6 +25,20 @@ class ProductResource extends JsonResource
                 ->calculateItem((float) ($ownerStocks->first()->hpp ?? $this->harga_beli ?? 0), $priceRule, $this->resource)['price'];
         }
 
+        if ($request->boolean('compact')) {
+            return [
+                'id' => $this->id,
+                'name' => $this->name,
+                'barcode' => $this->code,
+                'code' => $this->code,
+                'harga_jual' => $displayPrice,
+                'image_url' => asset($this->pic),
+                'is_serialized' => $this->is_serialized,
+                'total_stock' => $isOutletContext ? $ownerStocks->sum('qty') : $this->total_stock,
+                'outlet_stock' => $isOutletContext ? $ownerStocks->sum('qty') : null,
+            ];
+        }
+
         return [
             'id' => $this->id,
             'name' => $this->name,
