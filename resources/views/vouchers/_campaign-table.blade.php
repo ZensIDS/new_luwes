@@ -30,6 +30,7 @@
                         : ($campaign->outlet?->name ?? 'Semua outlet');
                     $discountType = $isVoucher ? $campaign->type : $campaign->discount_type;
                     $discountValue = $isVoucher ? $campaign->value : $campaign->discount_value;
+                    $isRafaksi = ! $isVoucher && $campaign->type === 'flash_sale';
                     $status = $isVoucher
                         ? ($redemptionCount ? 'Sudah dipakai' : ($campaign->isActive() ? 'Aktif' : 'Tidak aktif'))
                         : ($campaign->isActive() ? 'Aktif' : ($campaign->is_active ? 'Tidak aktif' : 'Nonaktif'));
@@ -47,7 +48,8 @@
                                 data-campaign-type="promotion"
                                 data-voucher-ids="{{ $campaign->id }}"
                                 form="voucher-label-print-form"
-                                aria-label="Pilih promo {{ $campaign->name }}">
+                                aria-label="Pilih promo {{ $campaign->name }}"
+                                @if ($isRafaksi) disabled title="Promo Rafaksi tidak dapat dicetak sebagai voucher" @endif>
                         @endif
                     </td>
                     <td>{{ $loop->iteration }}</td>

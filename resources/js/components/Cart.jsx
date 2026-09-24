@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import axios from "axios";
+import Swal from "sweetalert2";
 import Barcodes from "./Barcodes.jsx";
 import CartTable from "./CartTable";
 import Gallery from "./Gallery";
@@ -66,6 +67,8 @@ const Cart = () => {
     const [paidAmount, setPaidAmount] = useState("");
     const [errorMessage, setErrorMessage] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [completedSale, setCompletedSale] = useState(null);
+    const [isPrintingReceipt, setIsPrintingReceipt] = useState(false);
     const [selectedCartProductId, setSelectedCartProductId] = useState(null);
     const [productModalOpen, setProductModalOpen] = useState(false);
     const barcodeRef = useRef(null);
@@ -358,8 +361,23 @@ const Cart = () => {
         loadCart(nextPromotions.map((item) => item.code));
     };
 
+    const resetCheckoutState = () => {
+        setCart([]);
+        setAppliedVouchers([]);
+        setAppliedPromotions([]);
+        setCustomerId("");
+        setPaymentMethodId("");
+        setPaymentReference("");
+        setPaidAmount("");
+        setBarcode("");
+        setSelectedCartProductId(null);
+        setCompletedSale(null);
+        setErrorMessage("");
+        barcodeRef.current?.focus();
+    };
+
     const handleSubmit = () => {
-        if (isSubmitting) return;
+        if (isSubmitting || completedSale) return;
 
         setErrorMessage("");
         const selectedPaymentMethod = paymentMethods.find((method) => String(method.id) === String(paymentMethodId));
@@ -385,11 +403,6 @@ const Cart = () => {
             return;
         }
 
-        const printWindow = window.open(
-            "about:blank",
-            "pos-print",
-            "width=430,height=700,scrollbars=yes,resizable=yes"
-        );
         setIsSubmitting(true);
         axios.post("/penjualan", {
             outlet_id: outlet.id,
@@ -402,17 +415,81 @@ const Cart = () => {
             promotion_codes: appliedPromotions.map((promotion) => promotion.code),
         }).then((response) => {
             window.localStorage.setItem("last-pos-sale", response.data.order.id);
-            if (printWindow && !printWindow.closed) {
-                printWindow.location.href = response.data.print;
-            } else {
-                window.open(response.data.print, "pos-print", "width=430,height=700,scrollbars=yes,resizable=yes");
-            }
-            window.location.reload();
+            setIsSubmitting(false);
+            const completedSale = {
+                code: response.data.order.code,
+                print: response.data.print,
+            };
+            setCompletedSale(completedSale);
+            Swal.fire({
+                icon: "success",
+                title: "Penjualan tersimpan",
+                text: `Transaksi ${completedSale.code} berhasil disimpan. Pilih tindakan berikutnya.`,
+                showCancelButton: true,
+                confirmButtonText: "Cetak",
+                cancelButtonText: "Close",
+                allowOutsideClick: false,
+                allowEscapeKey: false,
+                reverseButtons: true,
+            }).then((result) => {
+                resetCheckoutState();
+                if (result.isConfirmed) {
+                    printCompletedSale(completedSale.print);
+                } else {
+                    window.location.reload();
+                }
+            });
         }).catch((error) => {
-            if (printWindow && !printWindow.closed) printWindow.close();
             setIsSubmitting(false);
             setErrorMessage(error.response?.data?.message || "Checkout gagal.");
         });
+    };
+
+    const printCompletedSale = (printUrl) => {
+        if (!printUrl || isPrintingReceipt) return;
+
+        setIsPrintingReceipt(true);
+        const frame = document.createElement("iframe");
+        frame.title = "Cetak struk";
+        frame.setAttribute("aria-hidden", "true");
+        Object.assign(frame.style, {
+            position: "fixed",
+            left: "-10000px",
+            top: "0",
+            width: "80mm",
+            height: "1px",
+            border: "0",
+        });
+
+        let fallbackTimer = null;
+        const finishPrinting = () => {
+            if (fallbackTimer) window.clearTimeout(fallbackTimer);
+            frame.remove();
+            setIsPrintingReceipt(false);
+            window.location.reload();
+        };
+
+        frame.addEventListener("load", () => {
+            const printWindow = frame.contentWindow;
+            if (!printWindow) {
+                setIsPrintingReceipt(false);
+                frame.remove();
+                setErrorMessage("Struk tidak dapat disiapkan untuk dicetak.");
+                return;
+            }
+
+            printWindow.addEventListener("afterprint", finishPrinting, { once: true });
+            printWindow.focus();
+            printWindow.print();
+            fallbackTimer = window.setTimeout(finishPrinting, 2000);
+        }, { once: true });
+        frame.addEventListener("error", () => {
+            frame.remove();
+            setIsPrintingReceipt(false);
+            setErrorMessage("Struk tidak dapat disiapkan untuk dicetak.");
+        }, { once: true });
+        document.body.appendChild(frame);
+        frame.src = printUrl;
     };
 
     useEffect(() => {
@@ -431,7 +508,7 @@ const Cart = () => {
             if (event.key === "F7") { event.preventDefault(); paymentMethodRef.current?.focus(); }
             if (event.key === "F8") { event.preventDefault(); voucherRef.current?.focus(); }
             if (event.key === "F9") { event.preventDefault(); paidRef.current?.focus(); }
-            if (event.key === "F10") { event.preventDefault(); if (cart.length) handleSubmit(); }
+            if (event.key === "F10") { event.preventDefault(); if (!completedSale && cart.length) handleSubmit(); }
             if (event.ctrlKey && event.key.toLowerCase() === "h") { event.preventDefault(); holdTransaction(); }
             if (event.ctrlKey && event.key.toLowerCase() === "l") { event.preventDefault(); recallTransaction(); }
             if (event.ctrlKey && event.key.toLowerCase() === "p") {
@@ -458,7 +535,7 @@ const Cart = () => {
         };
         window.addEventListener("keydown", shortcut);
         return () => window.removeEventListener("keydown", shortcut);
-    }, [cart, paidAmount, grandTotal, appliedVouchers, appliedPromotions, selectedCartProductId, paymentReference, paymentMethodId, isSubmitting, search]);
+    }, [cart, paidAmount, grandTotal, appliedVouchers, appliedPromotions, selectedCartProductId, paymentReference, paymentMethodId, isSubmitting, completedSale, search]);
 
     return (
         <div className="row pos-cashier-layout">

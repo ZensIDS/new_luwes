@@ -24,7 +24,7 @@
                                     {{-- <td>Kas/Metode Pembayaran</td> --}}
                                     <th>Outlet</th>
                                     <th>Kassa (akun)</th>
-                                    <th>Salesman</th>
+                                    <th>Nama kasir shift</th>
                                     <th>Detail</th>
                                     <th>Aksi</th>
                                 </tr>
@@ -38,7 +38,7 @@
                                     {{-- <td>{{ $value->kas?->name ?? $value->transaction?->payment?->name }}</td> --}}
                                     <td>{{ $value->outlet->name ?? '___customer' }}</td>
                                     <td>{{ $value->kasir->name ?? '___customer' }}</td>
-                                    <td>{{ $value->salesman?->name }}</td>
+                                    <td>{{ $value->cashierShift?->name ?? '—' }}</td>
                                     <td>
                                         <div class="table-responsive text-nowrap">
                                             <table class="table table-sm table-bordered">
@@ -67,12 +67,20 @@
                                                 <tr>
                                                     <th colspan="4" class="text-right">Grand Total : @currency($value->grand_total ?? ($totalCost - $value->discount - $value->voucher?->value))</th>
                                                 </tr>
+                                                <tr>
+                                                    <th colspan="3" class="text-right">Dibayar</th>
+                                                    <th class="text-right">@currency($value->paid_amount ?? $value->total ?? 0)</th>
+                                                </tr>
+                                                <tr>
+                                                    <th colspan="3" class="text-right">Kembalian</th>
+                                                    <th class="text-right">@currency($value->change_amount ?? 0)</th>
+                                                </tr>
                                             </table>
                                         </div>
                                     </td>
                                     <td>
                                         <a class="btn btn-info" href="{{ route('penjualan.show', $value->id) }}">Show</a>
-                                        <a class="btn btn-warning" href="{{ route('penjualan.print', $value->id) }}">Print</a>
+                                        <a class="btn btn-warning" href="{{ route('penjualan.print', $value->id) }}">Re-Print</a>
                                         <form action="{{ route('penjualan.destroy', $value->id) }}" method="post"
                                             style="display: inline;">
                                             @method('delete')

@@ -42,14 +42,11 @@
                     <button type="button" class="btn btn-xs btn-warning" data-toggle="modal" data-target="#changeShiftModal">
                         <i class="fa fa-refresh"></i> Ganti shift
                     </button>
-                    <a class="btn btn-xs btn-default" href="{{ route('cashier.print.products', ['outlet_id' => $outlet->id]) }}" target="_blank">
-                        <i class="fa fa-tags"></i> Label produk
-                    </a>
-                    <a class="btn btn-xs btn-default" href="{{ route('cashier.print.vouchers', ['outlet_id' => $outlet->id]) }}" target="_blank">
-                        <i class="fa fa-barcode"></i> Label voucher
-                    </a>
                     <a class="btn btn-xs btn-info" href="{{ route('cashier.history', ['outlet_id' => $outlet->id]) }}" target="_blank">
                         <i class="fa fa-history"></i> History
+                    </a>
+                    <a class="btn btn-xs btn-info" href="{{ route('penjualan.index', ['outlet_id' => $outlet->id]) }}" target="_blank">
+                        <i class="fa fa-file-text"></i> Daftar Penjualan
                     </a>
                     <button type="button" class="btn btn-xs btn-danger" data-toggle="modal" data-target="#closeCashierModal">
                         <i class="fa fa-lock"></i> Tutup kasir

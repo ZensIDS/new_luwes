@@ -108,7 +108,7 @@ class PenjualanController extends Controller
                 'success' => true,
                 'message' => 'Pesanan berhasil dibuat.',
                 'redirect' => route('outlet.show', $order->outlet_id),
-                'print' => route('penjualan.print', [$order, 'auto' => 1]),
+                'print' => route('penjualan.print', [$order]),
                 'order' => $order,
             ], 201);
         } catch (Throwable $e) {

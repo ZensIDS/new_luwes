@@ -53,7 +53,7 @@
                     @if ($outletId)<input type="hidden" name="outlet_id" value="{{ $outletId }}">@endif
                     <input type="hidden" name="print" value="1">
                     <table>
-                        <thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('.voucher-check').forEach((el) => el.checked = this.checked)"></th><th>Kode</th><th>Nama voucher / promo</th><th>Potongan</th><th>Qty label</th></tr></thead>
+                        <thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('.voucher-check:not(:disabled)').forEach((el) => el.checked = this.checked)"></th><th>Kode</th><th>Nama voucher / promo</th><th>Potongan</th><th>Qty label</th></tr></thead>
                         <tbody>
                         @foreach ($vouchers as $voucher)
                             <tr>
@@ -65,8 +65,9 @@
                             </tr>
                         @endforeach
                         @foreach ($promotions as $promotion)
+                            @php($isRafaksi = $promotion->type === 'flash_sale')
                             <tr>
-                                <td><input class="voucher-check" type="checkbox" name="promotion_ids[]" value="{{ $promotion->id }}"></td>
+                                <td><input class="voucher-check" type="checkbox" name="promotion_ids[]" value="{{ $promotion->id }}" @if ($isRafaksi) disabled title="Promo Rafaksi tidak dapat dicetak sebagai voucher" @endif></td>
                                 <td>{{ $promotion->code }}</td>
                                 <td>{{ $promotion->name }}</td>
                                 <td>{{ $promotion->print_discount_amount !== null ? 'Rp ' . number_format($promotion->print_discount_amount, 0, ',', '.') : '—' }}</td>

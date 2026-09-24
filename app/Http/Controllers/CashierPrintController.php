@@ -208,7 +208,9 @@ class CashierPrintController extends Controller
             ->whereNotNull('code')
             ->where('code', '!=', '');
         if ($printing) {
-            $promotionQuery->whereIn('id', $selectedPromotionIds);
+            $promotionQuery
+                ->whereIn('id', $selectedPromotionIds)
+                ->where('type', '!=', 'flash_sale');
         } else {
             $promotionQuery
                 ->where('is_active', true)

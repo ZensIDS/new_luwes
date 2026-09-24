@@ -80,7 +80,7 @@ $(function () {
     });
 
     function selectedVoucherGroups() {
-        return $('.voucher-print-checkbox:checked');
+        return $('.voucher-print-checkbox:enabled:checked');
     }
 
     function updateSelectedVouchers() {
@@ -90,7 +90,7 @@ $(function () {
 
         $('.voucher-select-all').each(function () {
             const table = $(this).closest('table');
-            const checks = table.find('tbody .voucher-print-checkbox');
+            const checks = table.find('tbody .voucher-print-checkbox:enabled');
             const checked = checks.filter(':checked').length;
             $(this).prop('checked', checks.length > 0 && checked === checks.length);
             $(this).prop('indeterminate', checked > 0 && checked < checks.length);
@@ -99,7 +99,7 @@ $(function () {
 
     $('.voucher-select-all').on('change', function () {
         const table = $(this).closest('table');
-        table.find('tbody .voucher-print-checkbox').prop('checked', this.checked);
+        table.find('tbody .voucher-print-checkbox:enabled').prop('checked', this.checked);
         updateSelectedVouchers();
     });
 
