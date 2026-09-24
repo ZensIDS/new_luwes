@@ -28,31 +28,23 @@
     <tr>
         <td class="label">Barcode</td>
         <td class="colon">:</td>
-        <td>{{ $stock->product->code ?? '-' }}</td>
-        <td class="label">No Batch / SKU</td>
+        <td>{{ $product->code ?? '-' }}</td>
+        <td class="label">Lokasi Penyimpanan</td>
         <td class="colon">:</td>
-        <td>{{ $stock->sku ?? '-' }}</td>
+        <td>{{ $product->lokasi ?? '-' }}</td>
     </tr>
     <tr>
         <td class="label">Nama Barang</td>
         <td class="colon">:</td>
-        <td>{{ $stock->product->name ?? '-' }}</td>
-        <td class="label">Lokasi Penyimpanan</td>
-        <td class="colon">:</td>
-        <td>{{ $stock->product->lokasi ?? '-' }}</td>
-    </tr>
-    <tr>
+        <td>{{ $product->name ?? '-' }}</td>
         <td class="label">Satuan</td>
         <td class="colon">:</td>
-        <td>{{ $stock->product->satuan ?? 'PCS' }}</td>
-        <td class="label">Expired Date</td>
-        <td class="colon">:</td>
-        <td>{{ $stock->expired_at ? \Carbon\Carbon::parse($stock->expired_at)->isoFormat('DD MMMM YYYY') : '-' }}</td>
+        <td>{{ $product->satuan ?? 'PCS' }}</td>
     </tr>
     <tr>
         <td class="label">Supplier</td>
         <td class="colon">:</td>
-        <td colspan="3">{{ $stock->pembelian->supplier->name ?? '-' }}</td>
+        <td colspan="4">{{ $suppliers ?? '-' }}</td>
     </tr>
 </table>
 
@@ -60,13 +52,14 @@
     <thead>
         <tr>
             <th style="width:3%">No</th>
-            <th style="width:13%">Tanggal</th>
-            <th style="width:8%">Stok Awal</th>
-            <th style="width:8%">Masuk</th>
-            <th style="width:8%">Keluar</th>
+            <th style="width:11%">Tanggal</th>
+            <th style="width:11%">SKU</th>
+            <th style="width:7%">Stok Awal</th>
+            <th style="width:7%">Masuk</th>
+            <th style="width:7%">Keluar</th>
             <th style="width:8%">Stok Akhir</th>
-            <th style="width:13%">Harga Satuan (Rp)</th>
-            <th style="width:14%">Nilai Persediaan</th>
+            <th style="width:10%">Harga Satuan (Rp)</th>
+            <th style="width:11%">Nilai Persediaan</th>
             <th>Keterangan</th>
         </tr>
     </thead>
@@ -74,34 +67,22 @@
         @forelse ($transactions as $i => $t)
             <tr class="{{ $i % 2 == 1 ? 'alt' : '' }}">
                 <td class="tc">{{ $i + 1 }}</td>
-                <td class="tc">{{ $t['tanggal'] }}</td>
-                <td class="tr">
-                    {{ $t['stok_awal'] }}
-                    @php $k = $stock->product->konversiDisplay($t['stok_awal']); @endphp
-                    @if($k !== '-') <br><small>({{ $k }})</small>@endif
-                </td>
-                <td class="tr">
-                    {{ $t['masuk'] }}
-                    @php $k = $stock->product->konversiDisplay($t['masuk']); @endphp
-                    @if($k !== '-') <br><small>({{ $k }})</small>@endif
-                </td>
-                <td class="tr">
-                    {{ $t['keluar'] }}
-                    @php $k = $stock->product->konversiDisplay($t['keluar']); @endphp
-                    @if($k !== '-') <br><small>({{ $k }})</small>@endif
-                </td>
-                <td class="tr">
-                    <strong>{{ $t['stok_akhir'] }}</strong>
-                    @php $k = $stock->product->konversiDisplay($t['stok_akhir']); @endphp
-                    @if($k !== '-') <br><small>({{ $k }})</small>@endif
-                </td>
+                <td class="tc">{{ \Carbon\Carbon::parse($t['tanggal'])->isoFormat('DD MMM YYYY') }}</td>
+                <td class="tc">{{ $t['sku'] }}</td>
+                @foreach (['stok_awal', 'masuk', 'keluar', 'stok_akhir'] as $col)
+                    <td class="tr">
+                        @if ($col === 'stok_akhir')<strong>{{ $t[$col] }}</strong>@else{{ $t[$col] }}@endif
+                        @php $k = $product->konversiDisplay($t[$col]); @endphp
+                        @if ($k !== '-') <br><small>({{ $k }})</small>@endif
+                    </td>
+                @endforeach
                 <td class="tr">{{ number_format($t['harga'], 0, ',', '.') }}</td>
                 <td class="tr"><strong>{{ number_format($t['nilai'], 0, ',', '.') }}</strong></td>
                 <td><small>{{ $t['keterangan'] }}</small></td>
             </tr>
         @empty
             <tr>
-                <td colspan="9" class="tc">Tidak ada transaksi</td>
+                <td colspan="10" class="tc">Tidak ada transaksi</td>
             </tr>
         @endforelse
     </tbody>
@@ -110,32 +91,61 @@
 @php
     $totalMasuk  = collect($transactions)->sum('masuk');
     $totalKeluar = collect($transactions)->sum('keluar');
-    $stokAwal    = collect($transactions)->first()['stok_awal'] ?? 0;
-    $stokAkhir   = collect($transactions)->last()['stok_akhir'] ?? 0;
-    $nilaiAkhir  = collect($transactions)->last()['nilai'] ?? 0;
 @endphp
+
+<div style="margin-top:10px; font-size:9px;"><strong>Rincian Stok per SKU</strong></div>
+<table class="main-table" style="width:70%; margin-top:3px;">
+    <thead>
+        <tr>
+            <th>SKU</th>
+            <th>Stok Fisik</th>
+            <th>Reserved</th>
+            <th>Saldo Kartu</th>
+            <th>Selisih</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach ($summary['breakdown'] as $b)
+            <tr>
+                <td>{{ $b['sku'] }}</td>
+                <td class="tr">{{ $b['qty'] }}</td>
+                <td class="tr">{{ $b['qty_reserved'] }}</td>
+                <td class="tr">{{ $b['saldo_kartu'] }}</td>
+                <td class="tr"><strong>{{ ($b['selisih'] > 0 ? '+' : '') . $b['selisih'] }}</strong></td>
+            </tr>
+        @endforeach
+        <tr>
+            <td><strong>TOTAL</strong></td>
+            <td class="tr"><strong>{{ $summary['total_qty'] }}</strong></td>
+            <td class="tr"><strong>{{ $summary['total_reserved'] }}</strong></td>
+            <td class="tr"><strong>{{ $summary['total_saldo_kartu'] }}</strong></td>
+            <td class="tr"><strong>{{ ($summary['total_selisih'] > 0 ? '+' : '') . $summary['total_selisih'] }}</strong></td>
+        </tr>
+    </tbody>
+</table>
+<div style="font-size:7.5px; margin-top:3px;">
+    Stok Fisik = stok gudang (sama dengan menu Stok &amp; Produk, reserved sudah termasuk). Saldo Kartu = total Masuk - Keluar yang tercatat.
+    Selisih tidak nol berarti ada perubahan stok yang tidak tercatat di kartu.
+</div>
 
 <table class="summary-box">
     <tr>
-        <td class="label">Stok Awal</td>
+        <td class="label">Total Masuk</td>
         <td class="colon">:</td>
-        <td>{{ $stokAwal }}</td>
+        <td>{{ $totalMasuk }}</td>
         <td class="label">Total Keluar</td>
         <td class="colon">:</td>
         <td>{{ $totalKeluar }}</td>
     </tr>
     <tr>
-        <td class="label">Total Masuk</td>
+        <td class="label">Stok Fisik (Gudang)</td>
         <td class="colon">:</td>
-        <td>{{ $totalMasuk }}</td>
-        <td class="label">Stok Akhir</td>
-        <td class="colon">:</td>
-        <td><strong>{{ $stokAkhir }}</strong></td>
+        <td colspan="4"><strong>{{ $summary['total_qty'] }}</strong></td>
     </tr>
     <tr>
         <td class="label">Nilai Persediaan</td>
         <td class="colon">:</td>
-        <td colspan="4"><strong>Rp {{ number_format($nilaiAkhir, 0, ',', '.') }}</strong></td>
+        <td colspan="4"><strong>Rp {{ number_format($summary['total_nilai'], 0, ',', '.') }}</strong></td>
     </tr>
 </table>
 

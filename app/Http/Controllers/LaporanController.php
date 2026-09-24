@@ -120,6 +120,7 @@ class LaporanController extends Controller
         return abort(404);
     }
 
+    // $id = ID PRODUK (sesuai tombol Export di halaman Kartu Stok), bukan ID stock.
     public function exportKartuStok(Request $request, $id = null)
     {
         $settings = json_decode(Storage::disk('public')->get('settings.json'), true) ?? [];
@@ -128,19 +129,10 @@ class LaporanController extends Controller
             return abort(404);
         }
 
-        $stock = Stock::with(['product', 'pembelian.supplier'])->findOrFail($id);
-        $movements = StockMovement::where('product_id', $stock->product_id)
-            ->where(function ($q) use ($stock) {
-                $q->where('notes', 'like', "%SKU: {$stock->sku}%")
-                    ->orWhere(function ($q2) use ($stock) {
-                        $q2->where('reference_type', 'App\Models\Pembelian')
-                            ->where('reference_id', $stock->pembelian_id);
-                    });
-            })
-            ->orderBy('created_at', 'asc')
-            ->get();
+        $product = Product::findOrFail($id);
+        $kartu   = app(\App\Services\KartuStokBuilder::class)->build($product);
 
-        return Excel::download(new KartuStokExport($stock, $movements, $settings), 'Kartu_Stok-' . $stock->sku . '.xlsx');
+        return Excel::download(new KartuStokExport($product, $kartu, $settings), 'Kartu_Stok-' . $product->code . '.xlsx');
     }
 
     public function exportStockOpname(Request $request)
@@ -493,49 +485,23 @@ class LaporanController extends Controller
             ->setPaper('a4', 'landscape')->stream('Laporan_Stok_Barang.pdf');
     }
 
+    // $id = ID PRODUK (sesuai tombol Export di halaman Kartu Stok), bukan ID stock.
     public function pdfKartuStok(Request $request, $id)
     {
         $settings = $this->getSettings();
 
-        $stock = Stock::with(['product.category', 'pembelian.supplier'])->findOrFail($id);
+        $product = Product::with('category')->findOrFail($id);
+        $kartu   = app(\App\Services\KartuStokBuilder::class)->build($product);
 
-        $movements = StockMovement::where('product_id', $stock->product_id)
-            ->where(function ($q) use ($stock) {
-                $q->where('notes', 'like', "%SKU: {$stock->sku}%")
-                    ->orWhere(function ($q2) use ($stock) {
-                        $q2->where('reference_type', 'App\Models\Pembelian')
-                            ->where('reference_id', $stock->pembelian_id);
-                    });
-            })
-            ->orderBy('created_at', 'asc')
-            ->get();
-
-        $transactions = [];
-        $runningStock = 0;
-
-        foreach ($movements as $movement) {
-            $stokAwal  = $runningStock;
-            $masuk     = $movement->qty_in ?? 0;
-            $keluar    = $movement->qty_out ?? 0;
-            $stokAkhir = $stokAwal + $masuk - $keluar;
-
-            $transactions[] = [
-                'tanggal'    => $movement->created_at->isoFormat('DD MMM YYYY'),
-                'stok_awal'  => $stokAwal,
-                'masuk'      => $masuk,
-                'keluar'     => $keluar,
-                'stok_akhir' => $stokAkhir,
-                'harga'      => $stock->harga_beli,
-                'nilai'      => $stokAkhir * $stock->harga_beli,
-                'keterangan' => $movement->notes ?? '-',
-            ];
-
-            $runningStock = $stokAkhir;
-        }
-
-        return Pdf::loadView('exports.pdf.kartu-stok', compact('stock', 'transactions', 'settings'))
+        return Pdf::loadView('exports.pdf.kartu-stok', [
+            'product'      => $product,
+            'transactions' => $kartu['transactions']->all(),
+            'summary'      => $kartu['product_summary'],
+            'suppliers'    => $kartu['product']['suppliers'],
+            'settings'     => $settings,
+        ])
             ->setPaper('a4', 'portrait')
-            ->stream('Kartu_Stok-' . $stock->sku . '.pdf');
+            ->stream('Kartu_Stok-' . $product->code . '.pdf');
     }
 
     public function pdfPenerimaanBarang(Request $request)

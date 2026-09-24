@@ -28,7 +28,8 @@ class StockExport implements FromCollection, WithHeadings, WithTitle
             'Expired Date',
             'Kategori',
             'Satuan',
-            'Stok',
+            'Stok Batch',
+            'Total Stok Produk',
             'Min Stok',
             'Selisih',
             'Status Stok',
@@ -50,6 +51,12 @@ class StockExport implements FromCollection, WithHeadings, WithTitle
             ->get()
             ->keyBy('product_id');
 
+        // Total stok fisik per produk = SUM(stocks.qty) semua batch (sama dengan menu Stok/Produk).
+        // Min Stok, Selisih, dan Status Stok dinilai terhadap TOTAL ini, bukan qty satu batch.
+        $productTotals = Stock::selectRaw('product_id, SUM(qty) as total_qty')
+            ->groupBy('product_id')
+            ->pluck('total_qty', 'product_id');
+
         $rows = collect();
         $no = 1;
 
@@ -59,12 +66,14 @@ class StockExport implements FromCollection, WithHeadings, WithTitle
             $minStok = $adj
                 ? (int) ceil($baseMin * (1 + $adj->adjustment_percentage / 100))
                 : (int) $baseMin;
-            $selisih = ($s->qty ?? 0) - $minStok;
-            $statusStok = ($s->qty ?? 0) > $minStok ? 'Aman' : (($s->qty ?? 0) > 0 ? 'Kritis' : 'Habis');
+            $totalQty = (int) ($productTotals[$s->product_id] ?? 0);
+            $selisih = $totalQty - $minStok;
+            $statusStok = $totalQty > $minStok ? 'Aman' : ($totalQty > 0 ? 'Kritis' : 'Habis');
             $statusExp = $s->expired_at && Carbon::parse($s->expired_at)->isPast() ? 'Expired' : 'Belum Expired';
 
             $qty         = $s->qty ?? 0;
             $konvDisplay = $s->product?->konversiDisplay($qty) ?? '-';
+            $konvTotal   = $s->product?->konversiDisplay($totalQty) ?? '-';
 
             $rows->push([
                 $no++,
@@ -75,6 +84,7 @@ class StockExport implements FromCollection, WithHeadings, WithTitle
                 $s->product?->category?->name ?? '-',
                 $s->product?->satuan ?? 'PCS',
                 $qty.($konvDisplay && $konvDisplay !== '-' ? " ({$konvDisplay})" : ''),
+                $totalQty.($konvTotal && $konvTotal !== '-' ? " ({$konvTotal})" : ''),
                 $minStok,
                 ($selisih >= 0 ? '+' : '').$selisih,
                 $statusStok,

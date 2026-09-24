@@ -290,14 +290,50 @@ class DeliveryOrderController extends Controller
 
         DB::beginTransaction();
         try {
+            // Cegah kirim ganda (owner stock & movement akan tercatat dua kali)
+            $deliveryOrder = DeliveryOrder::lockForUpdate()->findOrFail($deliveryOrder->id);
+            if ($deliveryOrder->status === 'delivered') {
+                throw new \Exception('Delivery order ini sudah berstatus delivered.');
+            }
+
             foreach ($deliveryOrder->items as $item) {
                 $qtySent = max(0, (int) ($itemData[$item->id]['qty_sent'] ?? $item->qty));
                 $stock   = $item->stock;
 
+                // Qty kirim tidak boleh melebihi qty yang sudah di-pick (dan sudah dipotong dari gudang)
+                if ($qtySent > (int) $item->qty) {
+                    throw new \Exception("Qty kirim untuk SKU {$stock->sku} ({$qtySent}) melebihi qty picking ({$item->qty}).");
+                }
+
                 $item->update(['qty_sent' => $qtySent]);
+
+                // Sisa yang tidak jadi dikirim sudah terlanjur dipotong dari gudang saat picking
+                // selesai (completeAndShip). Kembalikan ke stok gudang supaya stok fisik tetap benar.
+                $qtyReturned = (int) $item->qty - $qtySent;
+                if ($qtyReturned > 0) {
+                    $lockedStock = \App\Models\Stock::lockForUpdate()->find($stock->id);
+                    $lockedStock->qty = (int) $lockedStock->qty + $qtyReturned;
+                    $lockedStock->save();
+
+                    StockMovement::create([
+                        'product_id'     => $item->product_id,
+                        'user_id'        => auth()->id(),
+                        'type'           => 'in',
+                        'reference_type' => DeliveryOrder::class,
+                        'reference_id'   => $deliveryOrder->id,
+                        'qty_in'         => $qtyReturned,
+                        'qty_out'        => 0,
+                        'balance'        => $item->product->stocks()->sum('qty'),
+                        'notes'          => "Sisa pengiriman dikembalikan ke gudang ({$deliveryOrder->code}) - SKU: {$stock->sku}",
+                    ]);
+                }
 
                 // DIHAPUS: $stock->allocate($qtySent);
                 // Stock sudah dialokasikan di completeAndShip() saat picking selesai
+
+                if ($qtySent === 0) {
+                    continue; // tidak ada yang dikirim: tidak buat owner stock / movement keluar
+                }
 
                 // Create/update owner stock using admin-confirmed qty
                 OwnerStock::updateOrCreate(

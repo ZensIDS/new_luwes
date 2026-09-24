@@ -2,7 +2,8 @@
 
 namespace App\Exports;
 
-use App\Models\Stock;
+use App\Models\Product;
+use Carbon\Carbon;
 use Maatwebsite\Excel\Concerns\Exportable;
 use Maatwebsite\Excel\Concerns\FromCollection;
 use Maatwebsite\Excel\Concerns\WithCustomStartCell;
@@ -20,32 +21,30 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 class KartuStokExport implements FromCollection, WithHeadings, WithMapping, WithStyles, WithDrawings, WithCustomStartCell, WithProperties
 {
     use Exportable;
-    protected $stock;
-    protected $movements;
+    protected Product $product;
+    protected array $kartu;
     protected $transactions = [];
     protected $settings;
 
-    public function __construct(Stock $stock, $movements, array $settings = [])
+    /**
+     * @param array $kartu hasil App\Services\KartuStokBuilder::build() (sumber angka yang sama
+     *                     dengan halaman Kartu Stok).
+     */
+    public function __construct(Product $product, array $kartu, array $settings = [])
     {
-        $this->stock = $stock;
+        $this->product  = $product;
+        $this->kartu    = $kartu;
         $this->settings = $settings;
 
-        $runningStock = 0;
-        $currentPrice = $stock->harga_beli;
-        foreach ($movements as $movement) {
-            $stokAwal  = $runningStock;
-            $masuk     = $movement->qty_in ?? '0';
-            $keluar    = $movement->qty_out ?? '0';
-            $stokAkhir = $stokAwal + $masuk - $keluar;
+        foreach ($kartu['transactions'] as $t) {
             $this->transactions[] = [
-                'tanggal'    => $movement->created_at->isoFormat('DD MMMM YYYY'),
-                'batch'      => $movement->notes ?? '-',
-                'keterangan' => $movement->notes ?? '-',
-                'masuk'      => $masuk > 0 ? $masuk : '0',
-                'keluar'     => $keluar > 0 ? $keluar : '0',
-                'total'      => $stokAkhir ?? '0',
+                'tanggal'    => Carbon::parse($t['tanggal'])->isoFormat('DD MMMM YYYY'),
+                'batch'      => $t['sku'],
+                'keterangan' => $t['keterangan'] ?? '-',
+                'masuk'      => $t['masuk'] > 0 ? $t['masuk'] : '0',
+                'keluar'     => $t['keluar'] > 0 ? $t['keluar'] : '0',
+                'total'      => $t['stok_akhir'] ?? '0', // saldo berjalan per SKU
             ];
-            $runningStock = $stokAkhir;
         }
     }
 
@@ -62,7 +61,7 @@ class KartuStokExport implements FromCollection, WithHeadings, WithMapping, With
     public function map($row): array
     {
         $fmt = function ($qty) {
-            $k = $this->stock->product->konversiDisplay($qty);
+            $k = $this->product->konversiDisplay($qty);
 
             return $qty.($k && $k !== '-' ? " ({$k})" : '');
         };
@@ -118,27 +117,27 @@ class KartuStokExport implements FromCollection, WithHeadings, WithMapping, With
         ]);
 
         $sheet->setCellValue('B10', 'Barcode :');
-        $sheet->setCellValue('D10', $this->stock->product->code ?? '-');
+        $sheet->setCellValue('D10', $this->product->code ?? '-');
         $sheet->getStyle('B10')->getFont()->setBold(true);
 
         $sheet->setCellValue('B11', 'Nama Barang :');
-        $sheet->setCellValue('D11', $this->stock->product->name ?? '-');
+        $sheet->setCellValue('D11', $this->product->name ?? '-');
         $sheet->getStyle('B11')->getFont()->setBold(true);
 
         $sheet->setCellValue('B12', 'Satuan :');
-        $sheet->setCellValue('D12', $this->stock->product->satuan ?? 'PCS');
+        $sheet->setCellValue('D12', $this->product->satuan ?? 'PCS');
         $sheet->getStyle('B12')->getFont()->setBold(true);
 
         $sheet->setCellValue('B13', 'Supplier :');
-        $sheet->setCellValue('D13', $this->stock->pembelian->supplier->name ?? '-');
+        $sheet->setCellValue('D13', $this->kartu['product']['suppliers'] ?? '-');
         $sheet->getStyle('B13')->getFont()->setBold(true);
 
         // Lokasi from stock->location
         $sheet->setCellValue('F12', 'Lokasi Penyimpanan :');
-        $sheet->setCellValue('H12', $this->stock->product->lokasi ?? '-');
+        $sheet->setCellValue('H12', $this->product->lokasi ?? '-');
         $sheet->getStyle('F12')->getFont()->setBold(true);
 
-        $sheet->setCellValue('B14', 'Detail Barang Diterima');
+        $sheet->setCellValue('B14', 'Mutasi Stok (semua SKU)');
         $sheet->getStyle('B14')->getFont()->setBold(true);
 
         // TABLE HEADER
@@ -169,27 +168,47 @@ class KartuStokExport implements FromCollection, WithHeadings, WithMapping, With
         $sheet->getStyle('H')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
         // SUMMARY
+        $summary     = $this->kartu['product_summary'];
         $totalMasuk  = collect($this->transactions)->sum('masuk');
         $totalKeluar = collect($this->transactions)->sum('keluar');
-        $stokAwal    = collect($this->transactions)->first()['total'] ?? '0';
-        $stokAkhir   = collect($this->transactions)->last()['total'] ?? '0';
 
         $summaryRow = $highestRow + 2;
-        $sheet->setCellValue('B'.$summaryRow, 'Stok Awal :');
-        $sheet->setCellValue('D'.$summaryRow, $stokAwal);
+        $sheet->setCellValue('B'.$summaryRow, 'Total Masuk :');
+        $sheet->setCellValue('D'.$summaryRow, $totalMasuk);
         $sheet->setCellValue('F'.$summaryRow, 'Total Keluar :');
         $sheet->setCellValue('H'.$summaryRow, $totalKeluar);
 
-        $sheet->setCellValue('B'.($summaryRow + 1), 'Total Masuk :');
-        $sheet->setCellValue('D'.($summaryRow + 1), $totalMasuk);
-        $sheet->setCellValue('F'.($summaryRow + 1), 'Total Akhir :');
-        $sheet->setCellValue('H'.($summaryRow + 1), $stokAkhir);
+        $sheet->setCellValue('B'.($summaryRow + 1), 'Stok Fisik (Gudang) :');
+        $sheet->setCellValue('D'.($summaryRow + 1), $summary['total_qty']);
+        $sheet->setCellValue('F'.($summaryRow + 1), 'Saldo Kartu :');
+        $sheet->setCellValue('H'.($summaryRow + 1), $summary['total_saldo_kartu']);
 
-        $sheet->getStyle('B'.$summaryRow.':H'.($summaryRow + 1))
+        $sheet->setCellValue('B'.($summaryRow + 2), 'Selisih :');
+        $sheet->setCellValue('D'.($summaryRow + 2), $summary['total_selisih']);
+
+        $sheet->getStyle('B'.$summaryRow.':H'.($summaryRow + 2))
             ->getBorders()->getOutline()->setBorderStyle(Border::BORDER_THIN);
 
+        // RINCIAN PER SKU
+        $r = $summaryRow + 4;
+        $sheet->setCellValue('B'.$r, 'Rincian per SKU');
+        $sheet->getStyle('B'.$r)->getFont()->setBold(true);
+        $r++;
+        $sheet->setCellValue('B'.$r, 'SKU');
+        $sheet->setCellValue('D'.$r, 'Stok Fisik');
+        $sheet->setCellValue('F'.$r, 'Saldo Kartu');
+        $sheet->setCellValue('H'.$r, 'Selisih');
+        $sheet->getStyle('B'.$r.':H'.$r)->getFont()->setBold(true);
+        foreach ($summary['breakdown'] as $b) {
+            $r++;
+            $sheet->setCellValue('B'.$r, $b['sku']);
+            $sheet->setCellValue('D'.$r, $b['qty']);
+            $sheet->setCellValue('F'.$r, $b['saldo_kartu']);
+            $sheet->setCellValue('H'.$r, $b['selisih']);
+        }
+
         // SIGNATURE
-        $row = $summaryRow + 4;
+        $row = $r + 3;
         $sheet->mergeCells('B'.$row.':D'.$row);
         $sheet->mergeCells('F'.$row.':H'.$row);
         $sheet->setCellValue('B'.$row, 'Dibuat Oleh');
@@ -247,7 +266,7 @@ class KartuStokExport implements FromCollection, WithHeadings, WithMapping, With
         return [
             'creator' => config('app.name'),
             'title' => 'Kartu Stok',
-            'description' => 'Kartu Stok '.$this->stock->sku,
+            'description' => 'Kartu Stok '.$this->product->code,
         ];
     }
 }
