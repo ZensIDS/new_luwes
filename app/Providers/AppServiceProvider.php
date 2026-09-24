@@ -60,21 +60,21 @@ class AppServiceProvider extends ServiceProvider
                             $query->orWhereIn('id', $activeAdjs->keys());
                         }
                     })
-                    ->withSum('stocks as available_stock_qty', 'qty_available')
+                    ->withSum('stocks as stock_qty', 'qty') // stok fisik gudang = SUM(stocks.qty)
                     ->get()
                     ->map(function ($product) use ($activeAdjs) {
-                        $current = (int) ($product->available_stock_qty ?? 0);
+                        $current = (int) ($product->stock_qty ?? 0);
                         $adj = $activeAdjs->get($product->id);
                         $product->effective_min_qty = $adj
                             ? (int) ceil($product->min_stock * (1 + $adj->adjustment_percentage / 100))
                             : (int) $product->min_stock;
-                        $product->available_stock_qty = $current;
+                        $product->stock_qty = $current;
 
                         return $product;
                     });
 
                 $lowStockProducts = $lowStockCandidates
-                    ->filter(fn ($product) => $product->available_stock_qty <= $product->effective_min_qty)
+                    ->filter(fn ($product) => $product->stock_qty <= $product->effective_min_qty)
                     ->sortBy('name')
                     ->values();
 

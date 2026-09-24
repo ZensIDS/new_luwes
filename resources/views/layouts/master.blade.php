@@ -90,7 +90,7 @@
                                                 <li>
                                                     <a href="{{ route('product.index') }}">
                                                         <i class="fa fa-warning text-yellow"></i>
-                                                        <b>{{ $product->name }}</b> — hampir habis, stock <span class="text-danger">{{ $product->available_stock_qty }}</span>/{{ $product->effective_min_qty }}
+                                                        <b>{{ $product->name }}</b> — hampir habis, stock <span class="text-danger">{{ $product->stock_qty }}</span>/{{ $product->effective_min_qty }}
                                                     </a>
                                                 </li>
                                             @endforeach

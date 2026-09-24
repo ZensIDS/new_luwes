@@ -44,7 +44,8 @@ class PembelianController extends Controller
             ->select('products.id', 'code', 'name', 'is_serialized', 'harga_beli', 'konversi_qty', 'satuan_besar', 'satuan')
             ->get()
             ->map(function ($product) {
-                $product->stock_count = $product->stocks()->sum('qty_available');
+                // stok fisik gudang = SUM(stocks.qty) (sama dengan menu Stok/Produk/Dashboard)
+                $product->stock_count = (int) $product->stocks()->sum('qty');
 
                 return $product;
             });
@@ -55,7 +56,7 @@ class PembelianController extends Controller
     public function getAllProducts()
     {
         $products = Product::select('id', 'code', 'name', 'is_serialized', 'harga_beli', 'min_stock', 'konversi_qty', 'satuan_besar', 'satuan')
-            ->withSum('stocks', 'qty_available')
+            ->withSum('stocks', 'qty')
             ->orderBy('name');
 
         if (request()->filled('supplier_id')) {
@@ -65,7 +66,7 @@ class PembelianController extends Controller
 
         $products = $products->get()
             ->map(function ($product) {
-                $currentStock = (int) ($product->stocks_sum_qty_available ?? 0);
+                $currentStock = (int) ($product->stocks_sum_qty ?? 0);
                 $effectiveMin = $product->effective_min_stock;   // ← compute once
                 $product->stock_count      = $currentStock;
                 $product->effective_min    = $effectiveMin;      // ← expose as 'effective_min'

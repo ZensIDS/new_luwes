@@ -193,7 +193,7 @@
                                 <tr>
                                     <th>Kode</th>
                                     <th>Produk</th>
-                                    <th class="text-center">Stok Tersedia</th>
+                                    <th class="text-center">Stok Gudang</th>
                                     <th class="text-center">Status</th>
                                 </tr>
                             </thead>
@@ -202,7 +202,7 @@
                                     <tr>
                                         <td><small>{{ $p->code }}</small></td>
                                         <td>{{ $p->name }}</td>
-                                        <td class="text-center">{{ (int)($p->stocks_sum_qty_available ?? 0) }}</td>
+                                        <td class="text-center">{{ (int)($p->stocks_sum_qty ?? 0) }}</td>
                                         <td class="text-center"><span class="label label-default"><i class="fa fa-minus-circle"></i> Tidak Aktif</span></td>
                                     </tr>
                                 @empty
@@ -330,7 +330,7 @@
                                     <th>Produk</th>
                                     <th>Kode</th>
                                     <th>Batch / SKU</th>
-                                    <th>Qty Tersedia</th>
+                                    <th>Qty Gudang</th>
                                     <th>Tanggal Expired</th>
                                     <th>Sisa Hari</th>
                                 </tr>
@@ -345,7 +345,7 @@
                                         <td>{{ $stock->product?->name ?? '—' }}</td>
                                         <td>{{ $stock->product?->code ?? '—' }}</td>
                                         <td>{{ $stock->batch_number ?? $stock->sku ?? '—' }}</td>
-                                        <td class="text-center">{{ $stock->qty_available }}</td>
+                                        <td class="text-center">{{ $stock->qty }}</td>
                                         <td>{{ \Carbon\Carbon::parse($stock->expired_at)->format('d M Y') }}</td>
                                         <td class="text-center">
                                             @if($daysLeft <= 7)
@@ -510,7 +510,7 @@
                 categories: {!! json_encode($inventoryChart->map(fn($i) => $i->product?->name ?? '—')->toArray()) !!},
                 labels: { style: { fontSize: '11px' } }
             },
-            yAxis: { min: 0, title: { text: 'Qty Tersedia' } },
+            yAxis: { min: 0, title: { text: 'Qty Gudang' } },
             plotOptions: {
                 column: {
                     colorByPoint: true,
@@ -523,7 +523,7 @@
                 }
             },
             series: [{
-                name: 'Stok Tersedia',
+                name: 'Stok Gudang',
                 data: {!! json_encode($inventoryChart->map(fn($i) => (int)$i->total_qty)->toArray()) !!}
             }],
             legend: { enabled: false }

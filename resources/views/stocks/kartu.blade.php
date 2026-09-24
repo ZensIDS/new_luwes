@@ -79,7 +79,7 @@
                                 </tbody>
                                 <tfoot>
                                     <tr id="rowTotalStokProduk" style="display:none;">
-                                        <th colspan="8" class="text-right">TOTAL STOK PRODUK (SEMUA SKU)</th>
+                                        <th colspan="8" class="text-right">TOTAL STOK GUDANG (SEMUA SKU)</th>
                                         <th id="totalStokProduk">0</th>
                                         <th></th>
                                     </tr>
@@ -95,16 +95,25 @@
                         <!-- Rincian stok per SKU untuk produk yang sama -->
                         <div id="productStockBreakdown" style="display:none;" class="mt-3">
                             <h5>Rincian Stok per SKU (Produk: <span id="breakdownProductName">-</span>)</h5>
-                            <table class="table table-sm table-bordered" style="width: 60%">
+                            <table class="table table-sm table-bordered" style="width: 90%">
                                 <thead>
                                     <tr>
                                         <th>SKU</th>
                                         <th>Supplier</th>
-                                        <th class="text-right">Qty Tersedia</th>
+                                        <th class="text-right">Stok Fisik</th>
+                                        <th class="text-right">Reserved</th>
+                                        <th class="text-right">Saldo Kartu</th>
+                                        <th class="text-right">Selisih</th>
                                     </tr>
                                 </thead>
                                 <tbody id="breakdownBody"></tbody>
+                                <tfoot id="breakdownFoot"></tfoot>
                             </table>
+                            <p class="text-muted" style="font-size:12px; width:90%;">
+                                <b>Stok Fisik</b> = stok gudang yang sama dengan menu Stok &amp; Produk (reserved sudah termasuk di dalamnya).
+                                <b>Saldo Kartu</b> = total Masuk &minus; Keluar yang tercatat di log pergerakan.
+                                <b>Selisih</b> &ne; 0 berarti ada perubahan stok yang tidak tercatat (atau tercatat terlambat) di kartu.
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -225,7 +234,6 @@
                 if (!transactions || transactions.length === 0) {
                     tbody.append(
                         '<tr><td colspan="10" class="text-center">Tidak ada transaksi untuk produk ini</td></tr>');
-                    $('#totalPersediaan').text('0');
                     return;
                 }
 
@@ -235,11 +243,7 @@
                     return qty + (k ? ' <span class="label label-info">' + k + '</span>' : '');
                 }
 
-                let latestNilai = 0;
-
                 transactions.forEach((item, index) => {
-                    latestNilai = item.nilai;
-
                     tbody.append(`
                         <tr>
                             <td>${index + 1}</td>
@@ -255,8 +259,6 @@
                         </tr>
                     `);
                 });
-
-                $('#totalPersediaan').text(formatRupiah(latestNilai));
             }
 
             function renderProductStockSummary(summary, product, meta) {
@@ -270,22 +272,46 @@
                 $('#totalStokProduk').html(totalDisplay);
                 $('#rowTotalStokProduk').show();
 
+                // Nilai persediaan = SUM(stok fisik x harga beli) semua SKU
+                $('#totalPersediaan').text(formatRupiah(summary.total_nilai || 0));
+
                 $('#breakdownProductName').text(product.name);
                 const $body = $('#breakdownBody');
+                const $foot = $('#breakdownFoot');
                 $body.empty();
+                $foot.empty();
+
+                function selisihCell(val) {
+                    const cls = val === 0 ? '' : 'text-danger';
+                    const sign = val > 0 ? '+' : '';
+                    return '<td class="text-right ' + cls + '"><strong>' + sign + val + '</strong></td>';
+                }
 
                 if (!summary.breakdown || summary.breakdown.length === 0) {
-                    $body.append('<tr><td colspan="3" class="text-center">Tidak ada data SKU</td></tr>');
+                    $body.append('<tr><td colspan="6" class="text-center">Tidak ada data SKU</td></tr>');
                 } else {
                     summary.breakdown.forEach(function (item) {
                         $body.append(`
                             <tr>
                                 <td>${item.sku}</td>
                                 <td>${item.supplier}</td>
-                                <td class="text-right">${fmtQtyStandalone(item.qty_available, meta)}</td>
+                                <td class="text-right">${fmtQtyStandalone(item.qty, meta)}</td>
+                                <td class="text-right">${fmtQtyStandalone(item.qty_reserved, meta)}</td>
+                                <td class="text-right">${fmtQtyStandalone(item.saldo_kartu, meta)}</td>
+                                ${selisihCell(item.selisih)}
                             </tr>
                         `);
                     });
+
+                    $foot.append(`
+                        <tr>
+                            <th colspan="2" class="text-right">TOTAL</th>
+                            <th class="text-right">${fmtQtyStandalone(summary.total_qty, meta)}</th>
+                            <th class="text-right">${fmtQtyStandalone(summary.total_reserved, meta)}</th>
+                            <th class="text-right">${fmtQtyStandalone(summary.total_saldo_kartu, meta)}</th>
+                            ${selisihCell(summary.total_selisih)}
+                        </tr>
+                    `);
                 }
 
                 $('#productStockBreakdown').show();

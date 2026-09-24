@@ -35,6 +35,7 @@ use App\Models\DeliveryOrder;
 use App\Models\Outlet;
 use App\Models\Pembelian;
 use App\Models\PickingList;
+use App\Models\Product;
 use App\Models\ProductMinimumAdjustment;
 use App\Models\RefundPembelian;
 use App\Models\RequestOrder;
@@ -747,7 +748,14 @@ class LaporanController extends Controller
         $movementStats = StockMovement::selectRaw('product_id, SUM(qty_out) as total_out, MIN(created_at) as first_date, MAX(created_at) as last_date')
             ->groupBy('product_id')->get()->keyBy('product_id');
 
-        $rows = Stock::with(['product.category'])->get()->map(function ($s) use ($movementStats, $activeAdjs) {
+        // Per PRODUK dengan stok fisik = SUM(stocks.qty) semua batch (bukan per baris batch)
+        $rows = Product::with('category')
+            ->withSum('stocks as stock_qty', 'qty')
+            ->whereHas('stocks')
+            ->orderBy('code')
+            ->get()
+            ->map(function ($p) use ($movementStats, $activeAdjs) {
+            $s = (object) ['product_id' => $p->id, 'product' => $p, 'qty' => (int) ($p->stock_qty ?? 0)];
             $stat       = $movementStats[$s->product_id] ?? null;
             $totalOut   = (int) ($stat?->total_out ?? 0);
             $months     = max(1, (int) \Carbon\Carbon::parse($stat?->first_date ?? now())->diffInMonths(now()) + 1);

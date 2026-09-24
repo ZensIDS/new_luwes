@@ -220,7 +220,7 @@
                                         @php
                                             $ownerQty = (int) ($value->owner_stock_qty ?? 0);
                                             $reservedQty = (int) ($value->reserved_stock_qty ?? 0);
-                                            $availableQty = (int) ($value->available_stock_qty ?? 0);
+                                            $stockQty = (int) ($value->stock_qty ?? 0); // stok fisik gudang = SUM(stocks.qty)
                                             $pembelianQty = (int) ($value->approved_stock_pembelians_qty ?? 0);
                                         @endphp
 
@@ -231,7 +231,7 @@
                                             {{ $reservedQty }} {{ $value->satuan ?? '-' }}/<span class="label label-info">{{ $reservedQty > 0 ? $value->konversiDisplay($reservedQty) : '-' }}</span>
                                         </td>
                                         <td>
-                                            {{ $availableQty }} {{ $value->satuan ?? '-' }}/<span class="label label-info">{{ $availableQty > 0 ? $value->konversiDisplay($availableQty) : '-' }}</span>
+                                            {{ $stockQty }} {{ $value->satuan ?? '-' }}/<span class="label label-info">{{ $stockQty > 0 ? $value->konversiDisplay($stockQty) : '-' }}</span>
                                         </td>
                                         <td>
                                             {{ $pembelianQty }} {{ $value->satuan ?? '-' }}/<span class="label label-info">{{ $pembelianQty > 0 ? $value->konversiDisplay($pembelianQty) : '-' }}</span>
@@ -249,8 +249,8 @@
                                         </td>
                                         {{-- <td>@currency($value->harga_jual)</td> --}}
                                         <td>
-                                            @if ($availableQty < $value->min_stock)
-                                            habis, stock tinggal {{ $availableQty }}
+                                            @if ($value->min_stock > 0 && $stockQty <= $value->effective_min_stock)
+                                            habis, stock tinggal {{ $stockQty }}
                                             @else
                                             aman
                                             @endif

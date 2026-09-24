@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Spatie\Activitylog\LogOptions;
@@ -99,10 +100,34 @@ class Product extends Model
         return $this->hasMany(PenjualanItem::class);
     }
 
-    // Get total available stock
+    /*
+    |--------------------------------------------------------------------------
+    | SUMBER KEBENARAN STOK (dipakai SEMUA tampilan stok)
+    |--------------------------------------------------------------------------
+    | Stok gudang (fisik) sebuah produk = SUM(stocks.qty) dari semua batch/SKU
+    | yang belum di-soft-delete. Kolom `qty` adalah satu-satunya kolom yang
+    | benar-benar diubah oleh semua alur (penerimaan, picking/allocate, retur,
+    | opname), jadi angka inilah yang paling aktual.
+    |
+    |  - stock_qty          = SUM(stocks.qty)          -> stok fisik gudang
+    |  - reserved_stock_qty = SUM(stocks.qty_reserved) -> info reservasi (SUDAH termasuk di stock_qty)
+    |  - owner_stock_qty    = SUM(owner_stocks.qty)    -> stok di outlet
+    |
+    | qty_available (= qty - qty_reserved) BUKAN untuk ditampilkan sebagai "stok";
+    | hanya dipakai sebagai batas validasi/alokasi operasional (picker SKU, retur, dll).
+    */
+    public function scopeWithStockTotals(Builder $query): Builder
+    {
+        return $query
+            ->withSum('stocks as stock_qty', 'qty')
+            ->withSum('stocks as reserved_stock_qty', 'qty_reserved')
+            ->withSum('ownerStocks as owner_stock_qty', 'qty');
+    }
+
+    // Total stok fisik gudang (SUM qty semua batch/SKU)
     public function getTotalStockAttribute()
     {
-        return $this->stocks()->sum('qty');
+        return (int) $this->stocks()->sum('qty');
     }
 
     public function calculateHPP($newQty, $newPrice)
@@ -121,6 +146,7 @@ class Product extends Model
         $this->save();
     }
 
+    // Hanya untuk kebutuhan validasi/alokasi (qty - reserved). Jangan dipakai untuk menampilkan "stok".
     public function getTotalAvailableStockAttribute()
     {
         return $this->stocks()->sum('qty_available');
@@ -148,7 +174,7 @@ class Product extends Model
 
     public function isLowStock(): bool
     {
-        return $this->total_available_stock <= $this->effective_min_stock;
+        return $this->total_stock <= $this->effective_min_stock;
     }
 
     /**

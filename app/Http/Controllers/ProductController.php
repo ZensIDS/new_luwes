@@ -75,9 +75,9 @@ class ProductController extends Controller
 
         $products = $products
             ->with('category:id,name')
-            ->withSum('ownerStocks as owner_stock_qty', 'qty')
-            ->withSum('stocks as reserved_stock_qty', 'qty_reserved')
-            ->withSum('stocks as available_stock_qty', 'qty_available')
+            // stock_qty (SUM qty), reserved_stock_qty (SUM qty_reserved), owner_stock_qty (SUM owner_stocks.qty)
+            // -> sumber angka yang sama dengan menu Stok, Dashboard, dan Laporan
+            ->withStockTotals()
             ->withSum([
                 'stockPembelians as approved_stock_pembelians_qty' => function ($query) {
                     $query->whereHas('pembelian', fn($pembelian) => $pembelian->where('owner_approval_status', 'approved'));
