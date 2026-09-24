@@ -29,10 +29,9 @@ class KartuStokBuilder
             ->orderBy('id')
             ->get();
 
-        // Kartu ini adalah kartu stok gudang. Pergerakan owner stock outlet
-        // dicatat pada tabel yang sama, tetapi tidak boleh mengubah saldo gudang.
+        // 1 query untuk semua movement produk ini, lalu tiap movement dipetakan ke
+        // TEPAT SATU batch di memory (tidak ada lagi movement yang dobel/tercampur antar SKU).
         $movements = StockMovement::where('product_id', $product->id)
-            ->whereNull('owner_id')
             ->orderBy('created_at', 'asc')
             ->orderBy('id', 'asc')
             ->get();

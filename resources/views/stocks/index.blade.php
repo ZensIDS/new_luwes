@@ -1,17 +1,6 @@
 @extends('layouts.master')
 @section('title', 'Stocks')
 @section('container')
-    <style>
-        .stock-filter-bar { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
-        .stock-filter { min-width:160px; margin:0; }
-        .stock-filter label { display:block; margin-bottom:4px; font-size:12px; color:#666; }
-        .stock-filter .form-control, .stock-filter .select2-container { min-width:160px; }
-        .stock-table th, .stock-table td { vertical-align:middle !important; }
-        .modal .table { margin-bottom:0; }
-        @media (max-width:767px) {
-            .stock-filter, .stock-filter .form-control, .stock-filter .select2-container { width:100% !important; }
-        }
-    </style>
     <section class="content-header">
         <h1>Data Stocks</h1>
     </section>
@@ -20,50 +9,23 @@
             <div class="col-xs-12">
                 <div class="box">
                     <div class="box-header">
-                        <div class="stock-filter-bar">
-                            <div class="stock-filter">
-                                <label for="filterKategori">Kategori</label>
-                                <select id="filterKategori" class="form-control input-sm select2">
-                                    <option value="">Semua Kategori</option>
-                                    @foreach($kategoriOptions as $kat)
-                                        <option value="{{ $kat }}">{{ $kat }}</option>
-                                    @endforeach
-                                </select>
-                            </div>
-                            <div class="stock-filter">
-                                <label for="filterLokasi">Lokasi</label>
-                                <select id="filterLokasi" class="form-control input-sm select2">
-                                    <option value="">Semua Lokasi</option>
-                                    @foreach($lokasiOptions as $lok)
-                                        <option value="{{ $lok }}">{{ $lok }}</option>
-                                    @endforeach
-                                </select>
-                            </div>
-                            <div class="stock-filter">
-                                <label for="filterSupplier">Supplier</label>
-                                <select id="filterSupplier" class="form-control input-sm select2">
-                                    <option value="">Semua Supplier</option>
-                                    @foreach($supplierOptions as $supplier)
-                                        <option value="{{ $supplier->id }}">{{ $supplier->name }}</option>
-                                    @endforeach
-                                </select>
-                            </div>
-                            <div class="stock-filter">
-                                <label for="filterStatus">Status</label>
-                                <select id="filterStatus" class="form-control input-sm select2">
-                                    <option value="">Semua Status</option>
-                                    @foreach($statusOptions as $status)
-                                        <option value="{{ $status }}">{{ ucfirst($status) }}</option>
-                                    @endforeach
-                                </select>
-                            </div>
-                            <button type="button" id="resetStockFilters" class="btn btn-default btn-sm">
-                                <i class="fa fa-refresh"></i> Reset
-                            </button>
+                        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                            <select id="filterKategori" class="form-control input-sm select2" style="width:auto; min-width:160px;">
+                                <option value="">Semua Kategori</option>
+                                @foreach($kategoriOptions as $kat)
+                                    <option value="{{ $kat }}">{{ $kat }}</option>
+                                @endforeach
+                            </select>
+                            <select id="filterLokasi" class="form-control input-sm select2" style="width:auto; min-width:160px;">
+                                <option value="">Semua Lokasi</option>
+                                @foreach($lokasiOptions as $lok)
+                                    <option value="{{ $lok }}">{{ $lok }}</option>
+                                @endforeach
+                            </select>
                         </div>
                     </div>
                     <div class="box-body table-responsive">
-                        <table id="example1" class="table table-bordered table-striped stock-table">
+                        <table id="example1" class="table table-bordered table-striped">
                             <thead>
                                 <tr>
                                     <th>No</th>
@@ -204,8 +166,6 @@
                     data: function(d) {
                         d.kategori = $('#filterKategori').val();
                         d.lokasi = $('#filterLokasi').val();
-                        d.supplier_id = $('#filterSupplier').val();
-                        d.status = $('#filterStatus').val();
                     }
                 },
                 order: [[2, 'asc']], // Product name
@@ -276,13 +236,8 @@
                 ]
             });
 
-            $('#filterKategori, #filterLokasi, #filterSupplier, #filterStatus').on('change', function() {
+            $('#filterKategori, #filterLokasi').on('change', function() {
                 table.draw();
-            });
-
-            $('#resetStockFilters').on('click', function() {
-                $('#filterKategori, #filterLokasi, #filterSupplier, #filterStatus').val('').trigger('change.select2');
-                table.search('').draw();
             });
 
             $('#priceHistoryModal').on('show.bs.modal', function(event) {

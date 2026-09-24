@@ -7,15 +7,12 @@ use App\Models\DeliveryOrderItem;
 use App\Models\Pembelian;
 use App\Models\Penjualan;
 use App\Models\Product;
-use App\Models\ProductMinimumAdjustment;
 use App\Models\RefundPembelian;
 use App\Models\RequestOrder;
 use App\Models\RequestOrderItem;
 use App\Models\Stock;
 use App\Models\Supplier;
-use Carbon\Carbon;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 
 class DashboardController extends Controller
@@ -43,7 +40,7 @@ class DashboardController extends Controller
                 if (! $next) {
                     return false;
                 }
-                if (Carbon::today()->diffInDays($next, false) > 3) {
+                if (\Carbon\Carbon::today()->diffInDays($next, false) > 3) {
                     return false;
                 }
                 if ($s->hasPembelianInCurrentInterval($next)) {
@@ -66,7 +63,7 @@ class DashboardController extends Controller
             ->orderBy('expired_at')
             ->get(['id', 'product_id', 'qty', 'expired_at', 'batch_number', 'sku']);
 
-        $activeAdjustments = ProductMinimumAdjustment::query()
+        $activeAdjustments = \App\Models\ProductMinimumAdjustment::query()
             ->activeOn()
             ->orderByDesc('active_from')
             ->orderByDesc('id')
@@ -216,43 +213,31 @@ class DashboardController extends Controller
             'address' => $settings['address'] ?? '',
             'website' => $settings['website'] ?? '',
             'logo'    => $settings['logo'] ?? '',
-            'returnPinConfigured' => filled($settings['return_pin_hash'] ?? null),
         ]);
     }
 
     public function store(Request $request)
     {
-        $rules = [
+        $this->validate($request, [
             'name'    => 'required',
             'email'   => 'required|email',
             'telp'    => 'required',
             'address' => 'required',
             'website' => 'nullable|url',
             'logo'    => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
-        ];
-        if (auth()->user()?->role === 'superadmin') {
-            $rules['return_pin'] = 'nullable|digits_between:4,8';
-        }
-
-        $this->validate($request, $rules, [
+        ], [
             'logo.image' => 'File yang diunggah harus berupa gambar.',
             'logo.mimes' => 'Logo harus bertipe: jpeg, png, jpg, atau gif.',
             'logo.max'   => 'Ukuran logo maksimal 2 MB.',
         ]);
 
-        $settings = json_decode(Storage::disk('public')->get('settings.json') ?? '{}', true) ?? [];
-        $data = array_merge($settings, [
+        $data = [
             'name'    => $request->name,
             'email'   => $request->email,
             'telp'    => $request->telp,
             'address' => $request->address,
             'website' => $request->website,
-        ]);
-
-        if (auth()->user()?->role === 'superadmin' && $request->filled('return_pin')) {
-            $data['return_pin_hash'] = Hash::make((string) $request->input('return_pin'));
-        }
-        unset($data['return_pin']);
+        ];
 
         if ($request->hasFile('logo')) {
             $path = $request->file('logo')->store('logos', 'public');

@@ -24,27 +24,17 @@
                                 </tr>
                                 <tr>
                                     <td colspan="2">Customer</td>
-                                        <td colspan="2">{{ $penjualan->customer?->name ?? 'Umum' }}</td>
+                                    <td colspan="2">{{ $penjualan->customer->name }}</td>
                                 </tr>
                                 <tr>
                                     <td colspan="2">Kas/Metode Pembayaran</td>
                                     <td colspan="2">
-                                        {{ $penjualan->kas?->name ?? $penjualan->paymentMethod?->name ?? $penjualan->transaction?->payment?->name ?? 'Tunai' }}
+                                        {{ $penjualan->kas->name ?? $penjualan->transaction?->payment?->name }}
                                     </td>
                                 </tr>
-                                @if ($penjualan->payment_reference)
-                                    <tr>
-                                        <td colspan="2">Nomor Referensi</td>
-                                        <td colspan="2">{{ $penjualan->payment_reference }}</td>
-                                    </tr>
-                                @endif
                                 <tr>
-                                    <td colspan="2">Kassa (akun)</td>
+                                    <td colspan="2">Kasir</td>
                                     <td colspan="2">{{ $penjualan->kasir->name ?? '___customer' }}</td>
-                                </tr>
-                                <tr>
-                                    <td colspan="2">Nama kasir shift</td>
-                                    <td colspan="2">{{ $penjualan->cashierShift?->name ?? '—' }}</td>
                                 </tr>
                                 <tr>
                                     <td colspan="2">Outlet</td>
@@ -64,47 +54,28 @@
                                         <td>{{ $item->serial_number ? $item->serial_number : $item->product?->code }} - {{ $item->product->name }}</td>
                                         <td>{{ $item->qty }}</td>
                                         <td>@currency($item->price)</td>
-                                        <td>@currency($item->subtotal ?? ($item->qty * $item->price))</td>
+                                        <td>@currency($item->qty * $item->price)</td>
                                     </tr>
-                                    @php $totalCost += $item->subtotal ?? ($item->qty * $item->price); @endphp
+                                    @php $totalCost += $item->qty * $item->price; @endphp
                                 @endforeach
-                                @php $grandTotal = $penjualan->grand_total ?? ($totalCost - $penjualan->discount - $penjualan->voucher?->value); @endphp
+                                @php $kembali = abs(($totalCost - $penjualan->discount - $penjualan->voucher?->value) - $penjualan->total); @endphp
                                 <tr>
-                                    <th colspan="4" class="text-sm text-right">Subtotal setelah Disc Toko : @currency(($penjualan->subtotal ?? $totalCost) + ($penjualan->promotion_total ?? 0))</th>
+                                    <th colspan="4" class="text-sm text-right">Sub Total : @currency($totalCost)</th>
                                 </tr>
                                 <tr>
-                                    <th colspan="4" class="text-sm text-right">Promo Rafaksi / Bundling : -@currency($penjualan->promotion_total ?? 0)</th>
+                                    <th colspan="4" class="text-sm text-right">Diskon : -@currency($penjualan->discount)</th>
                                 </tr>
                                 <tr>
-                                    <th colspan="4" class="text-sm text-right">Subtotal setelah promo : @currency($penjualan->subtotal ?? $totalCost)</th>
+                                    <th colspan="4" class="text-sm text-right">Voucher : -@currency($penjualan->voucher?->value)</th>
                                 </tr>
                                 <tr>
-                                    <th colspan="4" class="text-sm text-right">Disc Toko : -@currency($penjualan->discount_total ?? $penjualan->discount)</th>
-                                </tr>
-                                <tr>
-                                    <th colspan="4" class="text-sm text-right">Voucher : -@currency($penjualan->voucher_total ?? 0)</th>
-                                </tr>
-                                @if ($penjualan->promotionApplications->isNotEmpty())
-                                    <tr>
-                                        <th colspan="4" class="text-sm text-right">Promo: {{ $penjualan->promotionApplications->map(fn ($application) => $application->name)->join(', ') }}</th>
-                                    </tr>
-                                @endif
-                                @if ($penjualan->vouchers->isNotEmpty())
-                                    <tr>
-                                        <th colspan="4" class="text-sm text-right">Kode Voucher: {{ $penjualan->vouchers->pluck('code')->join(', ') }}</th>
-                                    </tr>
-                                @endif
-                                <tr>
-                                    <th colspan="4" class="text-right">Grand Total : @currency($grandTotal)</th>
+                                    <th colspan="4" class="text-right">Grand Total : @currency($totalCost - $penjualan->discount - $penjualan->voucher?->value)</th>
                                 </tr>
                                 {{-- <tr> --}}
                                     {{-- <th colspan="4" class="text-sm text-right">Di Bayar : @currency($penjualan->total)</th> --}}
                                 {{-- </tr> --}}
                                 <tr>
-                                    <th colspan="4" class="text-sm text-right">Dibayar: @currency($penjualan->paid_amount ?? $penjualan->total)</th>
-                                </tr>
-                                <tr>
-                                    <th colspan="4" class="text-sm text-right">Kembalian: @currency($penjualan->change_amount ?? 0)</th>
+                                    <th colspan="4" class="text-sm text-right">Hemat: @currency($kembali)</th>
                                 </tr>
                             </tbody>
                         </table>

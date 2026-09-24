@@ -4,7 +4,6 @@ namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
-use App\Support\IndonesianNumber;
 
 class ProductRequest extends FormRequest
 {
@@ -18,9 +17,6 @@ class ProductRequest extends FormRequest
             'konversi_qty' => $this->filled('konversi_qty')
                 ? round((float) $this->input('konversi_qty'), 2)
                 : null,
-            'harga_beli' => IndonesianNumber::parse($this->input('harga_beli')),
-            'harga_jual' => IndonesianNumber::parse($this->input('harga_jual')),
-            'diskon' => IndonesianNumber::parse($this->input('diskon')),
         ]);
     }
 
@@ -44,7 +40,7 @@ class ProductRequest extends FormRequest
             'desc' => 'nullable',
             'warna' => 'nullable',
             'ukuran' => 'nullable',
-            'brand' => 'nullable|string',
+            // 'brand' => 'nullable',
             'model' => 'nullable',
             'is_serialized' => 'nullable',
             'harga_beli' => 'required',
@@ -54,7 +50,7 @@ class ProductRequest extends FormRequest
             'satuan' => 'nullable|string',
             'satuan_besar' => 'nullable|string|max:255',
             'konversi_qty' => 'nullable|numeric|min:1',
-            'min_stock' => 'required|integer|min:0',
+            'min_stock' => 'nullable|integer|min:0',
             'lokasi' => 'nullable|string',
             'status_produk' => 'required|in:free_produk,tambahan_diskon,free_tester,listing,lunas,belum_lunas,sudah',
             'status_produk_note' => 'nullable|required_if:status_produk,tambahan_diskon|string|max:255',
@@ -76,7 +72,6 @@ class ProductRequest extends FormRequest
             'harga_beli.required' => 'Harga beli wajib diisi.',
             'harga_jual.required' => 'Harga jual wajib diisi.',
             'satuan.string' => 'Satuan harus berupa teks.',
-            'min_stock.required' => 'Minimal stok wajib diisi.',
             'min_stock.integer' => 'Minimal stok harus berupa angka.',
             'min_stock.min' => 'Minimal stok tidak boleh kurang dari 0.',
             'lokasi.string' => 'Lokasi harus berupa teks.',

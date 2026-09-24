@@ -390,7 +390,6 @@
                     }
                 });
             });
-
         });
     </script>
 @endsection

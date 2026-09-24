@@ -11,7 +11,6 @@ use App\Models\RequestOrderNote;
 use App\Models\PickingList;
 use App\Models\PickingListItem;
 use App\Models\Stock;
-use App\Models\StockMovement;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -1186,18 +1185,6 @@ class RequestOrderController extends Controller
                     $stock = Stock::find($item->stock_id);
                     if ($stock) {
                         $stock->allocate($item->qty_picked);
-
-                        StockMovement::create([
-                            'product_id' => $stock->product_id,
-                            'user_id' => auth()->id(),
-                            'type' => 'out',
-                            'reference_type' => PickingList::class,
-                            'reference_id' => $pickingList->id,
-                            'qty_in' => 0,
-                            'qty_out' => $item->qty_picked,
-                            'balance' => $stock->qty,
-                            'notes' => "Delivery ke outlet - Picking List #{$pickingList->id} - SKU: {$stock->sku}",
-                        ]);
                     }
 
                     $requestOrder->items()

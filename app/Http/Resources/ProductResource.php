@@ -3,27 +3,16 @@
 namespace App\Http\Resources;
 
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Carbon;
 
 class ProductResource extends JsonResource
 {
     public function toArray($request)
     {
+        $now = Carbon::now();
+
         // Sort stocks by status and serial_number
-        $sortedStocks = $this->relationLoaded('stocks')
-            ? $this->stocks->sortBy('status')->sortBy('serial_number')
-            : collect();
-        $ownerStocks = $this->relationLoaded('ownerStocks')
-            ? $this->ownerStocks->where('qty', '>', 0)->values()
-            : collect();
-        // The relation being loaded is the context signal. An outlet with zero
-        // stock must return zero, not fall back to warehouse stock.
-        $isOutletContext = $this->relationLoaded('ownerStocks');
-        $priceRule = $this->relationLoaded('outletPrices') ? $this->outletPrices->first() : null;
-        $displayPrice = $this->harga_jual;
-        if ($isOutletContext && $ownerStocks->first()) {
-            $displayPrice = app(\App\Services\PriceCalculator::class)
-                ->calculateItem((float) ($ownerStocks->first()->hpp ?? $this->harga_beli ?? 0), $priceRule, $this->resource)['price'];
-        }
+        $sortedStocks = $this->stocks->sortBy('status')->sortBy('serial_number');
 
         return [
             'id' => $this->id,
@@ -31,37 +20,13 @@ class ProductResource extends JsonResource
             'barcode' => $this->code,
             'desc' => $this->desc,
             'image' => $this->pic,
-            'code' => $this->code,
+            'code' => $this->barcode,
             'brand' => $this->brand,
             'model' => $this->model,
-            'harga_jual' => $displayPrice,
+            'harga_jual' => $this->harga_jual,
             'image_url' => asset($this->pic),
             'is_serialized' => $this->is_serialized,
-            'total_stock' => $isOutletContext ? $ownerStocks->sum('qty') : $this->total_stock,
-            'outlet_stock' => $isOutletContext ? $ownerStocks->sum('qty') : null,
-            'price_rule' => $priceRule ? [
-                'disc_brand_type' => $priceRule->disc_brand_type,
-                'disc_brand_value' => $priceRule->disc_brand_value,
-                'pajak_type' => $priceRule->pajak_type,
-                'pajak_value' => $priceRule->pajak_value,
-                'disc_tambahan_type' => $priceRule->disc_tambahan_type,
-                'disc_tambahan_value' => $priceRule->disc_tambahan_value,
-                'margin_type' => $priceRule->margin_type,
-                'margin_value' => $priceRule->margin_value,
-                'disc_toko_type' => $priceRule->disc_toko_type,
-                'disc_toko_value' => $priceRule->disc_toko_value,
-                'outlet_adjustment_type' => $priceRule->outlet_adjustment_type,
-                'outlet_adjustment_value' => $priceRule->outlet_adjustment_value,
-            ] : null,
-            'owner_stocks' => $ownerStocks->map(fn ($ownerStock) => [
-                'id' => $ownerStock->id,
-                'qty' => $ownerStock->qty,
-                'available' => $ownerStock->qty > 0,
-                'hpp' => $ownerStock->hpp,
-                'batch_number' => $ownerStock->batch_number,
-                'expired_at' => optional($ownerStock->expired_at)->toDateString(),
-                'serial_number' => $ownerStock->stock?->serial_number,
-            ])->values(),
+            'total_stock' => $this->total_stock,
             'stocks' => $sortedStocks->map(fn ($stock) => [
                 'id' => $stock->id,
                 'status' => $stock->status,

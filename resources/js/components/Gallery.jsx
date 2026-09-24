@@ -10,9 +10,10 @@ const Gallery = ({ products, addProductToCart }) => {
                     <tr>
                         <th className="w-10 text-center">Image</th>
                         <th className="w-15">Kode</th>
-                        <th className="w-35">Nama</th>
-                        <th className="w-20">Total Stock</th>
-                        <th className="w-20 text-right">Harga Jual</th>
+                        <th className="w-25">Nama</th>
+                        <th className="w-10">Total Stock</th>
+                        <th className="w-30">Serials</th>
+                        <th className="w-10 text-right">Harga Jual</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -21,14 +22,6 @@ const Gallery = ({ products, addProductToCart }) => {
                             key={p.id}
                             className="cursor-pointer"
                             onClick={() => addProductToCart(p.barcode)}
-                            tabIndex="0"
-                            onKeyDown={(event) => {
-                                if (event.key === "Enter" || event.key === " ") {
-                                    event.preventDefault();
-                                    addProductToCart(p.barcode);
-                                }
-                            }}
-                            title="Tekan Enter untuk memasukkan produk"
                         >
                             <td className="text-center align-middle">
                                 <img
@@ -45,6 +38,14 @@ const Gallery = ({ products, addProductToCart }) => {
                             <td>{p.barcode}</td>
                             <td>{p.name}</td>
                             <td>{p.total_stock}</td>
+                            <td>
+                                {p.stocks
+                                    .filter(
+                                        (s) => s.available && s.serial_number
+                                    )
+                                    .map((s) => s.serial_number)
+                                    .join(", ") || "N/A"}
+                            </td>
                             <td className="text-right">
                                 {formatRupiah(p.harga_jual)}
                             </td>

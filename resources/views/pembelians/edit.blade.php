@@ -15,6 +15,9 @@
                         </h3>
                         <div class="box-tools">
                             <span id="autosave-indicator" class="text-muted small"></span>
+                            <button type="button" class="btn btn-xs btn-warning btn-sync-failed">
+                                <i class="fa fa-refresh"></i> Sync Ulang Item Gagal
+                            </button>
                         </div>
                     </div><!-- /.box-header -->
                     <!-- form start: dipakai HANYA untuk tombol "Selesai" di akhir -->
@@ -149,6 +152,9 @@
 
                         <div class="box-footer">
                             <a href="{{ route('pembelian.index') }}" class="btn btn-default">Kembali</a>
+                            <button type="button" class="btn btn-warning btn-sync-failed">
+                                <i class="fa fa-refresh"></i> Sync Ulang Item Gagal
+                            </button>
                             @if ($pembelian->canBeEditedBy(auth()->user()))
                                 <button type="submit" class="btn btn-primary">Selesai</button>
                             @endif
@@ -219,6 +225,26 @@
             destroyItem:    (itemId) => `/pembelian/${pembelianId}/items/${itemId}`,
         };
 
+        // ---- Antrean simpan global ----
+        // AKAR MASALAH banyak status "Gagal": server mengunci baris PO (lockForUpdate) supaya
+        // request autosave yang datang bersamaan diproses satu-per-satu. Tapi sebelumnya semua
+        // request dari browser ditembakkan BERSAMAAN (misal saat "Tambahkan ke PO" banyak produk
+        // sekaligus), jadi banyak request numpuk menunggu lock/koneksi lalu timeout & gagal.
+        // Solusinya: antrekan semua request simpan (header, item, hapus item) di sisi browser juga,
+        // supaya hanya 1 yang jalan ke server dalam satu waktu — sama seperti cara server memprosesnya.
+        let saveQueueTail = Promise.resolve();
+
+        function queuedAjax(options) {
+            const run = saveQueueTail.then(function() {
+                return new Promise(function(resolve) {
+                    $.ajax(options).always(function() { resolve(); });
+                });
+            });
+            // Task berikutnya tetap lanjut walau task ini gagal.
+            saveQueueTail = run.catch(function() {});
+            return run;
+        }
+
         function showIndicator(message, isError = false) {
             const $ind = $('#autosave-indicator');
             $ind.removeClass('text-danger text-success').addClass(isError ? 'text-danger' : 'text-success');
@@ -236,22 +262,38 @@
         // Dipakai supaya tombol "Selesai" tahu harus menunggu sebelum submit (lihat flushPendingAutosaves).
         let headerTimeout;
         let headerPending = false;
+        let headerRetryCount = 0;
+        let headerRetryScheduled = false;
         function autosaveHeader() {
             clearTimeout(headerTimeout);
             headerPending = true;
             headerTimeout = setTimeout(function() {
-                $.ajax({
+                queuedAjax({
                     url: routes.autosaveHeader,
                     method: 'POST',
                     headers: { 'X-CSRF-TOKEN': csrfToken },
                     data: { supplier_id: $('#supplier_id').val() },
                     success: function(res) {
+                        headerRetryCount = 0;
                         if (res.code) {
                             $('.box-title').first().text('Edit PO — ' + res.code);
                         }
                         showIndicator('Tersimpan otomatis ✓');
                     },
-                    error: function() { showIndicator('Gagal menyimpan', true); },
+                    error: function(xhr) {
+                        const isTransient = xhr.status === 0 || xhr.status === 408 || xhr.status === 429 || xhr.status >= 500;
+                        if (isTransient && headerRetryCount < 3) {
+                            headerRetryCount++;
+                            headerRetryScheduled = true;
+                            setTimeout(function() {
+                                headerRetryScheduled = false;
+                                autosaveHeader();
+                            }, 800 * headerRetryCount);
+                            return;
+                        }
+                        headerRetryCount = 0;
+                        showIndicator('Gagal menyimpan', true);
+                    },
                     complete: function() { headerPending = false; },
                 });
             }, 400);
@@ -561,7 +603,7 @@
         // Kalau ada perubahan saat request masih jalan, disimpan lagi SETELAH request selesai
         // (dengan item_id yang sudah ada). Ini mencegah 1 baris tersimpan 2x (produk dobel).
         function deleteItemRequest(itemId, onDone) {
-            $.ajax({
+            queuedAjax({
                 url: routes.destroyItem(itemId),
                 method: 'POST',
                 headers: { 'X-CSRF-TOKEN': csrfToken },
@@ -606,7 +648,7 @@
             $row.data('dirty', false);
             $row.find('.row-status').html('<span class="label label-warning">Menyimpan...</span>');
 
-            $.ajax({
+            queuedAjax({
                 url: routes.autosaveItem,
                 method: 'POST',
                 headers: { 'X-CSRF-TOKEN': csrfToken },
@@ -618,6 +660,7 @@
                         return;
                     }
 
+                    $row.data('retryCount', 0);
                     $row.data('item-id', res.item_id);
                     $row.attr('data-item-id', res.item_id);
                     $row.find('.row-status').html('<span class="label label-success">Tersimpan</span>');
@@ -627,12 +670,33 @@
                 error: function(xhr) {
                     if ($row.data('removed')) return;
 
-                    const msg = xhr.responseJSON?.message || 'Gagal menyimpan item';
                     if (xhr.status === 422 && xhr.responseJSON?.code === 'duplicate') {
+                        $row.data('retryCount', 0);
                         markDuplicate($row);
-                    } else {
-                        $row.find('.row-status').html('<span class="label label-danger">Gagal</span>');
+                        showIndicator(xhr.responseJSON?.message || 'Produk sudah ada di PO ini', true);
+                        return;
                     }
+
+                    // Gagal karena hal yang sifatnya sementara (koneksi putus, server sibuk/timeout,
+                    // request kena antre lama) -> coba lagi otomatis beberapa kali dulu sebelum
+                    // benar-benar ditandai "Gagal", supaya user tidak perlu klik Sync Ulang tiap saat.
+                    const isTransient = xhr.status === 0 || xhr.status === 408 || xhr.status === 429 || xhr.status >= 500;
+                    const retryCount = $row.data('retryCount') || 0;
+
+                    if (isTransient && retryCount < 3 && !$row.data('dirty')) {
+                        $row.data('retryCount', retryCount + 1);
+                        $row.data('retryScheduled', true);
+                        $row.find('.row-status').html('<span class="label label-warning">Mencoba lagi...</span>');
+                        setTimeout(function() {
+                            $row.data('retryScheduled', false);
+                            if (!$row.data('removed') && document.contains($row[0])) autosaveRow($row);
+                        }, 800 * (retryCount + 1));
+                        return;
+                    }
+
+                    $row.data('retryCount', 0);
+                    const msg = xhr.responseJSON?.message || 'Gagal menyimpan item';
+                    $row.find('.row-status').html('<span class="label label-danger">Gagal</span>');
                     showIndicator(msg, true);
                 },
                 complete: function() {
@@ -953,11 +1017,11 @@
         // request yang belum selesai itu — produk yang baru saja "kelihatan" tersimpan jadi
         // hilang di database, terutama saat user menambah banyak produk sekaligus lalu langsung klik Selesai.
         function isRowBusy($row) {
-            return !!($row.data('debouncePending') || $row.data('saving') || $row.data('dirty'));
+            return !!($row.data('debouncePending') || $row.data('saving') || $row.data('dirty') || $row.data('retryScheduled'));
         }
 
         function anyPendingAutosave() {
-            if (headerPending) return true;
+            if (headerPending || headerRetryScheduled) return true;
             let busy = false;
             $('#product-repeater tr').each(function() {
                 if (isRowBusy($(this))) { busy = true; return false; }
@@ -968,6 +1032,57 @@
         function anyRowFailed() {
             return $('#product-repeater .row-status .label-danger').length > 0;
         }
+
+        // ---- Tombol "Sync Ulang Item Gagal" (atas & bawah) ----
+        // Coba simpan ulang semua baris yang berstatus "Gagal", tanpa perlu edit manual satu-satu.
+        // Prosesnya tetap lewat antrean (queuedAjax) supaya tidak numpuk lagi ke server.
+        function syncFailedItems() {
+            const $failedRows = $('#product-repeater tr').filter(function() {
+                return $(this).find('.row-status .label-danger').length > 0;
+            });
+
+            if ($failedRows.length === 0) {
+                showIndicator('Tidak ada item yang gagal ✓');
+                return;
+            }
+
+            $('.btn-sync-failed').prop('disabled', true).each(function() {
+                $(this).data('original-text', $(this).html());
+            }).html('<i class="fa fa-refresh fa-spin"></i> Menyinkronkan...');
+
+            $failedRows.each(function() {
+                const $row = $(this);
+                $row.data('retryCount', 0);
+                autosaveRow($row);
+            });
+
+            const start = Date.now();
+            const maxWaitMs = 20000;
+            (function poll() {
+                const stillBusy = $failedRows.toArray().some(function(el) {
+                    return isRowBusy($(el));
+                });
+
+                if (!stillBusy || Date.now() - start > maxWaitMs) {
+                    $('.btn-sync-failed').prop('disabled', false).each(function() {
+                        $(this).html($(this).data('original-text'));
+                    });
+
+                    const stillFailed = $('#product-repeater .row-status .label-danger').length;
+                    showIndicator(
+                        stillFailed > 0
+                            ? stillFailed + ' item masih gagal, coba Sync Ulang lagi'
+                            : 'Semua item berhasil disinkronkan ✓',
+                        stillFailed > 0
+                    );
+                    return;
+                }
+
+                setTimeout(poll, 200);
+            })();
+        }
+
+        $(document).on('click', '.btn-sync-failed', syncFailedItems);
 
         function flushPendingAutosaves(onSettled) {
             // Paksa jalankan lebih dulu semua debounce yang masih menunggu, supaya tidak perlu

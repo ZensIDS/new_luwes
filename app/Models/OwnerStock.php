@@ -19,16 +19,11 @@ class OwnerStock extends Model
         'qty',
         'sku',
         'expired_at',
-        'batch_number',
-        'hpp',
-        'source_type',
-        'source_id',
-        'created_by',
+        'harga_beli',
     ];
 
     protected $casts = [
         'expired_at' => 'date',
-        'hpp' => 'float',
     ];
 
     public function owner()
@@ -44,21 +39,6 @@ class OwnerStock extends Model
     public function stock()
     {
         return $this->belongsTo(Stock::class);
-    }
-
-    public function movements()
-    {
-        return $this->hasMany(StockMovement::class);
-    }
-
-    public function creator()
-    {
-        return $this->belongsTo(User::class, 'created_by');
-    }
-
-    public function getHargaBeliAttribute()
-    {
-        return $this->attributes['hpp'] ?? $this->attributes['harga_beli'] ?? null;
     }
 
     public function getActivitylogOptions(): LogOptions

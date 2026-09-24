@@ -143,10 +143,8 @@ class LaporanController extends Controller
         $mulai   = $request->input('tanggal_mulai', $request->input('tanggal', $today)) ?: $today;
         $selesai = $request->input('tanggal_selesai', $mulai) ?: $mulai;
         $lokasi  = $request->input('lokasi');
-        $kategori = $request->input('kategori');
 
         $lokasiFilter = $lokasi ? fn($q) => $q->where('lokasi', $lokasi) : null;
-        $kategoriFilter = $kategori ? fn($q) => $q->where('name', $kategori) : null;
 
         $query = StockAdjustment::with(['product', 'stock'])
             ->whereDate('adjustment_date', '>=', $mulai)
@@ -154,9 +152,6 @@ class LaporanController extends Controller
 
         if ($lokasiFilter) {
             $query->whereHas('product', $lokasiFilter);
-        }
-        if ($kategoriFilter) {
-            $query->whereHas('product.category', $kategoriFilter);
         }
 
         $adjustments = $query->get();
@@ -168,9 +163,6 @@ class LaporanController extends Controller
                 ->limit(500);
             if ($lokasiFilter) {
                 $fallback->whereHas('product', $lokasiFilter);
-            }
-            if ($kategoriFilter) {
-                $fallback->whereHas('product.category', $kategoriFilter);
             }
             $adjustments = $fallback->get();
         }

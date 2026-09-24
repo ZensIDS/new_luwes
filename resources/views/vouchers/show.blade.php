@@ -25,8 +25,8 @@
                                 <td>{{ $voucher->name }}</td>
                             </tr>
                             <tr>
-                                <td>Kode utama</td>
-                                <td>{{ preg_replace('/-\d{3}$/', '', $voucher->code) }}</td>
+                                <td>Kode</td>
+                                <td>{{ $voucher->code }}</td>
                             </tr>
                             @if ($voucher->product)
                                 <tr>
@@ -35,14 +35,10 @@
                                 </tr>
                             @endif
                             <tr>
-                                <td>Outlet</td>
-                                <td>{{ $voucher->outlet?->name ?? 'Semua outlet' }}</td>
-                            </tr>
-                            <tr>
                                 <td>Tanggal</td>
                                 <td>
-                                    {{ $voucher->start_at?->format('d F Y H:i') ?? 'Tanpa batas' }} -
-                                    {{ $voucher->end_at?->format('d F Y H:i') ?? 'Tanpa batas' }}
+                                    {{ \Carbon\Carbon::parse($voucher->start_at)->format('d F Y') }} -
+                                    {{ \Carbon\Carbon::parse($voucher->end_at)->format('d F Y') }}
                                 </td>
                             </tr>
                             <tr>
@@ -67,41 +63,6 @@
                                 <td>Minimal Pembelian</td>
                                 <td>@currency($voucher->min_purchase)</td>
                             </tr>
-                            <tr>
-                                <td>Maksimal Potongan</td>
-                                <td>{{ $voucher->max_discount_amount !== null ? 'Rp ' . number_format($voucher->max_discount_amount, 0, ',', '.') : 'Tanpa batas' }}</td>
-                            </tr>
-                            <tr>
-                                <td>Redemption</td>
-                                <td>{{ $vouchers->sum('redemptions_count') }} / {{ $vouchers->count() }} kode terpakai</td>
-                            </tr>
-                        </table>
-                        <h4>Daftar kode voucher</h4>
-                        <table class="table table-bordered table-striped">
-                            <thead>
-                                <tr>
-                                    <th>Kode</th>
-                                    <th>Status</th>
-                                    <th>Pemakaian</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach ($vouchers as $item)
-                                    <tr>
-                                        <td>{{ $item->code }}</td>
-                                        <td>
-                                            @if ($item->redemptions_count)
-                                                Sudah dipakai
-                                            @elseif ($item->isActive())
-                                                Aktif
-                                            @else
-                                                Tidak aktif
-                                            @endif
-                                        </td>
-                                        <td>{{ $item->redemptions_count }}/{{ $item->limit ?? '∞' }}</td>
-                                    </tr>
-                                @endforeach
-                            </tbody>
                         </table>
                     </div><!-- /.box-body -->
                 </div><!-- /.box -->

@@ -15,7 +15,6 @@ use App\Models\Product;
 use App\Models\ProductImport;
 use App\Models\Stock;
 use App\Models\Supplier;
-use App\Support\OutletAccess;
 use Illuminate\Bus\Batch;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Bus;
@@ -25,68 +24,28 @@ use Spatie\Activitylog\Models\Activity;
 
 class ProductController extends Controller
 {
-    /**
-     * Return only products available in the requested outlet for the cashier.
-     * The outlet is part of the URL so the client cannot accidentally fall
-     * back to the global product listing.
-     */
-    public function outletProducts(Request $request, Outlet $outlet)
-    {
-        $request->merge([
-            'outlet_id' => $outlet->id,
-            'status_produk' => 'all',
-        ]);
-        $request->headers->set('Accept', 'application/json');
-
-        return $this->index($request);
-    }
-
     public function index(Request $request)
     {
-        if (in_array($request->user()?->role, ['staff-outlet', 'kasir'], true)) {
-            $request->merge(['outlet_id' => OutletAccess::id($request)]);
-        }
-        $outletId = $request->input('outlet_id');
         $statusFilter = $request->input('status_produk', 'sudah');
         $products = Product::query();
 
         if ($request->filled('search')) {
-            $search = trim((string) $request->search);
-            if ($search !== '') {
-                $products = $products->where(function ($query) use ($search, $outletId) {
-                    $query->where('name', 'LIKE', "%{$search}%")
-                        ->orWhere('code', 'LIKE', "%{$search}%")
-                        ->orWhere('harga_jual', 'LIKE', "%{$search}%")
-                        ->orWhere('brand', 'LIKE', "%{$search}%")
-                        ->orWhere('model', 'LIKE', "%{$search}%");
-
-                    if ($outletId) {
-                        $query->orWhereHas('ownerStocks', function ($stockQuery) use ($outletId, $search) {
-                            $stockQuery->where('owner_id', $outletId)
-                                ->where('qty', '>', 0)
-                                ->where(function ($expiryQuery) {
-                                    $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
-                                })
-                                ->whereHas('stock', fn ($stock) => $stock->where('serial_number', 'LIKE', "%{$search}%"));
-                        });
-                    } else {
-                        $query->orWhereHas('stocks', function ($stockQuery) use ($search) {
-                            $stockQuery->where('serial_number', 'LIKE', "%{$search}%")
-                                ->orWhere('status', 'LIKE', "%{$search}%");
-                        });
-                    }
-                });
-            }
-        }
-
-        if ($outletId) {
-            $products = $products->whereHas('ownerStocks', function ($query) use ($outletId) {
-                $query->where('owner_id', $outletId)
-                    ->where('qty', '>', 0)
-                    ->where(function ($expiryQuery) {
-                        $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+            $search = $request->search;
+            $products = $products->where(function ($query) use ($search) {
+                $query->where('name', 'LIKE', "%{$search}%")
+                    ->orWhere('code', 'LIKE', "%{$search}%")
+                    ->orWhere('harga_jual', 'LIKE', "%{$search}%")
+                    ->orWhere('brand', 'LIKE', "%{$search}%")
+                    ->orWhere('model', 'LIKE', "%{$search}%")
+                    ->orWhereHas('stocks', function ($stockQuery) use ($search) {
+                        $stockQuery->where('serial_number', 'LIKE', "%{$search}%")
+                            ->orWhere('status', 'LIKE', "%{$search}%");
                     });
             });
+        }
+
+        if ($request->filled('outlet_id')) {
+            $products = $products->where('outlet_id', $request->outlet_id);
         }
 
         if ($request->filled('category_id')) {
@@ -102,60 +61,23 @@ class ProductController extends Controller
         }
 
         if (request()->wantsJson()) {
-            $relations = [
-                'category:id,name',
-                'outletPrices' => function ($query) use ($outletId) {
-                    if ($outletId) {
-                        $query->where('outlet_id', $outletId);
-                    }
-                    $query->with('outlet')->currentlyActive();
-                },
-            ];
-
-            if ($outletId) {
-                // Cashier searches only need stock owned by this outlet. Do not
-                // hydrate warehouse stocks for every search result.
-                $relations['ownerStocks'] = function ($query) use ($outletId) {
-                    $query->where('owner_id', $outletId)
-                        ->where('qty', '>', 0)
-                        ->where(function ($expiryQuery) {
-                            $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
-                        })
-                        ->with('stock');
-                };
-            } else {
-                $relations['stocks'] = function ($query) {
+            $products = $products
+                ->with(['category', 'stocks' => function ($query) {
                     $query->where('qty', '>', 0)
                         ->orderBy('status')
                         ->orderBy('serial_number');
-                };
-            }
-
-            $perPage = min(max($request->integer('per_page', 25), 1), 50);
-            $products = $products
-                ->with($relations)
+                }])
                 ->latest()
-                ->paginate($perPage);
+                ->paginate(10);
 
             return ProductResource::collection($products);
         }
 
-        $ownerStockScope = function ($query) use ($request) {
-            if ($request->filled('outlet_id')) {
-                $query->where('owner_id', $request->outlet_id);
-            }
-
-            $query->where('qty', '>', 0)
-                ->where(function ($expiryQuery) {
-                    $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
-                });
-        };
-
         $products = $products
             ->with('category:id,name')
-            ->withSum('stocks as stock_qty', 'qty')
-            ->withSum(['ownerStocks as owner_stock_qty' => $ownerStockScope], 'qty')
-            ->withSum('stocks as reserved_stock_qty', 'qty_reserved')
+            // stock_qty (SUM qty), reserved_stock_qty (SUM qty_reserved), owner_stock_qty (SUM owner_stocks.qty)
+            // -> sumber angka yang sama dengan menu Stok, Dashboard, dan Laporan
+            ->withStockTotals()
             ->withSum([
                 'stockPembelians as approved_stock_pembelians_qty' => function ($query) {
                     $query->whereHas('pembelian', fn($pembelian) => $pembelian->where('owner_approval_status', 'approved'));

@@ -10,7 +10,6 @@ use App\Models\PembelianProduct;
 use App\Models\PembelianTransaction;
 use App\Models\Product;
 use App\Models\Stock;
-use App\Support\IndonesianNumber;
 use App\Models\StockMovement;
 use App\Models\StockPembelian;
 use App\Models\Supplier;
@@ -260,14 +259,20 @@ class PembelianController extends Controller
             abort(403);
         }
 
-        // Open the input form first. The PO is created only after the user
-        // submits it, so clicking "Buat PO Baru" does not create an empty PO.
-        return view('pembelians.create', [
-            'kas' => Kas::get(),
-            'outlets' => Outlet::get(),
-            'suppliers' => Supplier::orderBy('name')->get(),
-            'products' => collect(),
+        // Langsung insert ke DB (draft), lalu redirect ke halaman edit — create dan edit
+        // jadi satu alur yang sama dengan autosave, meniru pola Request Order.
+        $pembelian = Pembelian::create([
+            'code' => null,
+            'supplier_id' => null,
+            'total' => 0,
+            'is_published' => false,
+            'owner_approval_status' => 'approved',
+            'owner_approved_by' => null,
+            'owner_approved_at' => null,
+            'owner_approval_note' => null,
         ]);
+
+        return redirect()->route('pembelian.edit', $pembelian);
     }
 
     public function autosaveHeader(Request $request, Pembelian $pembelian)
@@ -1451,7 +1456,6 @@ class PembelianController extends Controller
 
         $currentAmount = $pembelian->pembelianTransaction?->amount ?? 0;
         $maxAmount = $pembelian->total - $currentAmount;
-        $request->merge(['amount' => IndonesianNumber::parse($request->input('amount'))]);
 
         $request->validate([
             'payment_date'      => 'required|date',

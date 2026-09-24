@@ -41,9 +41,7 @@ class ProfileController extends Controller
 
         Auth::logout();
 
-        // Account deletion is permanent, matching the profile contract and
-        // preventing a deleted user from being restored with active access.
-        $user->forceDelete();
+        $user->delete();
 
         $request->session()->invalidate();
         $request->session()->regenerateToken();

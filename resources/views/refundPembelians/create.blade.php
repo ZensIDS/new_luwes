@@ -118,7 +118,7 @@
                                         </div>
                                         <div class="form-group">
                                             <label>Total Retur (IDR)</label>
-                                            <input type="text" inputmode="numeric" data-currency-input data-currency-decimals="0" class="form-control" name="total"
+                                            <input type="text" class="form-control numeral-mask" name="total"
                                                 id="total-supplier" readonly value="0">
                                         </div>
                                     </div>
@@ -521,7 +521,6 @@
                             ${item.product_name}
                             <input type="hidden" name="product[${i}][product_id]" value="${item.product_id}">
                             <input type="hidden" name="product[${i}][stock_id]" value="${item.stock_id}">
-                            <input type="hidden" name="product[${i}][owner_stock_id]" value="${item.owner_stock_id}">
                             <input type="hidden" name="product[${i}][sku]" value="${item.sku}">
                         </td>
                         <td><span class="label label-default">${item.sku}</span></td>
@@ -532,7 +531,7 @@
                                 min="1" max="${item.qty_available}" required>
                         </td>
                         <td>
-                            <input type="text" inputmode="numeric" data-currency-input data-currency-decimals="0" class="form-control input-harga" style="width:100px" name="product[${i}][harga]"
+                            <input type="text" class="form-control numeral-mask input-harga" style="width:100px" name="product[${i}][harga]"
                                 value="${item.harga_beli}" required>
                         </td>
                         <td>
@@ -549,7 +548,6 @@
                 });
 
                 applyMask();
-                window.initCurrencyInputs?.();
                 $('#supplier-product-area').show();
 
                 dtSupplier = $('#tbl-supplier').DataTable({
@@ -618,7 +616,6 @@
                             ${item.product_name}
                             <input type="hidden" name="product[${i}][product_id]" value="${item.product_id}">
                             <input type="hidden" name="product[${i}][stock_id]" value="${item.stock_id}">
-                            <input type="hidden" name="product[${i}][owner_stock_id]" value="${item.owner_stock_id}">
                         </td>
                         <td><span class="label label-default">${item.sku}</span></td>
                         <td><small class="text-muted">${item.do_code}</small></td>

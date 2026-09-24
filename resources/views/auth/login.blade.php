@@ -31,7 +31,7 @@
             <div class="col-xs-8">
                 <div class="checkbox">
                     <label>
-                        <input type="checkbox" name="remember" checked> Ingat saya
+                        <input type="checkbox" name="remember"> Ingat saya
                     </label>
                 </div>
             </div>

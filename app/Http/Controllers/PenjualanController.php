@@ -2,31 +2,31 @@
 
 namespace App\Http\Controllers;
 
+use App\Http\Requests\PenjualanRequest;
+use App\Models\Kas;
 use App\Models\Outlet;
-use App\Models\PaymentMethod;
 use App\Models\Penjualan;
-use App\Services\CashierSaleService;
-use App\Support\OutletAccess;
+use App\Models\Stock;
+use App\Models\Voucher;
+use Carbon\Carbon;
+use Exception;
 use Illuminate\Http\Request;
-use Throwable;
+use Illuminate\Support\Facades\DB;
+use PDF;
 
 class PenjualanController extends Controller
 {
-    public function getPenjualan(Request $request, $outlet_id)
+    public function getPenjualan($outlet_id)
     {
-        $request->merge(['outlet_id' => $outlet_id]);
-        OutletAccess::id($request);
         $penjualans = Penjualan::where('outlet_id', $outlet_id)->get();
 
         return response()->json($penjualans);
     }
 
-    public function getItems(Request $request, $penjualan_id)
+    public function getItems($penjualan_id)
     {
         $penjualan = Penjualan::find($penjualan_id);
         if ($penjualan) {
-            $request->merge(['outlet_id' => $penjualan->outlet_id]);
-            OutletAccess::id($request);
             $items = $penjualan->items;
 
             return response()->json($items);
@@ -42,25 +42,16 @@ class PenjualanController extends Controller
         ]);
     }
 
-    public function index(Request $request)
+    public function index()
     {
-        $outletId = OutletAccess::id($request, false);
-        $query = Penjualan::with(['items.product', 'outlet', 'kasir', 'cashierShift', 'vouchers', 'promotionApplications'])
-            ->orderBy('created_at', 'desc');
-        if ($outletId) {
-            $query->where('outlet_id', $outletId);
-        }
-
         return view('penjualan.index', [
-            'penjualan' => $query->get(),
+            'penjualan' => Penjualan::doesntHave('transaction')->orderBy('created_at', 'desc')->get(),
         ]);
     }
 
     public function create()
     {
-        if (in_array(auth()->user()->role, ['kasir', 'staff-outlet'], true)) {
-            abort_unless(auth()->user()->outlet_id, 422, 'User belum memiliki outlet.');
-
+        if (auth()->user()->role == 'kasir' | auth()->user()->role == 'admin'){
             return redirect()->route('outlet.show', auth()->user()->outlet_id);
         }
 
@@ -69,70 +60,119 @@ class PenjualanController extends Controller
         ]);
     }
 
-    public function store(Request $request, CashierSaleService $saleService)
+    public function store(Request $request)
     {
         $request->validate([
-            'customer_id' => 'nullable|integer|exists:users,id',
-            'outlet_id' => 'required|integer|exists:outlets,id',
-            'paid_amount' => 'required|numeric|min:0',
-            'payment_method_id' => 'nullable|integer|exists:payment_methods,id',
-            'payment_method_name' => 'nullable|string|max:100',
-            'payment_reference' => 'nullable|string|max:150',
-            'salesman_id' => 'nullable|integer|exists:salesmen,id',
-            'voucher_codes' => 'nullable|array',
-            'voucher_codes.*' => 'string|max:100',
-            'promotion_codes' => 'nullable|array',
-            'promotion_codes.*' => 'string|max:100',
-        ], [
-            'paid_amount.required' => 'Uang Diterima (F9) wajib diisi.',
-            'paid_amount.numeric' => 'Uang Diterima (F9) harus berupa angka.',
+            'customer_id' => 'required',
+            // 'kas_id' => 'required',
+            'kasir_id' => 'nullable',
+            'total' => 'required',
         ]);
 
-        $paymentMethod = $request->filled('payment_method_id')
-            ? PaymentMethod::find($request->integer('payment_method_id'))
-            : null;
-        $paymentMethodName = $paymentMethod?->name ?? $request->input('payment_method_name', 'Tunai');
-        if ($request->filled('payment_method_id') && ! preg_match('/tunai|cash/i', (string) $paymentMethodName)) {
-            $request->validate([
-                'payment_reference' => 'required|string|max:150',
-            ], [
-                'payment_reference.required' => 'Nomor Referensi wajib diisi untuk metode pembayaran ini.',
-            ]);
-        }
+        DB::beginTransaction();
 
         try {
-            OutletAccess::id($request);
-            $order = $saleService->checkout($request->user(), $request->all());
+            $lastOrder = Penjualan::where('outlet_id', $request->outlet_id)
+                ->orderBy('created_at', 'desc')
+                ->first();
+            $nextInvoiceNumber = $lastOrder ? ((int) substr($lastOrder->code, 3) + 1) : 1;
+            $nextInvoiceNumber = str_pad($nextInvoiceNumber, 3, '0', STR_PAD_LEFT);
+            $nextInvoiceCode = 'INV'.$nextInvoiceNumber;
+            $order = Penjualan::create([
+                'code' => $nextInvoiceCode,
+                'customer_id' => $request->customer_id,
+                'outlet_id' => $request->outlet_id,
+                'salesman_id' => $request->salesman_id,
+                'kasir_id' => $request->kasir_id,
+                'voucher_id' => $request->voucher_id,
+                'discount' => $request->discount,
+                'total' => $request->total,
+            ]);
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Pesanan berhasil dibuat.',
-                'redirect' => route('outlet.show', $order->outlet_id),
-                'print' => route('penjualan.print', [$order, 'auto' => 1]),
-                'order' => $order,
-            ], 201);
-        } catch (Throwable $e) {
-            report($e);
+            if (isset($request->voucher_id)) {
+                Voucher::find($request->voucher_id)->update(['limit' => 0]);
+            }
+            // $kas = Kas::find($request->kas_id);
+            // $kas->nominal += $request->total;
+            // $kas->save();
 
-            return response()->json(['message' => $e->getMessage()], 422);
+            $cart = $request->user()->cart()->get();
+            foreach ($cart as $item) {
+                $order->items()->create([
+                    'subtotal' => $item->harga_jual * $item->pivot->qty,
+                    'price' => $item->harga_jual,
+                    'qty' => $item->pivot->qty,
+                    'product_id' => $item->id,
+                    'serial_number' => $item->pivot->serial_number,
+                    'stock_id' => $item->pivot->stock_id,
+                ]);
+
+                if ($item->is_serialized) {
+                    // For serialized items, update specific stock
+                    $stock = Stock::find($item->pivot->stock_id);
+                    if (! $stock || $stock->qty < $item->pivot->qty) {
+                        throw new Exception('Stock not found or insufficient quantity');
+                    }
+                    $stock->qty -= $item->pivot->qty;
+                    $stock->save();
+                } else {
+                    // Existing FIFO logic for non-serialized items
+                    $now = Carbon::now();
+                    $stocks = Stock::where('product_id', $item->id)
+                        ->where('qty', '>', 0)
+                        ->get();
+
+                    if ($stocks->isEmpty()) {
+                        throw new Exception('Stock not found or expired');
+                    }
+
+                    $remainingQty = $item->pivot->qty;
+                    foreach ($stocks as $stock) {
+                        if ($remainingQty <= 0) {
+                            break;
+                        }
+
+                        if ($stock->qty >= $remainingQty) {
+                            $stock->qty -= $remainingQty;
+                            $remainingQty = 0;
+                        } else {
+                            $remainingQty -= $stock->qty;
+                            $stock->qty = 0;
+                        }
+                        $stock->save();
+                    }
+
+                    if ($remainingQty > 0) {
+                        throw new Exception('Insufficient stock quantity');
+                    }
+                }
+            }
+
+            $request->user()->cart()->detach();
+
+            DB::commit();
+        } catch (Exception $e) {
+            DB::rollBack();
+
+            return $e->getMessage();
         }
     }
 
     public function show(Penjualan $penjualan)
     {
-        $this->ensureSaleAccess($penjualan);
+        // dd($penjualan->load(['kasir', 'customer', 'items.product'])->toArray());
+        // $pdf = PDF::loadView('penjualan.penjualan_pdf', ['penjualan' => $penjualan]);
 
+        // return $pdf->download('penjualan_'.$penjualan->id.'.pdf');
         return view('penjualan.show', [
-            'penjualan' => $penjualan->load(['kasir', 'cashierShift', 'customer', 'outlet', 'items.product', 'vouchers', 'promotionApplications.promotion', 'paymentMethod']),
+            'penjualan' => $penjualan,
         ]);
     }
 
     public function print(Penjualan $penjualan)
     {
-        $this->ensureSaleAccess($penjualan);
-
         return view('penjualan.print', [
-            'penjualan' => $penjualan->load(['kasir', 'cashierShift', 'customer', 'outlet', 'items.product', 'vouchers', 'promotionApplications.promotion', 'paymentMethod']),
+            'penjualan' => $penjualan,
         ]);
     }
 
@@ -154,20 +194,8 @@ class PenjualanController extends Controller
 
     public function destroy(Penjualan $penjualan)
     {
-        $this->ensureSaleAccess($penjualan);
-        if ($penjualan->status === 'paid' && $penjualan->items()->exists()) {
-            return redirect()->back()->with('toast_error', 'Penjualan paid tidak dapat dihapus karena stok dan voucher harus tetap dapat diaudit. Gunakan alur retur/void.');
-        }
         $penjualan->delete();
 
         return redirect(route('penjualan.index'))->with('toast_success', 'Berhasil Menghapus Data!');
-    }
-
-    private function ensureSaleAccess(Penjualan $penjualan): void
-    {
-        $user = auth()->user();
-        if (in_array($user?->role, ['staff-outlet', 'kasir'], true)) {
-            abort_unless($user->outlet_id && (int) $user->outlet_id === (int) $penjualan->outlet_id, 403);
-        }
     }
 }

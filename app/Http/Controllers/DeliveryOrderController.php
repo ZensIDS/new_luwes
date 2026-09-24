@@ -5,9 +5,9 @@ namespace App\Http\Controllers;
 use App\Models\DeliveryOrder;
 use App\Models\DeliveryOrderItem;
 use App\Models\Outlet;
-use App\Models\StockMovement;
+use App\Models\OwnerStock;
 use App\Models\PickingList;
-use App\Services\OutletStockService;
+use App\Models\StockMovement;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -261,12 +261,8 @@ class DeliveryOrderController extends Controller
         return $count;
     }
 
-    public function send(Request $request, DeliveryOrder $deliveryOrder, OutletStockService $stockService)
+    public function send(Request $request, DeliveryOrder $deliveryOrder)
     {
-        if (in_array($deliveryOrder->status, ['delivered', 'completed'], true)) {
-            return back()->with('toast_error', 'Delivery order ini sudah diterima dan tidak dapat diproses ulang.');
-        }
-
         $request->validate([
             'photo'   => 'nullable|image|max:2048',
             'items'   => 'required|array',
@@ -304,11 +300,9 @@ class DeliveryOrderController extends Controller
                 $qtySent = max(0, (int) ($itemData[$item->id]['qty_sent'] ?? $item->qty));
                 $stock   = $item->stock;
 
-                if (! $stock) {
-                    throw new \RuntimeException("Stok warehouse untuk item {$item->id} tidak ditemukan.");
-                }
+                // Qty kirim tidak boleh melebihi qty yang sudah di-pick (dan sudah dipotong dari gudang)
                 if ($qtySent > (int) $item->qty) {
-                    throw new \RuntimeException("Qty kirim item {$item->id} melebihi qty delivery order.");
+                    throw new \Exception("Qty kirim untuk SKU {$stock->sku} ({$qtySent}) melebihi qty picking ({$item->qty}).");
                 }
 
                 $item->update(['qty_sent' => $qtySent]);
@@ -318,9 +312,6 @@ class DeliveryOrderController extends Controller
                 $qtyReturned = (int) $item->qty - $qtySent;
                 if ($qtyReturned > 0) {
                     $lockedStock = \App\Models\Stock::lockForUpdate()->find($stock->id);
-                    if (! $lockedStock) {
-                        throw new \RuntimeException("Stok warehouse untuk item {$item->id} tidak ditemukan.");
-                    }
                     $lockedStock->qty = (int) $lockedStock->qty + $qtyReturned;
                     $lockedStock->save();
 
@@ -340,28 +331,36 @@ class DeliveryOrderController extends Controller
                 // DIHAPUS: $stock->allocate($qtySent);
                 // Stock sudah dialokasikan di completeAndShip() saat picking selesai
 
-                // Receive the confirmed quantity into the outlet-owned stock ledger.
-                $batchNumber = $stock->batch_number ?: 'DO-' . $deliveryOrder->id . '-' . $item->id;
-                if ($qtySent > 0) {
-                    $stockService->receive(
-                        $deliveryOrder->owner_id,
-                        $item->product_id,
-                        $qtySent,
-                        (float) $item->harga_beli,
-                        [
-                            'stock_id' => $stock->id,
-                            'sku' => $stock->sku,
-                            'expired_at' => $item->expired_at,
-                            'batch_number' => $batchNumber,
-                            'source_type' => DeliveryOrder::class,
-                            'source_id' => $deliveryOrder->id,
-                            'notes' => "Delivery to {$deliveryOrder->owner->name} - SKU: {$stock->sku}",
-                        ],
-                        DeliveryOrder::class,
-                        $deliveryOrder->id,
-                        auth()->user()
-                    );
+                if ($qtySent === 0) {
+                    continue; // tidak ada yang dikirim: tidak buat owner stock / movement keluar
                 }
+
+                // Create/update owner stock using admin-confirmed qty
+                OwnerStock::updateOrCreate(
+                    [
+                        'owner_id'   => $deliveryOrder->owner_id,
+                        'product_id' => $item->product_id,
+                        'stock_id'   => $stock->id,
+                        'sku'        => $stock->sku,
+                    ],
+                    [
+                        'qty'        => DB::raw('qty + ' . $qtySent),
+                        'expired_at' => $item->expired_at,
+                        'harga_beli' => $item->harga_beli,
+                    ]
+                );
+
+                // Log movement tetap berjalan
+                StockMovement::create([
+                    'product_id'     => $item->product_id,
+                    'user_id'        => auth()->id(),
+                    'type'           => 'out',
+                    'reference_type' => DeliveryOrder::class,
+                    'reference_id'   => $deliveryOrder->id,
+                    'qty_out'        => $qtySent,
+                    'balance'        => $item->product->stocks()->sum('qty'),
+                    'notes'          => "Delivery to {$deliveryOrder->owner->name} - SKU: {$stock->sku}",
+                ]);
             }
 
             $data = [

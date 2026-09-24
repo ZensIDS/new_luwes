@@ -58,14 +58,6 @@ class Product extends Model
         return $this->belongsTo(Category::class);
     }
 
-    /**
-     * Product codes are the barcode value used by the POS and label printer.
-     */
-    public function getBarcodeAttribute(): ?string
-    {
-        return $this->code;
-    }
-
     public function outlet()
     {
         return $this->belongsTo(Outlet::class);
@@ -168,18 +160,6 @@ class Product extends Model
     public function ownerStocks()
     {
         return $this->hasMany(OwnerStock::class);
-    }
-
-    public function outletPrices()
-    {
-        return $this->hasMany(OutletPrice::class);
-    }
-
-    public function promotions()
-    {
-        return $this->belongsToMany(Promotion::class, 'promotion_products')
-            ->withPivot('required_qty')
-            ->withTimestamps();
     }
 
     public function movements()

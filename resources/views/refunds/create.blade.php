@@ -87,11 +87,8 @@
                             <hr>
                             <div class="form-group">
                                 <label for="">Total IDR</label>
-                                <div class="input-group">
-                                    <span class="input-group-addon">Rp</span>
-                                    <input type="text" inputmode="numeric" data-currency-input data-currency-decimals="0" class="form-control" name="total" value="{{ old('total') }}"
+                                <input type="text" class="form-control numeral-mask" name="total" value="{{ old('total') }}"
                                     placeholder="Masukkan Total IDR">
-                                </div>
                                 @error('total')
                                     <div class="invalid-feedback text-danger">
                                         {{ $message }}

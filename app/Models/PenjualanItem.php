@@ -13,62 +13,10 @@ class PenjualanItem extends Model
         'penjualan_id',
         'product_id',
         'stock_id',
-        'owner_stock_id',
         'qty',
         'price',
         'subtotal',
-        'base_price',
-        'base_subtotal',
-        'promotion_discount',
-        'promotion_details',
         'serial_number',
-        'hpp',
-        'pajak_type',
-        'pajak_value',
-        'pajak_amount',
-        'hpp_setelah_pajak',
-        'harga_akhir',
-        'disc_brand_type',
-        'disc_brand_value',
-        'disc_brand_amount',
-        'disc_tambahan_type',
-        'disc_tambahan_value',
-        'disc_tambahan_amount',
-        'harga_dasar',
-        'margin_type',
-        'margin_value',
-        'margin_amount',
-        'harga_aktif',
-        'disc_toko_type',
-        'disc_toko_value',
-        'disc_toko_amount',
-        'outlet_surcharge',
-        'outlet_adjustment_type',
-        'outlet_adjustment_value',
-    ];
-
-    protected $casts = [
-        'hpp' => 'float',
-        'pajak_value' => 'float',
-        'pajak_amount' => 'float',
-        'hpp_setelah_pajak' => 'float',
-        'harga_akhir' => 'float',
-        'disc_brand_value' => 'float',
-        'disc_brand_amount' => 'float',
-        'disc_tambahan_value' => 'float',
-        'disc_tambahan_amount' => 'float',
-        'harga_dasar' => 'float',
-        'margin_value' => 'float',
-        'margin_amount' => 'float',
-        'harga_aktif' => 'float',
-        'disc_toko_value' => 'float',
-        'disc_toko_amount' => 'float',
-        'outlet_surcharge' => 'float',
-        'outlet_adjustment_value' => 'float',
-        'base_price' => 'float',
-        'base_subtotal' => 'float',
-        'promotion_discount' => 'float',
-        'promotion_details' => 'array',
     ];
 
     public function penjualan()
@@ -84,10 +32,5 @@ class PenjualanItem extends Model
     public function stock()
     {
         return $this->belongsTo(Stock::class);
-    }
-
-    public function ownerStock()
-    {
-        return $this->belongsTo(OwnerStock::class);
     }
 }

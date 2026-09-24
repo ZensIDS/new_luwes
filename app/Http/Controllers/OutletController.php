@@ -3,11 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\OutletRequest;
-use App\Models\CashierSession;
 use App\Models\Kas;
 use App\Models\Outlet;
-use App\Support\OutletAccess;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
 class OutletController extends Controller
@@ -55,31 +52,11 @@ class OutletController extends Controller
         return redirect(route('outlet.index'))->with('toast_success', 'Berhasil Menyimpan Data!');
     }
 
-    public function show(Request $request, Outlet $outlet)
+    public function show(Outlet $outlet)
     {
-        $request->merge(['outlet_id' => $outlet->id]);
-        OutletAccess::id($request);
-        $cashierSession = CashierSession::with([
-            'drawerEntries' => fn ($query) => $query->latest('recorded_at'),
-            'cashier', 'activeShifts',
-        ])
-            ->where('outlet_id', $outlet->id)
-            ->where('cashier_id', $request->user()->getAuthIdentifier())
-            ->where('status', 'open')
-            ->latest('opened_at')
-            ->first();
-        $lastClosedSession = CashierSession::query()
-            ->where('outlet_id', $outlet->id)
-            ->where('cashier_id', $request->user()->getAuthIdentifier())
-            ->where('status', 'closed')
-            ->latest('closed_at')
-            ->first();
-
+        // dd($outlet);
         return view('outlets.show', [
             'outlet' => $outlet,
-            'cashierSession' => $cashierSession,
-            'cashierSummary' => $cashierSession?->summary(),
-            'suggestedOpeningCash' => $lastClosedSession?->carry_over_cash ?? 1000000,
         ]);
     }
 
