@@ -52,9 +52,9 @@ use Illuminate\Support\Facades\Storage;
 /**
  * Complete, repeatable demo dataset for the warehouse and multi-outlet POS.
  *
- * Return/refund tables are intentionally not referenced here. This makes the
- * seeder useful for a clean development installation without manufacturing
- * return history that does not exist yet.
+ * The linked outlet-report fixtures are kept in OutletReportSeeder so this
+ * seeder remains readable while a normal `db:seed` still creates a complete
+ * warehouse and outlet reporting dataset.
  */
 class DemoDataSeeder extends Seeder
 {
@@ -83,6 +83,7 @@ class DemoDataSeeder extends Seeder
         $this->seedWarehouseData();
         $this->seedOutletOperations();
         $this->seedSalesAndCustomerData();
+        $this->call(OutletReportSeeder::class);
     }
 
     private function seedSettings(): void
@@ -381,6 +382,9 @@ class DemoDataSeeder extends Seeder
             foreach ($this->products as $productKey => $product) {
                 $isMainOutlet = $outletKey === 'one';
                 $isPercentage = in_array($productKey, ['A', 'B'], true);
+                // Outlet Demo 3 represents a Beauty-style outlet whose selling
+                // price is adjusted by a nominal Rp100 per product.
+                $isBeautyExample = $outletKey === 'three';
                 $this->upsert(OutletPrice::class, [
                     'outlet_id' => $outlet->id,
                     'product_id' => $product->id,
@@ -391,6 +395,8 @@ class DemoDataSeeder extends Seeder
                     'margin_value' => $isPercentage ? ($productKey === 'A' ? 25 : 30) : ($productKey === 'C' ? 15000 : 5000),
                     'disc_toko_type' => $isPercentage && $isMainOutlet ? 'percentage' : 'nominal',
                     'disc_toko_value' => $isPercentage && $isMainOutlet ? ($productKey === 'A' ? 5 : 10) : ($productKey === 'C' ? 0 : 1000),
+                    'outlet_adjustment_type' => 'nominal',
+                    'outlet_adjustment_value' => $isBeautyExample ? 100 : 0,
                     'effective_from' => today()->subDays(30)->toDateString(),
                     'effective_until' => today()->addMonths(6)->toDateString(),
                     'is_active' => true,

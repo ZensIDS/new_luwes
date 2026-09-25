@@ -34,6 +34,7 @@ class OutletController extends Controller
     public function store(OutletRequest $request)
     {
         $data = $request->validated();
+        $data['jenis_outlet'] = 'toko';
 
         // Handle file upload
         if ($request->hasFile('logo')) {
@@ -93,6 +94,7 @@ class OutletController extends Controller
     public function update(OutletRequest $request, Outlet $outlet)
     {
         $data = $request->validated();
+        $data['jenis_outlet'] = 'toko';
         if ($request->hasFile('logo')) {
             // Delete the old image file
             if ($outlet->logo) {

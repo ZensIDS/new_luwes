@@ -16,7 +16,6 @@ class OutletRequest extends FormRequest
         return [
             'logo' => 'nullable',
             'name' => 'required',
-            'jenis_outlet' => 'required',
             'alamat' => 'required',
             // 'npwp' => 'required',
             // 'slogan' => 'required',
@@ -29,7 +28,6 @@ class OutletRequest extends FormRequest
     {
         return [
             'name.required' => 'Nama outlet wajib diisi.',
-            'jenis_outlet.required' => 'Jenis outlet wajib dipilih.',
             'alamat.required' => 'Alamat outlet wajib diisi.',
         ];
     }

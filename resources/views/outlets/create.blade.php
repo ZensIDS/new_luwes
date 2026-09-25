@@ -27,16 +27,6 @@
                                 @enderror
                             </div>
                             <div class="form-group">
-                                <label for="">Jenis Outlet</label>
-                                <input type="text" class="form-control" name="jenis_outlet" value="{{ old('jenis_outlet') }}"
-                                    placeholder="Masukkan Jenis Outlet (Toko / Beauty)">
-                                @error('jenis_outlet')
-                                    <div class="invalid-feedback text-danger">
-                                        {{ $message }}
-                                    </div>
-                                @enderror
-                            </div>
-                            <div class="form-group">
                                 <label for="">Alamat</label>
                                 <input type="text" class="form-control" name="alamat" value="{{ old('alamat') }}"
                                     placeholder="Masukkan Alamat">
@@ -86,16 +76,15 @@
                                     {{-- </div> --}}
                                 {{-- @enderror --}}
                             {{-- </div> --}}
-                            {{-- <div class="form-group"> --}}
-                                {{-- <label for="">Logo</label> --}}
-                                {{-- <input type="file" class="form-control" name="logo" value="{{ old('logo') }}" --}}
-                                    {{-- placeholder="Masukkan logo"> --}}
-                                {{-- @error('logo') --}}
-                                    {{-- <div class="invalid-feedback text-danger"> --}}
-                                        {{-- {{ $message }} --}}
-                                    {{-- </div> --}}
-                                {{-- @enderror --}}
-                            {{-- </div> --}}
+                            <div class="form-group">
+                                <label for="">Logo</label>
+                                <input type="file" class="form-control" name="logo" accept="image/*">
+                                @error('logo')
+                                    <div class="invalid-feedback text-danger">
+                                        {{ $message }}
+                                    </div>
+                                @enderror
+                            </div>
                             <div class="form-group">
                                 <label for="">Deskripsi</label>
                                 <input type="text" class="form-control" name="desc"

@@ -14,20 +14,22 @@
                     <form action="{{ route('refundPembelian.store') }}" method="POST" id="refund-form">
                         @csrf
 
+                        @php($activeType = $isStaffOutlet ? 'outlet_ke_gudang' : old('type', $selectedType))
+
                         {{-- Hidden type field, updated when tab changes --}}
-                        <input type="hidden" name="type" id="type" value="{{ $isStaffOutlet ? 'outlet_ke_gudang' : 'gudang_ke_supplier' }}">
+                        <input type="hidden" name="type" id="type" value="{{ $activeType }}">
 
                         <div class="box-body">
 
                             {{-- ── Type Tab Selector (hidden for staff-outlet) ── --}}
                             @if (!$isStaffOutlet)
                             <ul class="nav nav-tabs" id="typeTab" style="margin-bottom:20px">
-                                <li class="active">
+                                <li class="{{ $activeType === 'gudang_ke_supplier' ? 'active' : '' }}">
                                     <a href="#tab-supplier" data-toggle="tab" data-type="gudang_ke_supplier">
                                         <i class="fa fa-arrow-up"></i> Gudang ke Supplier
                                     </a>
                                 </li>
-                                <li>
+                                <li class="{{ $activeType === 'outlet_ke_gudang' ? 'active' : '' }}">
                                     <a href="#tab-outlet" data-toggle="tab" data-type="outlet_ke_gudang">
                                         <i class="fa fa-arrow-down"></i> Outlet ke Gudang
                                     </a>
@@ -64,7 +66,7 @@
                                 {{-- ══════════════════════════════════════════════
                             TAB 1: Gudang ke Supplier (hidden for staff-outlet)
                             ══════════════════════════════════════════════ --}}
-                                <div class="tab-pane {{ $isStaffOutlet ? '' : 'active' }}" id="tab-supplier"
+                                <div class="tab-pane {{ $activeType === 'gudang_ke_supplier' ? 'active' : '' }}" id="tab-supplier"
                                     style="{{ $isStaffOutlet ? 'display:none' : '' }}">
                                     <div class="form-group">
                                         <label>Supplier <span class="text-danger">*</span></label>
@@ -133,7 +135,7 @@
                                 {{-- ══════════════════════════════════════════════
                             TAB 2: Outlet ke Gudang
                             ══════════════════════════════════════════════ --}}
-                                <div class="tab-pane {{ $isStaffOutlet ? 'active' : '' }}" id="tab-outlet">
+                                <div class="tab-pane {{ $activeType === 'outlet_ke_gudang' ? 'active' : '' }}" id="tab-outlet">
                                     <div class="form-group">
                                         <label>Outlet <span class="text-danger">*</span></label>
                                         <select id="outlet_id" class="form-control select2" name="outlet_id"
@@ -221,8 +223,7 @@
         var outletXhr   = null;
 
         // ── Tab switching ──────────────────────────────────────────────────────────
-        $('#typeTab a[data-toggle="tab"]').on('shown.bs.tab', function() {
-            var type = $(this).data('type');
+        function applyType(type) {
             $('#type').val(type);
             if (type === 'gudang_ke_supplier') {
                 $('#outlet_id, #delivery_order_id').prop('disabled', true).removeAttr('required');
@@ -232,6 +233,10 @@
                 $('#outlet_id').prop('disabled', false).attr('required', true);
             }
             checkSubmit();
+        }
+
+        $('#typeTab a[data-toggle="tab"]').on('shown.bs.tab', function() {
+            applyType($(this).data('type'));
         });
 
         // ── Numeral mask ──────────────────────────────────────────────────────────
@@ -673,11 +678,13 @@
 
         // ── Auto-load on page ready (browser restore / old() after validation) ──────
         $(function() {
+            applyType($('#type').val());
+
             var sid = $('#supplier_id').val();
             var oid = $('#outlet_id').val();
-            if (sid) {
+            if ($('#type').val() === 'gudang_ke_supplier' && sid) {
                 $('#supplier_id').trigger('change');
-            } else if (oid) {
+            } else if ($('#type').val() === 'outlet_ke_gudang' && oid) {
                 $('#outlet_id').trigger('change');
             }
         });

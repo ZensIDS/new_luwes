@@ -32,8 +32,8 @@
                     <div class="box-header">
                         <div class="stock-action-bar">
                             @if (in_array(auth()->user()->role, ['superadmin', 'admin-gudang', 'owner', 'staff-outlet']))
-                                <a href="{{ route('delivery-orders.index') }}" class="btn btn-default btn-sm"><i class="fa fa-truck"></i> Riwayat Delivery Order</a>
-                                <a href="{{ route('outlet-purchases.create', ['outlet_id' => request('outlet_id')]) }}" class="btn btn-warning btn-sm"><i class="fa fa-shopping-basket"></i> Belanja Langsung → Tambah Stock</a>
+                                <a href="{{ route('delivery-orders.index') }}" class="btn btn-default btn-sm"><i class="fa fa-truck"></i> Riwayat Pengiriman Toko</a>
+                                <a href="{{ route('outlet-purchases.create', ['outlet_id' => request('outlet_id')]) }}" class="btn btn-warning btn-sm"><i class="fa fa-shopping-cart"></i> Belanja Langsung → Tambah Stock</a>
                             @endif
                             @if (in_array(auth()->user()->role, ['superadmin', 'admin-gudang', 'owner']))
                                 <a href="{{ route('outlet-prices.index') }}" class="btn btn-primary btn-sm"><i class="fa fa-money"></i> Atur Harga Jual POS</a>

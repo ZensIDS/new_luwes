@@ -28,16 +28,6 @@
                                 @enderror
                             </div>
                             <div class="form-group">
-                                <label for="">Jenis Outlet</label>
-                                <input type="text" class="form-control" name="jenis_outlet" value="{{ old('jenis_outlet', $outlet->jenis_outlet) }}"
-                                    placeholder="Masukkan Jenis Outlet (Toko / Beauty)">
-                                @error('jenis_outlet')
-                                    <div class="invalid-feedback text-danger">
-                                        {{ $message }}
-                                    </div>
-                                @enderror
-                            </div>
-                            <div class="form-group">
                                 <label for="">Alamat</label>
                                 <input type="text" class="form-control" name="alamat"
                                     value="{{ old('alamat', $outlet->alamat) }}" placeholder="Masukkan Alamat">

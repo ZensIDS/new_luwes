@@ -15,7 +15,7 @@
                         <div class="row align-items-center">
 
                             <div class="col-md-4 col-sm-12 mb-2 mb-md-0">
-                                <a href="{{ route('refundPembelian.create') }}" class="btn btn-sm bg-green">
+                                <a href="{{ route('refundPembelian.create', ['type' => $selectedType ?: 'gudang_ke_supplier']) }}" class="btn btn-sm bg-green">
                                     <i class="fa fa-plus"></i> Tambah Retur
                                 </a>
                             </div>

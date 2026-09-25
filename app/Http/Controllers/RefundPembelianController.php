@@ -103,7 +103,7 @@ class RefundPembelianController extends Controller
         ]);
     }
 
-    public function create()
+    public function create(Request $request)
     {
         $lastRetur  = RefundPembelian::latest('id')->first();
         $nextNumber = $lastRetur ? ((int) substr($lastRetur->code, 3) + 1) : 1;
@@ -111,6 +111,13 @@ class RefundPembelianController extends Controller
 
         $user          = auth()->user();
         $isStaffOutlet = $user->role === 'staff-outlet';
+        $selectedType  = in_array($request->query('type'), ['gudang_ke_supplier', 'outlet_ke_gudang'], true)
+            ? $request->query('type')
+            : 'gudang_ke_supplier';
+
+        if ($isStaffOutlet) {
+            $selectedType = 'outlet_ke_gudang';
+        }
 
         return view('refundPembelians.create', [
             'suppliers'     => Supplier::get(),
@@ -118,6 +125,7 @@ class RefundPembelianController extends Controller
             'code'          => $code,
             'isStaffOutlet' => $isStaffOutlet,
             'staffOutletId' => $isStaffOutlet ? $user->outlet_id : null,
+            'selectedType'  => $selectedType,
         ]);
     }
 
