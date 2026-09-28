@@ -51,6 +51,7 @@ use App\Models\Supplier;
 use App\Models\User;
 use App\Services\OutletLaporanService;
 use App\Support\OutletAccess;
+use App\Support\ReportQuery;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -159,10 +160,8 @@ class LaporanController extends Controller
         $mulai   = $request->input('tanggal_mulai', $request->input('tanggal', $today)) ?: $today;
         $selesai = $request->input('tanggal_selesai', $mulai) ?: $mulai;
         $lokasi  = $request->input('lokasi');
-        $kategori = $request->input('kategori');
 
         $lokasiFilter = $lokasi ? fn($q) => $q->where('lokasi', $lokasi) : null;
-        $kategoriFilter = $kategori ? fn($q) => $q->where('name', $kategori) : null;
 
         $query = StockAdjustment::with(['product', 'stock'])
             ->whereDate('adjustment_date', '>=', $mulai)
@@ -170,9 +169,6 @@ class LaporanController extends Controller
 
         if ($lokasiFilter) {
             $query->whereHas('product', $lokasiFilter);
-        }
-        if ($kategoriFilter) {
-            $query->whereHas('product.category', $kategoriFilter);
         }
 
         $adjustments = $query->get();
@@ -184,9 +180,6 @@ class LaporanController extends Controller
                 ->limit(500);
             if ($lokasiFilter) {
                 $fallback->whereHas('product', $lokasiFilter);
-            }
-            if ($kategoriFilter) {
-                $fallback->whereHas('product.category', $kategoriFilter);
             }
             $adjustments = $fallback->get();
         }
@@ -467,27 +460,30 @@ class LaporanController extends Controller
         [$mulai, $selesai] = $this->dateRange($request);
         $settings = $this->getSettings();
 
-        $movements = StockMovement::with(['product'])
-            ->where('qty_in', '>', 0)
-            ->whereDate('created_at', '>=', $mulai)->whereDate('created_at', '<=', $selesai)
-            ->orderBy('created_at')->get()
-            ->map(function ($m) {
-                $docCode = '-';
-                $supplier = '-';
-                if ($m->reference_type && $m->reference_id) {
-                    $ref = $m->reference_type::find($m->reference_id);
-                    $docCode = $ref?->code ?? '-';
-                    if ($m->reference_type === 'App\Models\Pembelian') {
-                        $supplier = $ref?->supplier?->name ?? '-';
-                    }
-                }
-                preg_match('/SKU:\s*(\S+)/', $m->notes ?? '', $matches);
-                $m->doc_code = $docCode;
-                $m->supplier_n = $supplier;
-                $m->batch = $matches[1] ?? '-';
+        $query = ReportQuery::betweenDates(
+            StockMovement::with(['product'])->where('qty_in', '>', 0),
+            'created_at', $mulai, $selesai
+        );
+        ReportQuery::preparePdf();
+        ReportQuery::guardPdfRows((clone $query)->count());
+        $movements = $query->orderBy('created_at')->get();
 
-                return $m;
-            });
+        // 1 query per tipe dokumen (bukan 1 query per baris)
+        $refs = ReportQuery::resolveReferences($movements, [
+            Pembelian::class => ['supplier'],
+        ]);
+
+        $movements = $movements->map(function ($m) use ($refs) {
+            $ref = ReportQuery::ref($refs, $m);
+            $m->doc_code = $ref?->code ?? '-';
+            $m->supplier_n = $m->reference_type === Pembelian::class
+                ? ($ref?->supplier?->name ?? '-')
+                : '-';
+            preg_match('/SKU:\s*(\S+)/', $m->notes ?? '', $matches);
+            $m->batch = $matches[1] ?? '-';
+
+            return $m;
+        });
 
         return Pdf::loadView('exports.pdf.laporan-barang-masuk', compact('movements', 'settings', 'mulai', 'selesai'))
             ->setPaper('a4', 'landscape')->stream('Laporan_Barang_Masuk.pdf');
@@ -498,25 +494,27 @@ class LaporanController extends Controller
         [$mulai, $selesai] = $this->dateRange($request);
         $settings = $this->getSettings();
 
-        $movements = StockMovement::with(['product'])
-            ->where('qty_out', '>', 0)
-            ->whereDate('created_at', '>=', $mulai)->whereDate('created_at', '<=', $selesai)
-            ->orderBy('created_at')->get()
-            ->map(function ($m) {
-                $docCode = '-';
-                $tujuan = '-';
-                if ($m->reference_type && $m->reference_id) {
-                    $ref = $m->reference_type::find($m->reference_id);
-                    $docCode = $ref?->code ?? '-';
-                    $tujuan = $ref?->owner?->name ?? $ref?->requestOrder?->owner?->name ?? '-';
-                }
-                preg_match('/SKU:\s*(\S+)/', $m->notes ?? '', $matches);
-                $m->doc_code = $docCode;
-                $m->tujuan = $tujuan;
-                $m->batch = $matches[1] ?? '-';
+        $query = ReportQuery::betweenDates(
+            StockMovement::with(['product'])->where('qty_out', '>', 0),
+            'created_at', $mulai, $selesai
+        );
+        ReportQuery::preparePdf();
+        ReportQuery::guardPdfRows((clone $query)->count());
+        $movements = $query->orderBy('created_at')->get();
 
-                return $m;
-            });
+        $refs = ReportQuery::resolveReferences($movements, [
+            DeliveryOrder::class => ['owner', 'requestOrder.owner'],
+        ]);
+
+        $movements = $movements->map(function ($m) use ($refs) {
+            $ref = ReportQuery::ref($refs, $m);
+            $m->doc_code = $ref?->code ?? '-';
+            $m->tujuan = $ref?->owner?->name ?? $ref?->requestOrder?->owner?->name ?? '-';
+            preg_match('/SKU:\s*(\S+)/', $m->notes ?? '', $matches);
+            $m->batch = $matches[1] ?? '-';
+
+            return $m;
+        });
 
         return Pdf::loadView('exports.pdf.laporan-barang-keluar', compact('movements', 'settings', 'mulai', 'selesai'))
             ->setPaper('a4', 'landscape')->stream('Laporan_Barang_Keluar.pdf');
@@ -661,17 +659,21 @@ class LaporanController extends Controller
         [$mulai, $selesai] = $this->dateRange($request);
         $settings = $this->getSettings();
 
-        $movements = StockMovement::with(['product'])
-            ->whereDate('created_at', '>=', $mulai)->whereDate('created_at', '<=', $selesai)
-            ->orderBy('created_at')->get()
-            ->map(function ($m) {
-                $docCode = '-';
-                if ($m->reference_type && $m->reference_id) {
-                    $ref = $m->reference_type::find($m->reference_id);
-                    $docCode = $ref?->code ?? '-';
-                }
+        // product.suppliers di-eager-load (sebelumnya lazy-load per baris)
+        $query = ReportQuery::betweenDates(
+            StockMovement::with(['product.suppliers']),
+            'created_at', $mulai, $selesai
+        );
+        ReportQuery::preparePdf();
+        ReportQuery::guardPdfRows((clone $query)->count());
+        $movements = $query->orderBy('created_at')->get();
+
+        $refs = ReportQuery::resolveReferences($movements);
+
+        $movements = $movements
+            ->map(function ($m) use ($refs) {
                 $m->jenis    = $m->qty_in > 0 ? 'Penerimaan' : 'Pengiriman';
-                $m->doc_code = $docCode;
+                $m->doc_code = ReportQuery::ref($refs, $m)?->code ?? '-';
                 $m->pic = optional($m->product?->suppliers)->pluck('pic_supplier')?->filter()->implode(', ');
                 $m->lokasi   = $m->product?->lokasi;
                 $m->status   = $m->type;

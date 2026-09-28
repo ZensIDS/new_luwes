@@ -3,6 +3,7 @@
 namespace App\Exports;
 
 use App\Models\StockMovement;
+use App\Support\ReportQuery;
 use Illuminate\Http\Request;
 use Maatwebsite\Excel\Concerns\Exportable;
 use Maatwebsite\Excel\Concerns\FromCollection;
@@ -29,20 +30,22 @@ class LaporanBarangMasukExport implements FromCollection, WithHeadings, WithTitl
     {
         $mulai = $this->request->input('tanggal_mulai');
         $selesai = $this->request->input('tanggal_selesai');
-        $movements = StockMovement::with(['product'])->where('qty_in', '>', 0)
-            ->when($mulai, fn ($q) => $q->whereDate('created_at', '>=', $mulai))
-            ->when($selesai, fn ($q) => $q->whereDate('created_at', '<=', $selesai))
-            ->orderBy('created_at')->get();
+        $movements = ReportQuery::betweenDates(
+            StockMovement::with(['product'])->where('qty_in', '>', 0),
+            'created_at', $mulai, $selesai
+        )->orderBy('created_at')->get();
+
+        $refs = ReportQuery::resolveReferences($movements, [
+            \App\Models\Pembelian::class => ['supplier'],
+        ]);
         $rows = collect();
         $no = 1;
         foreach ($movements as $m) {
             $docCode = '-';
             $supplier = '-';
-            if ($m->reference_type && $m->reference_id) {
-                $ref = $m->reference_type::find($m->reference_id);
-                $docCode = $ref?->code ?? '-';
-                if ($m->reference_type === 'App\Models\Pembelian') { $supplier = $ref?->supplier?->name ?? '-'; }
-            }
+            $ref = ReportQuery::ref($refs, $m);
+            $docCode = $ref?->code ?? '-';
+            if ($m->reference_type === \App\Models\Pembelian::class) { $supplier = $ref?->supplier?->name ?? '-'; }
             preg_match('/SKU:\s*(\S+)/', $m->notes ?? '', $matches);
             $k = $m->product?->konversiDisplay($m->qty_in ?? 0);
             $rows->push([

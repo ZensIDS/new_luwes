@@ -71,7 +71,14 @@
 <script>
 $(function () {
     $('#voucher-rafaksi-table, #bundling-table').each(function () {
-        $(this).DataTable({ pageLength: 25, order: [[0, 'asc']] });
+        // Baris kosong TIDAK dirender di <tbody>: satu <td colspan> membuat DataTables error.
+        // Pesan kosong ditangani DataTables lewat language.emptyTable.
+        $(this).DataTable({
+            pageLength: 25,
+            order: [[1, 'asc']],
+            columnDefs: [{ targets: [0, 10], orderable: false, searchable: false }],
+            language: { emptyTable: $(this).data('empty-message') || 'Belum ada data.' }
+        });
     });
 
     $('a[data-toggle="tab"]').on('shown.bs.tab', function (event) {

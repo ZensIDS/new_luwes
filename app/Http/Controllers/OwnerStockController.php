@@ -10,8 +10,10 @@ use App\Models\Product;
 use App\Models\StockMovement;
 use App\Models\Supplier;
 use App\Services\OutletStockService;
+use App\Services\OwnerKartuStokBuilder;
 use App\Support\OutletAccess;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Spatie\Activitylog\Models\Activity;
 
@@ -22,118 +24,211 @@ class OwnerStockController extends Controller
         $outlets = OutletAccess::outlets();
         $outletId = OutletAccess::id($request, false);
         $selectedOwner = $outletId ? Outlet::find($outletId) : null;
+        $outletIds = $outlets->pluck('id');
 
-        $categoryOptions = \App\Models\Category::orderBy('name')->pluck('name');
-        $locationOptions = Product::whereNotNull('lokasi')
-            ->where('lokasi', '!=', '')
+        return view('owner-stocks.index', [
+            'outlets' => $outlets,
+            'selectedOwner' => $selectedOwner,
+            'categoryOptions' => $this->categoryOptions(),
+            'locationOptions' => $this->locationOptions(),
+            'sourceOptions' => $this->sourceOptions($outletIds),
+            'supplierOptions' => $this->supplierOptions($outletIds),
+        ]);
+    }
+
+    /**
+     * Server-side DataTables untuk Stock Toko.
+     * Semua agregasi (saldo, masuk, keluar, adjustment, HPP rata-rata) dihitung di SQL,
+     * dan hanya satu halaman (maks 100 baris) yang dikirim ke browser.
+     */
+    public function getIndexData(Request $request)
+    {
+        $draw = (int) $request->input('draw');
+        $outletId = OutletAccess::id($request, false);
+
+        if (! $outletId) {
+            return response()->json(['draw' => $draw, 'recordsTotal' => 0, 'recordsFiltered' => 0, 'data' => []]);
+        }
+
+        $start = max((int) $request->input('start', 0), 0);
+        $length = (int) $request->input('length', 25);
+        $length = $length > 0 ? min($length, 100) : 25;
+        $searchValue = trim((string) $request->input('search.value', ''));
+        $orderDir = strtolower((string) $request->input('order.0.dir', 'asc')) === 'desc' ? 'desc' : 'asc';
+
+        // Index kolom DataTables (urutan kolom di owner-stocks/index.blade.php) -> alias kolom hasil agregasi.
+        $sortable = [
+            2 => 'product_code',
+            3 => 'product_name',
+            4 => 'category_name',
+            7 => 'hpp',
+            8 => 'qty_in_total',
+            9 => 'qty_out_total',
+            10 => 'adjustment_total',
+            11 => 'qty',
+            12 => 'expired_at',
+        ];
+        $orderBy = $sortable[(int) $request->input('order.0.column', 3)] ?? 'product_name';
+
+        $recordsTotal = DB::table('owner_stocks')
+            ->whereNull('deleted_at')
+            ->where('owner_id', $outletId)
             ->distinct()
-            ->orderBy('lokasi')
-            ->pluck('lokasi');
-        $sourceOptions = OwnerStock::whereIn('owner_id', $outlets->pluck('id'))
-            ->whereNotNull('source_type')
-            ->where('source_type', '!=', '')
-            ->distinct()
-            ->orderBy('source_type')
-            ->pluck('source_type');
-        $supplierOptions = Supplier::where(function ($query) {
-                $query->whereHas('pembelians.stocks')
-                    ->orWhereIn('id', \App\Models\OutletPurchase::query()->select('supplier_id'));
+            ->count('product_id');
+
+        // Total pergerakan per batch stok toko (sekali agregasi, bukan 4 subquery per baris).
+        $movementTotals = DB::table('stock_movements')
+            ->whereNotNull('owner_stock_id')
+            ->select('owner_stock_id')
+            ->selectRaw('SUM(qty_in) as m_in, SUM(qty_out) as m_out')
+            ->selectRaw("SUM(CASE WHEN type = 'adjustment' THEN qty_in ELSE 0 END) as adj_in")
+            ->selectRaw("SUM(CASE WHEN type = 'adjustment' THEN qty_out ELSE 0 END) as adj_out")
+            ->groupBy('owner_stock_id');
+
+        $base = DB::table('owner_stocks as os')
+            ->whereNull('os.deleted_at')
+            ->where('os.owner_id', $outletId)
+            ->leftJoin('products as p', function ($join) {
+                $join->on('p.id', '=', 'os.product_id')->whereNull('p.deleted_at');
             })
-            ->orderBy('name')
-            ->get(['id', 'name']);
+            ->leftJoin('categories as c', 'c.id', '=', 'p.category_id')
+            ->leftJoinSub($movementTotals, 'm', 'm.owner_stock_id', '=', 'os.id');
 
-        $stockRows = $outletId
-            ? OwnerStock::with(['owner', 'product.category', 'stock.pembelian.supplier'])
-                ->withSum('movements as qty_in_total', 'qty_in')
-                ->withSum('movements as qty_out_total', 'qty_out')
-                ->withSum(['movements as adjustment_in_total' => function ($query) {
-                    $query->where('type', 'adjustment');
-                }], 'qty_in')
-                ->withSum(['movements as adjustment_out_total' => function ($query) {
-                    $query->where('type', 'adjustment');
-                }], 'qty_out')
-                ->whereIn('owner_id', $outlets->pluck('id'))
-                ->when($outletId, fn ($query) => $query->where('owner_id', $outletId))
-                ->when($request->filled('search'), function ($query) use ($request) {
-                    $search = trim($request->search);
-                    $query->where(function ($searchQuery) use ($search) {
-                        $searchQuery->whereHas('product', fn ($productQuery) => $productQuery
-                            ->where('name', 'like', "%{$search}%")
-                            ->orWhere('code', 'like', "%{$search}%"))
-                            ->orWhere('batch_number', 'like', "%{$search}%");
-                        });
+        $supplierId = $request->input('supplier_id');
+        if ($supplierId) {
+            // Join tambahan hanya kalau filter supplier dipakai.
+            $base->leftJoin('stocks as st', 'st.id', '=', 'os.stock_id')
+                ->leftJoin('pembelians as pb', 'pb.id', '=', 'st.pembelian_id')
+                ->leftJoin('outlet_purchases as op', function ($join) {
+                    $join->on('op.id', '=', 'os.source_id')
+                        ->where('os.source_type', '=', OutletPurchase::class);
+                });
+        }
+
+        if ($request->filled('kategori')) {
+            $base->where('c.name', $request->kategori);
+        }
+        if ($request->filled('lokasi')) {
+            $base->where('p.lokasi', $request->lokasi);
+        }
+
+        if ($searchValue !== '') {
+            $words = array_slice(preg_split('/\s+/', $searchValue, -1, PREG_SPLIT_NO_EMPTY), 0, 5);
+            $base->where(function ($query) use ($words) {
+                foreach ($words as $word) {
+                    $query->where(function ($wordQuery) use ($word) {
+                        $wordQuery->where('p.name', 'like', "%{$word}%")
+                            ->orWhere('p.code', 'like', "%{$word}%")
+                            ->orWhere('os.batch_number', 'like', "%{$word}%");
+                    });
+                }
+            });
+        }
+
+        $sourceDistinct = "COUNT(DISTINCT CONCAT(COALESCE(os.source_type, ''), ':', COALESCE(os.source_id, '')))";
+        $expiredExpr = 'COALESCE(MIN(os.expired_at) < CURDATE(), 0)';
+
+        $grouped = $base
+            ->groupBy('os.owner_id', 'os.product_id', 'p.code', 'p.name', 'p.satuan', 'p.lokasi', 'c.name')
+            ->select('os.owner_id', 'os.product_id')
+            ->selectRaw('p.code as product_code, p.name as product_name, p.satuan as satuan, p.lokasi as lokasi, c.name as category_name')
+            ->selectRaw('SUM(os.qty) as qty')
+            ->selectRaw('CASE WHEN SUM(os.qty) > 0 THEN SUM(os.qty * os.hpp) / SUM(os.qty) ELSE MAX(os.hpp) END as hpp')
+            ->selectRaw('COUNT(*) as batch_count')
+            ->selectRaw('COALESCE(SUM(m.m_in), 0) as qty_in_total')
+            ->selectRaw('COALESCE(SUM(m.m_out), 0) as qty_out_total')
+            ->selectRaw('COALESCE(SUM(m.adj_in), 0) - COALESCE(SUM(m.adj_out), 0) as adjustment_total')
+            ->selectRaw('MIN(os.expired_at) as expired_at')
+            ->selectRaw('MIN(os.source_type) as source_type, MIN(os.source_id) as source_id')
+            ->selectRaw("{$sourceDistinct} as source_count");
+
+        if ($supplierId) {
+            $grouped->havingRaw('SUM(CASE WHEN COALESCE(pb.supplier_id, op.supplier_id) = ? THEN 1 ELSE 0 END) > 0', [$supplierId]);
+        }
+
+        if ($request->filled('sumber')) {
+            if ($request->sumber === 'multiple') {
+                $grouped->havingRaw("{$sourceDistinct} > 1");
+            } else {
+                $grouped->havingRaw("{$sourceDistinct} = 1 AND MIN(os.source_type) = ?", [$request->sumber]);
+            }
+        }
+
+        $status = $request->input('status');
+        if ($status === 'expired') {
+            $grouped->havingRaw("{$expiredExpr} = 1");
+        } elseif ($status === 'available') {
+            $grouped->havingRaw("{$expiredExpr} = 0 AND SUM(os.qty) > 0");
+        } elseif ($status === 'empty') {
+            $grouped->havingRaw("{$expiredExpr} = 0 AND SUM(os.qty) <= 0");
+        }
+
+        $recordsFiltered = DB::query()->fromSub($grouped, 'g')->count();
+
+        $rows = DB::query()->fromSub($grouped, 'g')
+            ->orderByRaw("g.{$orderBy} {$orderDir}") // $orderBy dari whitelist, $orderDir sudah divalidasi
+            ->orderBy('g.product_id', $orderDir)
+            ->offset($start)
+            ->limit($length)
+            ->get();
+
+        // Nama supplier hanya dicari untuk produk di halaman ini (maks 100 produk).
+        $supplierMap = collect();
+        if ($rows->isNotEmpty()) {
+            $supplierMap = DB::table('owner_stocks as os')
+                ->whereNull('os.deleted_at')
+                ->where('os.owner_id', $outletId)
+                ->whereIn('os.product_id', $rows->pluck('product_id'))
+                ->leftJoin('stocks as st', 'st.id', '=', 'os.stock_id')
+                ->leftJoin('pembelians as pb', 'pb.id', '=', 'st.pembelian_id')
+                ->leftJoin('outlet_purchases as op', function ($join) {
+                    $join->on('op.id', '=', 'os.source_id')
+                        ->where('os.source_type', '=', OutletPurchase::class);
                 })
-                ->when($request->filled('kategori'), fn ($query) => $query->whereHas('product.category', fn ($categoryQuery) => $categoryQuery->where('name', $request->kategori)))
-                ->when($request->filled('lokasi'), fn ($query) => $query->whereHas('product', fn ($productQuery) => $productQuery->where('lokasi', $request->lokasi)))
-                ->when($request->filled('sumber'), fn ($query) => $query->where('source_type', $request->sumber))
-                ->when($request->input('status') === 'available', fn ($query) => $query->where('qty', '>', 0)->where(function ($dateQuery) {
-                    $dateQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
-                }))
-                ->when($request->input('status') === 'empty', fn ($query) => $query->where('qty', '<=', 0))
-                ->when($request->input('status') === 'expired', fn ($query) => $query->whereDate('expired_at', '<', today()))
-                ->orderBy('product_id')
-                ->orderBy('created_at')
+                ->join('suppliers as su', 'su.id', '=', DB::raw('COALESCE(pb.supplier_id, op.supplier_id)'))
+                ->select('os.product_id', 'su.name as supplier_name')
+                ->distinct()
                 ->get()
-            : collect();
+                ->groupBy('product_id')
+                ->map(fn ($items) => $items->pluck('supplier_name')->sort()->join(', '));
+        }
 
-        $directPurchaseSupplierMap = $stockRows->filter(fn ($row) => $row->source_type === \App\Models\OutletPurchase::class && $row->source_id)
-            ->pluck('source_id')
-            ->unique()
-            ->pipe(fn ($ids) => $ids->isNotEmpty()
-                ? \App\Models\OutletPurchase::whereIn('id', $ids)->pluck('supplier_id', 'id')
-                : collect());
+        $outletName = Outlet::whereKey($outletId)->value('name');
+        $today = today()->toDateString();
 
-        // The operational stock view is product-based. Batch rows remain
-        // available in the stock card, but duplicate product codes must not
-        // make the outlet balance look fragmented.
-        $stocks = $stockRows->groupBy(fn ($row) => $row->owner_id . ':' . $row->product_id)->map(function ($rows) use ($directPurchaseSupplierMap, $supplierOptions) {
-            $first = $rows->first();
-            $qty = (int) $rows->sum('qty');
-            $qtyIn = (int) $rows->sum('qty_in_total');
-            $qtyOut = (int) $rows->sum('qty_out_total');
-            $adjustment = (int) $rows->sum('adjustment_in_total') - (int) $rows->sum('adjustment_out_total');
-            $cost = $rows->sum(fn ($row) => (int) $row->qty * (float) $row->hpp);
-            $sources = $rows->map(fn ($row) => [$row->source_type, $row->source_id])
-                ->unique(fn ($source) => implode(':', $source))
-                ->values();
-            $supplierIds = $rows->map(fn ($row) => $row->stock?->pembelian?->supplier_id
-                ?: ($row->source_type === \App\Models\OutletPurchase::class ? $directPurchaseSupplierMap->get($row->source_id) : null))
-                ->filter()
-                ->unique()
-                ->values();
+        $data = $rows->map(function ($row) use ($supplierMap, $outletName, $today) {
+            $expiredAt = $row->expired_at ? substr((string) $row->expired_at, 0, 10) : null;
+            $qty = (int) $row->qty;
+            $single = (int) $row->source_count <= 1;
 
-            return (object) [
-                'product_id' => $first->product_id,
-                'owner_id' => $first->owner_id,
-                'owner' => $first->owner,
-                'product' => $first->product,
-                'category' => $first->product?->category?->name,
-                'lokasi' => $first->product?->lokasi,
-                'supplier_ids' => $supplierIds->all(),
-                'suppliers' => $supplierIds->map(fn ($id) => $supplierOptions->firstWhere('id', $id)?->name)->filter()->join(', '),
-                'batch_number' => $rows->pluck('batch_number')->filter()->unique()->join(', '),
-                'batch_count' => $rows->count(),
-                'hpp' => $qty > 0 ? $cost / $qty : (float) $first->hpp,
+            return [
+                'owner_id' => (int) $row->owner_id,
+                'product_id' => (int) $row->product_id,
+                'outlet' => $outletName ?? '-',
+                'code' => $row->product_code ?? '-',
+                'name' => $row->product_name ?? '-',
+                'category' => $row->category_name ?: '-',
+                'suppliers' => $supplierMap->get($row->product_id) ?: '-',
+                'source_type' => $single ? $row->source_type : 'multiple',
+                'source_id' => $single ? $row->source_id : null,
+                'batch_count' => (int) $row->batch_count,
+                'hpp' => (float) $row->hpp,
+                'qty_in' => (int) $row->qty_in_total,
+                'qty_out' => (int) $row->qty_out_total,
+                'adjustment' => (int) $row->adjustment_total,
                 'qty' => $qty,
-                'qty_in_total' => $qtyIn,
-                'qty_out_total' => $qtyOut,
-                'adjustment_in_total' => (int) $rows->sum('adjustment_in_total'),
-                'adjustment_out_total' => (int) $rows->sum('adjustment_out_total'),
-                'source_type' => $sources->count() === 1 ? $sources[0][0] : 'multiple',
-                'source_id' => $sources->count() === 1 ? $sources[0][1] : null,
-                'expired_at' => $rows->pluck('expired_at')->filter()->sort()->first(),
+                'satuan' => $row->satuan ?? '',
+                'expired_at' => $expiredAt,
+                'status' => $expiredAt && $expiredAt < $today ? 'expired' : ($qty > 0 ? 'available' : 'empty'),
             ];
-        })->sortBy(fn ($stock) => ($stock->owner?->name ?? '') . ' ' . ($stock->product?->name ?? ''))->values();
+        });
 
-        return view('owner-stocks.index', compact(
-            'outlets',
-            'selectedOwner',
-            'stocks',
-            'categoryOptions',
-            'locationOptions',
-            'sourceOptions',
-            'supplierOptions'
-        ));
+        return response()->json([
+            'draw' => $draw,
+            'recordsTotal' => $recordsTotal,
+            'recordsFiltered' => $recordsFiltered,
+            'data' => $data->values(),
+        ]);
     }
 
     public function show(Request $request, Outlet $owner)
@@ -155,25 +250,17 @@ class OwnerStockController extends Controller
             ->where('product_id', $request->product_id)
             ->pluck('id');
 
-        $activities = OwnerStock::whereIn('id', $stockIds)
+        $activities = Activity::where('subject_type', (new OwnerStock)->getMorphClass())
+            ->whereIn('subject_id', $stockIds)
+            ->with('causer')
+            ->orderBy('created_at')
             ->get()
-            ->flatMap(fn ($stock) => Activity::forSubject($stock)
-                ->with('causer')
-                ->orderBy('created_at')
-                ->get()
-                ->map(fn ($activity) => [
-                    'date' => optional($activity->created_at)->format('d M Y H:i'),
-                    'created_at' => optional($activity->created_at)->timestamp ?? 0,
-                    'user' => $activity->causer?->name ?? 'System',
-                    'event' => $activity->event,
-                    'properties' => $activity->properties,
-                ]))
-            ->sortBy(fn ($activity) => $activity['created_at'] ?? $activity['date'])
-            ->map(function ($activity) {
-                unset($activity['created_at']);
-
-                return $activity;
-            })
+            ->map(fn ($activity) => [
+                'date' => optional($activity->created_at)->format('d M Y H:i'),
+                'user' => $activity->causer?->name ?? 'System',
+                'event' => $activity->event,
+                'properties' => $activity->properties,
+            ])
             ->values();
 
         $purchaseItems = OutletPurchaseItem::with(['purchase.creator'])
@@ -253,43 +340,76 @@ class OwnerStockController extends Controller
     public function kartu(Request $request)
     {
         $outlets = OutletAccess::outlets();
-        $suppliers = Supplier::where(function ($query) {
-                $query->whereHas('pembelians.stocks', fn ($stockQuery) => $stockQuery->whereNotNull('sku'))
-                    ->orWhereIn('id', \App\Models\OutletPurchase::query()->select('supplier_id'));
-            })
-            ->orderBy('name')
-            ->get(['id', 'name']);
         $outletId = OutletAccess::id($request, false);
         $selectedOwner = $outletId ? Outlet::find($outletId) : null;
-        $ownerIds = $outlets->pluck('id');
-        $products = Product::with('category')
-            ->whereHas('ownerStocks', function ($query) use ($ownerIds, $selectedOwner, $request) {
-                $query->whereIn('owner_id', $ownerIds)
-                    ->when($selectedOwner, fn ($ownerQuery) => $ownerQuery->where('owner_id', $selectedOwner->id));
+
+        // Daftar produk TIDAK lagi dimuat ke halaman. Produk dicari lewat AJAX
+        // (searchKartuProducts), sama seperti Kartu Stok Gudang. Yang dimuat hanya
+        // satu produk kalau halaman dibuka dari tombol "Kartu" di menu Stock Toko.
+        $selectedProduct = $request->filled('product_id')
+            ? Product::select(['id', 'code', 'name'])->find($request->product_id)
+            : null;
+
+        return view('owner-stocks.kartu', [
+            'outlets' => $outlets,
+            'selectedOwner' => $selectedOwner,
+            'selectedProduct' => $selectedProduct,
+            'suppliers' => $this->supplierOptions($this->scopeOutletIds($outlets, $selectedOwner)),
+            'categoryOptions' => $this->categoryOptions(),
+            'locationOptions' => $this->locationOptions(),
+        ]);
+    }
+
+    /**
+     * Select2 AJAX untuk Kartu Stock Toko (padanan StockController::searchStock di gudang).
+     * Hanya mengembalikan 20 produk per halaman, tanpa COUNT(*) (cukup ambil 1 baris ekstra).
+     */
+    public function searchKartuProducts(Request $request)
+    {
+        $request->validate([
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+            'supplier_id' => 'nullable|integer|exists:suppliers,id',
+        ]);
+
+        $search = trim((string) $request->get('q', ''));
+        $page = max((int) $request->get('page', 1), 1);
+        $perPage = 20;
+
+        $outletId = OutletAccess::id($request, false);
+        $outletIds = OutletAccess::outlets()->pluck('id');
+
+        $query = Product::query()
+            ->whereHas('ownerStocks', function ($ownerQuery) use ($outletIds, $outletId, $request) {
+                $ownerQuery->whereIn('owner_id', $outletIds)
+                    ->when($outletId, fn ($q) => $q->where('owner_id', $outletId));
+
                 if ($request->filled('supplier_id')) {
-                    $this->applySupplierFilter($query, $request->supplier_id);
+                    $this->applySupplierFilter($ownerQuery, $request->supplier_id);
                 }
             })
-            ->when($request->filled('kategori'), fn ($query) => $query->whereHas('category', fn ($categoryQuery) => $categoryQuery->where('name', $request->kategori)))
-            ->when($request->filled('lokasi'), fn ($query) => $query->where('lokasi', $request->lokasi))
+            ->when($request->filled('kategori'), fn ($q) => $q->whereHas('category', fn ($categoryQuery) => $categoryQuery->where('name', $request->kategori)))
+            ->when($request->filled('lokasi'), fn ($q) => $q->where('lokasi', $request->lokasi));
+
+        if ($search !== '') {
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('code', 'like', "{$search}%");
+            });
+        }
+
+        $rows = $query
             ->orderBy('name')
-            ->get(['id', 'code', 'name', 'category_id', 'lokasi', 'konversi_qty', 'satuan_besar', 'satuan']);
+            ->skip(($page - 1) * $perPage)
+            ->take($perPage + 1)
+            ->get(['id', 'code', 'name']);
 
-        $categoryOptions = \App\Models\Category::orderBy('name')->pluck('name');
-        $locationOptions = Product::whereNotNull('lokasi')
-            ->where('lokasi', '!=', '')
-            ->distinct()
-            ->orderBy('lokasi')
-            ->pluck('lokasi');
-
-        return view('owner-stocks.kartu', compact(
-            'outlets',
-            'selectedOwner',
-            'products',
-            'suppliers',
-            'categoryOptions',
-            'locationOptions'
-        ));
+        return response()->json([
+            'results' => $rows->take($perPage)->map(fn ($product) => [
+                'id' => $product->id,
+                'text' => "{$product->name} | {$product->code}",
+            ])->values(),
+            'pagination' => ['more' => $rows->count() > $perPage],
+        ]);
     }
 
     public function getKartuData(Request $request)
@@ -297,115 +417,89 @@ class OwnerStockController extends Controller
         $request->validate([
             'outlet_id' => 'nullable|integer|exists:outlets,id',
             'product_id' => 'required|integer|exists:products,id',
+        ], [
+            'product_id.required' => 'Produk harus dipilih.',
+            'product_id.exists' => 'Produk yang dipilih tidak ditemukan.',
         ]);
+
         $outletId = OutletAccess::id($request, false);
         $outletIds = OutletAccess::outlets()->pluck('id');
         $product = Product::findOrFail($request->product_id);
-        $stocks = OwnerStock::with(['stock', 'owner'])
-            ->whereIn('owner_id', $outletIds)
-            ->when($outletId, fn ($query) => $query->where('owner_id', $outletId))
-            ->where('product_id', $product->id)
-            ->orderBy('created_at')
-            ->orderBy('id')
-            ->get();
-        $stockIds = $stocks->pluck('id');
 
-        $running = 0;
-        $transactions = StockMovement::whereIn('owner_id', $outletIds)
-            ->when($outletId, fn ($query) => $query->where('owner_id', $outletId))
-            ->where('product_id', $product->id)
-            ->whereIn('owner_stock_id', $stockIds)
-            ->with('owner')
-            ->orderBy('created_at')
-            ->orderBy('id')
-            ->get()
-            ->map(function ($movement) use (&$running) {
-                $running += (int) $movement->qty_in - (int) $movement->qty_out;
-
-                return [
-                    'date' => optional($movement->created_at)->format('Y-m-d H:i'),
-                    'type' => $movement->type,
-                    'outlet' => $movement->owner?->name ?? '-',
-                    'reference_type' => $movement->reference_type,
-                    'is_return' => $movement->reference_type === \App\Models\RefundPembelian::class
-                        || str_contains(strtolower((string) $movement->notes), 'retur'),
-                    'qty_in' => (int) $movement->qty_in,
-                    'qty_out' => (int) $movement->qty_out,
-                    'balance' => $running,
-                    'notes' => $movement->notes,
-                ];
-            });
-
-        return response()->json([
-            'product' => $product->only(['id', 'code', 'name', 'satuan', 'konversi_qty', 'satuan_besar']),
-            'summary' => [
-                'qty' => (int) $stocks->sum('qty'),
-                'batches' => $stocks->map(fn ($stock) => [
-                    'id' => $stock->id,
-                    'batch_number' => $stock->batch_number,
-                    'qty' => (int) $stock->qty,
-                    'hpp' => (float) $stock->hpp,
-                    'expired_at' => optional($stock->expired_at)->toDateString(),
-                    'serial_number' => $stock->stock?->serial_number,
-                    'outlet' => $stock->owner?->name ?? '-',
-                ])->values(),
-            ],
-            'transactions' => $transactions->values(),
-        ]);
+        return response()->json(
+            app(OwnerKartuStokBuilder::class)->build($product, $outletIds, $outletId)
+        );
     }
 
     public function opname(Request $request)
     {
         $outlets = OutletAccess::outlets();
-        $suppliers = Supplier::where(function ($query) {
-                $query->whereHas('pembelians.stocks', fn ($stockQuery) => $stockQuery->whereNotNull('sku'))
-                    ->orWhereIn('id', \App\Models\OutletPurchase::query()->select('supplier_id'));
-            })
-            ->orderBy('name')
-            ->get(['id', 'name']);
         $outletId = OutletAccess::id($request, false);
         $selectedOwner = $outletId ? Outlet::find($outletId) : null;
-        $categoryOptions = \App\Models\Category::orderBy('name')->pluck('name');
-        $locationOptions = Product::whereNotNull('lokasi')
-            ->where('lokasi', '!=', '')
-            ->distinct()
-            ->orderBy('lokasi')
-            ->pluck('lokasi');
 
-        return view('owner-stocks.opname', compact('outlets', 'suppliers', 'selectedOwner', 'categoryOptions', 'locationOptions'));
+        return view('owner-stocks.opname', [
+            'outlets' => $outlets,
+            'selectedOwner' => $selectedOwner,
+            'suppliers' => $this->supplierOptions($this->scopeOutletIds($outlets, $selectedOwner), true),
+            'categoryOptions' => $this->categoryOptions(),
+            'locationOptions' => $this->locationOptions(),
+        ]);
     }
 
+    /**
+     * Sama seperti opname gudang: supplier WAJIB dipilih dulu, baru stok supplier itu dimuat.
+     * Tanpa supplier, seluruh stok outlet (bisa ratusan ribu baris) tidak akan pernah dikirim ke browser.
+     */
     public function getOpnameData(Request $request)
     {
         $request->validate([
             'outlet_id' => 'required|integer|exists:outlets,id',
-            'supplier_id' => 'nullable|integer|exists:suppliers,id',
+            'supplier_id' => 'required|integer|exists:suppliers,id',
             'kategori' => 'nullable|string',
             'lokasi' => 'nullable|string',
+        ], [
+            'supplier_id.required' => 'Supplier harus dipilih.',
+            'supplier_id.exists' => 'Supplier yang dipilih tidak ditemukan.',
         ]);
         $outletId = OutletAccess::id($request);
 
-        $stocks = OwnerStock::with(['product.category', 'stock.pembelian.supplier'])
-            ->where('owner_id', $outletId)
-            ->when($request->filled('supplier_id'), fn ($query) => $this->applySupplierFilter($query, $request->supplier_id))
-            ->when($request->filled('kategori'), fn ($query) => $query->whereHas('product.category', fn ($categoryQuery) => $categoryQuery->where('name', $request->kategori)))
-            ->when($request->filled('lokasi'), fn ($query) => $query->whereHas('product', fn ($productQuery) => $productQuery->where('lokasi', $request->lokasi)))
-            ->orderBy('product_id')
-            ->orderBy('created_at')
-            ->get()
+        $stocks = DB::table('owner_stocks as os')
+            ->whereNull('os.deleted_at')
+            ->where('os.owner_id', $outletId)
+            // Produk sudah dihapus -> skip dari opname (sama seperti gudang).
+            ->join('products as p', function ($join) {
+                $join->on('p.id', '=', 'os.product_id')->whereNull('p.deleted_at');
+            })
+            ->leftJoin('categories as c', 'c.id', '=', 'p.category_id')
+            ->leftJoin('stocks as st', 'st.id', '=', 'os.stock_id')
+            ->leftJoin('pembelians as pb', 'pb.id', '=', 'st.pembelian_id')
+            ->leftJoin('outlet_purchases as op', function ($join) {
+                $join->on('op.id', '=', 'os.source_id')
+                    ->where('os.source_type', '=', OutletPurchase::class);
+            })
+            ->whereRaw('COALESCE(pb.supplier_id, op.supplier_id) = ?', [$request->supplier_id])
+            ->when($request->filled('kategori'), fn ($query) => $query->where('c.name', $request->kategori))
+            ->when($request->filled('lokasi'), fn ($query) => $query->where('p.lokasi', $request->lokasi))
+            ->orderBy('os.product_id')
+            ->orderBy('os.created_at')
+            ->orderBy('os.id')
+            ->get([
+                'os.id', 'os.product_id', 'os.batch_number', 'os.qty', 'os.hpp',
+                'p.name as product_name', 'p.code as product_code', 'p.satuan', 'p.lokasi',
+                'c.name as category_name', 'st.serial_number',
+            ])
             ->map(fn ($stock) => [
                 'id' => $stock->id,
                 'product_id' => $stock->product_id,
-                'product_name' => $stock->product?->name,
-                'product_code' => $stock->product?->code,
+                'product_name' => $stock->product_name,
+                'product_code' => $stock->product_code,
                 'batch_number' => $stock->batch_number,
-                'serial_number' => $stock->stock?->serial_number,
+                'serial_number' => $stock->serial_number,
                 'qty' => (int) $stock->qty,
                 'hpp' => (float) $stock->hpp,
-                'satuan' => $stock->product?->satuan ?? 'pcs',
-                'supplier' => $stock->stock?->pembelian?->supplier?->name ?? '-',
-                'kategori' => $stock->product?->category?->name ?? '-',
-                'lokasi' => $stock->product?->lokasi ?? '-',
+                'satuan' => $stock->satuan ?? 'pcs',
+                'kategori' => $stock->category_name ?? '-',
+                'lokasi' => $stock->lokasi ?? '-',
             ]);
 
         return response()->json(['stocks' => $stocks->values()]);
@@ -415,25 +509,41 @@ class OwnerStockController extends Controller
     {
         $request->validate([
             'outlet_id' => 'required|integer|exists:outlets,id',
-            'supplier_id' => 'nullable|integer|exists:suppliers,id',
+            'supplier_id' => 'required|integer|exists:suppliers,id',
             'adjustment_date' => 'required|date',
             'items' => 'required|array|min:1',
             'items.*.owner_stock_id' => 'required|exists:owner_stocks,id',
             'items.*.physical_qty' => 'required|numeric|min:0',
             'items.*.keterangan' => 'nullable|string',
+        ], [
+            'supplier_id.required' => 'Supplier harus dipilih.',
+            'adjustment_date.required' => 'Tanggal penyesuaian harus diisi.',
+            'adjustment_date.date' => 'Tanggal penyesuaian harus berupa tanggal yang valid.',
+            'items.required' => 'Item harus diisi.',
+            'items.*.owner_stock_id.exists' => 'Stok yang dipilih tidak ditemukan.',
+            'items.*.physical_qty.required' => 'Stok fisik harus diisi.',
+            'items.*.physical_qty.numeric' => 'Stok fisik harus berupa angka.',
         ]);
         $outletId = OutletAccess::id($request);
 
-        DB::transaction(function () use ($request, $outletId, $stockService) {
+        // Semua batch diambil dalam 1 query (bukan 1 query per item), sekaligus
+        // memastikan batch memang milik outlet & supplier yang dipilih.
+        $ownerStockQuery = OwnerStock::where('owner_id', $outletId)
+            ->whereIn('id', collect($request->items)->pluck('owner_stock_id')->unique()->values());
+        $this->applySupplierFilter($ownerStockQuery, $request->supplier_id);
+        $ownerStocks = $ownerStockQuery->get()->keyBy('id');
+
+        DB::transaction(function () use ($request, $ownerStocks, $stockService) {
             foreach ($request->items as $item) {
-                $ownerStock = OwnerStock::where('owner_id', $outletId)
-                    ->whereKey($item['owner_stock_id'])
-                    ->when($request->filled('supplier_id'), fn ($query) => $this->applySupplierFilter($query, $request->supplier_id))
-                    ->firstOrFail();
-                $physicalQty = (float) $item['physical_qty'];
+                $ownerStock = $ownerStocks->get((int) $item['owner_stock_id']);
+
+                abort_unless($ownerStock, 422, 'Ada batch stok yang bukan milik outlet / supplier yang dipilih.');
+
+                // adjust() mengunci baris, menghitung selisih terhadap qty terbaru,
+                // dan tidak mencatat apa pun kalau selisihnya 0.
                 $stockService->adjust(
                     $ownerStock,
-                    $physicalQty,
+                    (float) $item['physical_qty'],
                     $request->adjustment_date,
                     $item['keterangan'] ?? null,
                     auth()->user()
@@ -442,6 +552,75 @@ class OwnerStockController extends Controller
         });
 
         return response()->json(['success' => true, 'message' => 'Stock opname toko berhasil disimpan.']);
+    }
+
+    /**
+     * Outlet yang dipakai untuk menyaring daftar supplier: outlet terpilih, atau semua outlet yang boleh diakses.
+     */
+    protected function scopeOutletIds($outlets, ?Outlet $selectedOwner)
+    {
+        return $selectedOwner ? collect([$selectedOwner->id]) : $outlets->pluck('id');
+    }
+
+    protected function categoryOptions()
+    {
+        return collect(Cache::remember('owner-stock:categories', 600, fn () => \App\Models\Category::orderBy('name')->pluck('name')->all()));
+    }
+
+    protected function locationOptions()
+    {
+        return collect(Cache::remember('owner-stock:locations', 600, fn () => Product::whereNotNull('lokasi')
+            ->where('lokasi', '!=', '')
+            ->distinct()
+            ->orderBy('lokasi')
+            ->pluck('lokasi')
+            ->all()));
+    }
+
+    protected function sourceOptions($outletIds)
+    {
+        $key = 'owner-stock:sources:' . md5($outletIds->sort()->implode(','));
+
+        return collect(Cache::remember($key, 600, fn () => OwnerStock::whereIn('owner_id', $outletIds)
+            ->whereNotNull('source_type')
+            ->where('source_type', '!=', '')
+            ->distinct()
+            ->orderBy('source_type')
+            ->pluck('source_type')
+            ->all()));
+    }
+
+    /**
+     * Supplier yang benar-benar punya stok / belanja langsung di outlet yang boleh diakses user.
+     * Sebelumnya memakai whereHas('pembelians.stocks') yang menyisir seluruh stok gudang.
+     */
+    protected function supplierOptions($outletIds, bool $requireSku = false)
+    {
+        $key = 'owner-stock:suppliers:' . md5($outletIds->sort()->implode(',')) . ($requireSku ? ':sku' : '');
+
+        $rows = Cache::remember($key, 600, function () use ($outletIds, $requireSku) {
+            $fromWarehouse = DB::table('owner_stocks as os')
+                ->join('stocks as st', 'st.id', '=', 'os.stock_id')
+                ->join('pembelians as pb', 'pb.id', '=', 'st.pembelian_id')
+                ->whereNull('os.deleted_at')
+                ->whereIn('os.owner_id', $outletIds)
+                ->when($requireSku, fn ($query) => $query->whereNotNull('st.sku'))
+                ->distinct()
+                ->pluck('pb.supplier_id');
+
+            $direct = DB::table('outlet_purchases')
+                ->whereIn('outlet_id', $outletIds)
+                ->distinct()
+                ->pluck('supplier_id');
+
+            return Supplier::whereIn('id', $fromWarehouse->merge($direct)->filter()->unique()->values())
+                ->orderBy('name')
+                ->get(['id', 'name'])
+                ->map(fn ($supplier) => ['id' => $supplier->id, 'name' => $supplier->name])
+                ->all();
+        });
+
+        return collect($rows)->map(fn ($row) => (object) $row);
     }
 
     /**

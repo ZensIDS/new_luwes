@@ -3,6 +3,7 @@
 namespace App\Exports;
 
 use App\Models\StockMovement;
+use App\Support\ReportQuery;
 use Illuminate\Http\Request;
 use Maatwebsite\Excel\Concerns\Exportable;
 use Maatwebsite\Excel\Concerns\FromCollection;
@@ -34,12 +35,14 @@ class LaporanBarangKeluarExport implements FromCollection, WithHeadings, WithTit
         $mulai   = $this->request->input('tanggal_mulai');
         $selesai = $this->request->input('tanggal_selesai');
 
-        $movements = StockMovement::with(['product'])
-            ->where('qty_out', '>', 0)
-            ->when($mulai, fn ($q) => $q->whereDate('created_at', '>=', $mulai))
-            ->when($selesai, fn ($q) => $q->whereDate('created_at', '<=', $selesai))
-            ->orderBy('created_at')
-            ->get();
+        $movements = ReportQuery::betweenDates(
+            StockMovement::with(['product'])->where('qty_out', '>', 0),
+            'created_at', $mulai, $selesai
+        )->orderBy('created_at')->get();
+
+        $refs = ReportQuery::resolveReferences($movements, [
+            \App\Models\DeliveryOrder::class => ['owner', 'requestOrder.owner'],
+        ]);
 
         $rows = collect();
         $no = 1;
@@ -48,11 +51,9 @@ class LaporanBarangKeluarExport implements FromCollection, WithHeadings, WithTit
             $docCode = '-';
             $tujuan  = '-';
 
-            if ($m->reference_type && $m->reference_id) {
-                $ref = $m->reference_type::find($m->reference_id);
-                $docCode = $ref?->code ?? '-';
-                $tujuan = $ref?->owner?->name ?? $ref?->requestOrder?->owner?->name ?? '-';
-            }
+            $ref = ReportQuery::ref($refs, $m);
+            $docCode = $ref?->code ?? '-';
+            $tujuan = $ref?->owner?->name ?? $ref?->requestOrder?->owner?->name ?? '-';
 
             preg_match('/SKU:\s*(\S+)/', $m->notes ?? '', $matches);
             $batch = $matches[1] ?? '-';

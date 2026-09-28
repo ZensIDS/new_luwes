@@ -10,7 +10,6 @@ use App\Models\PembelianProduct;
 use App\Models\PembelianTransaction;
 use App\Models\Product;
 use App\Models\Stock;
-use App\Support\IndonesianNumber;
 use App\Models\StockMovement;
 use App\Models\StockPembelian;
 use App\Models\Supplier;
@@ -71,7 +70,7 @@ class PembelianController extends Controller
                 $effectiveMin = $product->effective_min_stock;   // ← compute once
                 $product->stock_count      = $currentStock;
                 $product->effective_min    = $effectiveMin;      // ← expose as 'effective_min'
-                $product->is_under_minimum = $currentStock < $effectiveMin;
+                $product->is_under_minimum = $currentStock <= $effectiveMin;
 
                 return $product;
             });
@@ -260,37 +259,11 @@ class PembelianController extends Controller
             abort(403);
         }
 
-        // Open the input form first. The PO is created only after the user
-        // submits it, so clicking "Buat PO Baru" does not create an empty PO.
-        return view('pembelians.create', [
-            'kas' => Kas::get(),
-            'outlets' => Outlet::get(),
-            'suppliers' => Supplier::orderBy('name')->get(),
-            'products' => collect(),
-        ]);
-    }
-
-    /**
-     * Create the draft used by the create page's autosave flow.
-     *
-     * The draft is created lazily by the browser after the user starts
-     * entering a supplier or product, so merely opening the create page does
-     * not leave an empty purchase order behind.
-     */
-    public function createDraft(Request $request)
-    {
-        if (auth()->user()->role === 'owner') {
-            abort(403);
-        }
-
-        $data = $request->validate([
-            'supplier_id' => 'nullable|exists:suppliers,id',
-        ]);
-
-        $supplierId = $data['supplier_id'] ?? null;
+        // Langsung insert ke DB (draft), lalu redirect ke halaman edit — create dan edit
+        // jadi satu alur yang sama dengan autosave, meniru pola Request Order.
         $pembelian = Pembelian::create([
-            'code' => $supplierId ? $this->generatePoCode((int) $supplierId) : null,
-            'supplier_id' => $supplierId,
+            'code' => null,
+            'supplier_id' => null,
             'total' => 0,
             'is_published' => false,
             'owner_approval_status' => 'approved',
@@ -299,15 +272,7 @@ class PembelianController extends Controller
             'owner_approval_note' => null,
         ]);
 
-        return response()->json([
-            'status' => 'ok',
-            'id' => $pembelian->id,
-            'code' => $pembelian->code,
-            'autosave_header_url' => route('pembelian.autosave-header', $pembelian),
-            'autosave_item_url' => route('pembelian.autosave-item', $pembelian),
-            'edit_url' => route('pembelian.edit', $pembelian),
-            'finish_url' => route('pembelian.finish', $pembelian),
-        ], 201);
+        return redirect()->route('pembelian.edit', $pembelian);
     }
 
     public function autosaveHeader(Request $request, Pembelian $pembelian)
@@ -531,20 +496,6 @@ class PembelianController extends Controller
         if ($pembelian->pembelianProducts()->count() === 0) {
             return back()->with('toast_error', 'Minimal harus ada 1 item produk.');
         }
-
-        $supplier = $pembelian->supplier;
-        $pembelian->pembelianTransaction()->firstOrCreate([
-            'pembelian_id' => $pembelian->id,
-        ], [
-            'payment_date' => null,
-            'payment_method' => 'bank_transfer',
-            'payment_reference' => $supplier?->bank_no_rek && $supplier?->bank_nama
-                ? $supplier->bank_no_rek . '-' . $supplier->bank_nama
-                : 'TRX-' . now()->format('YmdHis'),
-            'amount' => 0,
-            'status' => 'unpaid',
-            'notes' => null,
-        ]);
 
         return redirect()->route('pembelian.index')->with('toast_success', 'Berhasil Menyimpan Data!');
     }
@@ -1505,7 +1456,6 @@ class PembelianController extends Controller
 
         $currentAmount = $pembelian->pembelianTransaction?->amount ?? 0;
         $maxAmount = $pembelian->total - $currentAmount;
-        $request->merge(['amount' => IndonesianNumber::parse($request->input('amount'))]);
 
         $request->validate([
             'payment_date'      => 'required|date',

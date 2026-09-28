@@ -1,5 +1,5 @@
 <div class="table-responsive">
-    <table id="{{ $tableId }}" class="table table-bordered table-striped">
+    <table id="{{ $tableId }}" class="table table-bordered table-striped" data-empty-message="{{ $emptyMessage }}">
         <thead>
             <tr>
                 <th class="text-center">@if ($allowPrintSelection ?? true)<input type="checkbox" class="voucher-select-all" title="Pilih semua di halaman ini">@endif</th>
@@ -16,7 +16,7 @@
             </tr>
         </thead>
         <tbody>
-            @forelse ($campaigns as $campaign)
+            @foreach ($campaigns as $campaign)
                 @php
                     $isVoucher = $campaign->campaign_kind === 'voucher';
                     $voucherItems = $isVoucher ? ($campaign->voucher_group_items ?? collect([$campaign])) : collect();
@@ -104,11 +104,7 @@
                         @endif
                     </td>
                 </tr>
-            @empty
-                <tr>
-                    <td colspan="11" class="text-center text-muted">{{ $emptyMessage }}</td>
-                </tr>
-            @endforelse
+            @endforeach
         </tbody>
     </table>
 </div>

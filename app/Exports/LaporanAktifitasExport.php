@@ -4,6 +4,7 @@ namespace App\Exports;
 
 use App\Models\StockMovement;
 use Carbon\Carbon;
+use App\Support\ReportQuery;
 use Illuminate\Http\Request;
 use Maatwebsite\Excel\Concerns\Exportable;
 use Maatwebsite\Excel\Concerns\FromCollection;
@@ -48,17 +49,17 @@ class LaporanAktifitasExport implements FromCollection, WithHeadings, WithTitle
         $mulai   = $this->request->input('tanggal_mulai');
         $selesai = $this->request->input('tanggal_selesai');
 
-        $movements = StockMovement::with(['product'])
-            ->when($mulai, fn ($q) => $q->whereDate('created_at', '>=', $mulai))
-            ->when($selesai, fn ($q) => $q->whereDate('created_at', '<=', $selesai))
-            ->orderBy('created_at')
-            ->get()
-            ->map(function ($m) {
-                $docCode = '-';
-                if ($m->reference_type && $m->reference_id) {
-                    $ref = $m->reference_type::find($m->reference_id);
-                    $docCode = $ref?->code ?? '-';
-                }
+        // product.suppliers di-eager-load (sebelumnya lazy-load per baris)
+        $movements = ReportQuery::betweenDates(
+            StockMovement::with(['product.suppliers']),
+            'created_at', $mulai, $selesai
+        )->orderBy('created_at')->get();
+
+        $refs = ReportQuery::resolveReferences($movements);
+
+        $movements = $movements
+            ->map(function ($m) use ($refs) {
+                $docCode = ReportQuery::ref($refs, $m)?->code ?? '-';
                 $jenis = $m->qty_in > 0 ? 'Penerimaan' : 'Pengiriman';
                 $qty   = max($m->qty_in ?? 0, $m->qty_out ?? 0);
 

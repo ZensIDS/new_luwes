@@ -135,65 +135,6 @@
                             <tbody>
                                 @if (!$selectedOwner)
                                     <tr><td colspan="15" class="text-center text-muted">Pilih outlet terlebih dahulu.</td></tr>
-                                @else
-                                @foreach ($stocks as $stock)
-                                    @php
-                                        $sourceType = strtolower((string) $stock->source_type);
-                                        $sourceLabel = str_contains($sourceType, 'delivery') ? 'Delivery Order'
-                                            : (str_contains($sourceType, 'purchase') ? 'Belanja Langsung' : ($stock->source_type ?: 'Manual'));
-                                        $stockStatus = $stock->expired_at && $stock->expired_at->lt(today())
-                                            ? 'expired'
-                                            : ($stock->qty > 0 ? 'available' : 'empty');
-                                    @endphp
-                                    <tr data-outlet="{{ $stock->owner_id }}"
-                                        data-category="{{ strtolower((string) $stock->category) }}"
-                                        data-location="{{ strtolower((string) $stock->lokasi) }}"
-                                        data-suppliers="{{ implode(',', $stock->supplier_ids ?? []) }}"
-                                        data-source="{{ strtolower((string) $stock->source_type) }}"
-                                        data-status="{{ $stockStatus }}">
-                                        <td></td>
-                                        <td>{{ $stock->owner?->name ?? '-' }}</td>
-                                        <td>{{ $stock->product?->code ?? '-' }}</td>
-                                        <td>{{ $stock->product?->name ?? '-' }}</td>
-                                        <td>{{ $stock->category ?: '-' }}</td>
-                                        <td>{{ $stock->suppliers ?: '-' }}</td>
-                                        <td>
-                                            @if ($stock->source_id && str_contains($sourceType, 'delivery'))
-                                                <a href="{{ route('delivery-orders.show', $stock->source_id) }}">{{ $sourceLabel }} #{{ $stock->source_id }}</a>
-                                            @elseif ($stock->source_id && str_contains($sourceType, 'purchase'))
-                                                <a href="{{ route('outlet-purchases.show', $stock->source_id) }}">{{ $sourceLabel }} #{{ $stock->source_id }}</a>
-                                            @elseif ($sourceType === 'multiple')
-                                                Multiple sources
-                                            @else
-                                                {{ $sourceLabel }}{{ $stock->source_id ? ' #' . $stock->source_id : '' }}
-                                            @endif
-                                            @if (($stock->batch_count ?? 1) > 1)
-                                                <br><small class="text-muted">{{ $stock->batch_count }} batches combined</small>
-                                            @endif
-                                        </td>
-                                        <td>
-                                            <button type="button" class="btn btn-xs btn-info btn-price-history"
-                                                data-toggle="modal" data-target="#priceHistoryModal"
-                                                data-id="{{ $stock->product_id }}">@currency($stock->hpp)</button>
-                                        </td>
-                                        <td>{{ (int) ($stock->qty_in_total ?? 0) }}</td>
-                                        <td>{{ (int) ($stock->qty_out_total ?? 0) }}</td>
-                                        <td>{{ (int) (($stock->adjustment_in_total ?? 0) - ($stock->adjustment_out_total ?? 0)) }}</td>
-                                        <td><strong>{{ $stock->qty }}</strong> {{ $stock->product?->satuan }}</td>
-                                        <td>{{ optional($stock->expired_at)->format('Y-m-d') ?: '-' }}</td>
-                                        <td><span class="label label-{{ $stockStatus === 'available' ? 'success' : ($stockStatus === 'expired' ? 'danger' : 'default') }}">{{ $stockStatus }}</span></td>
-                                        <td>
-                                            <a class="btn btn-xs btn-info" href="{{ route('owner-stocks.kartu', ['outlet_id' => $stock->owner_id, 'product_id' => $stock->product_id]) }}">
-                                                <i class="fa fa-list"></i> Kartu
-                                            </a>
-                                            <button type="button" class="btn btn-xs btn-primary owner-stock-history"
-                                                data-outlet="{{ $stock->owner_id }}" data-product="{{ $stock->product_id }}"
-                                                data-toggle="modal" data-target="#ownerStockHistoryModal">
-                                                <i class="fa fa-history"></i> History
-                                            </button>
-                                        </td>
-                                    </tr>
-                                @endforeach
                                 @endif
                             </tbody>
                         </table>
@@ -257,56 +198,104 @@
                 return $('<div>').text(value == null ? '' : value).html();
             }
 
+            const urls = {
+                data: '{{ route('owner-stocks.index.data') }}',
+                index: '{{ route('owner-stocks.index') }}',
+                kartu: '{{ route('owner-stocks.kartu') }}',
+                delivery: '{{ route('delivery-orders.show', ':id') }}',
+                purchase: '{{ route('outlet-purchases.show', ':id') }}'
+            };
+            const selectedOutletId = @json($selectedOwner?->id);
+
+            function formatRupiah(value) {
+                return 'Rp ' + Number(value || 0).toLocaleString('id-ID', { maximumFractionDigits: 2 });
+            }
+
+            function sourceCell(row) {
+                var type = String(row.source_type || '').toLowerCase();
+                var label = type.indexOf('delivery') !== -1 ? 'Delivery Order'
+                    : (type.indexOf('purchase') !== -1 ? 'Belanja Langsung' : (row.source_type || 'Manual'));
+                var html;
+                if (row.source_id && type.indexOf('delivery') !== -1) {
+                    html = '<a href="' + urls.delivery.replace(':id', row.source_id) + '">' + escapeHtml(label) + ' #' + escapeHtml(row.source_id) + '</a>';
+                } else if (row.source_id && type.indexOf('purchase') !== -1) {
+                    html = '<a href="' + urls.purchase.replace(':id', row.source_id) + '">' + escapeHtml(label) + ' #' + escapeHtml(row.source_id) + '</a>';
+                } else if (type === 'multiple') {
+                    html = 'Multiple sources';
+                } else {
+                    html = escapeHtml(label) + (row.source_id ? ' #' + escapeHtml(row.source_id) : '');
+                }
+                if ((row.batch_count || 1) > 1) {
+                    html += '<br><small class="text-muted">' + row.batch_count + ' batches combined</small>';
+                }
+                return html;
+            }
+
+            // master.blade.php sudah meng-init #example1 secara otomatis; buang dulu supaya tidak "Cannot reinitialise".
             if ($.fn.DataTable.isDataTable('#example1')) {
                 $('#example1').DataTable().destroy();
             }
 
-            $.fn.dataTable.ext.search.push(function (settings, data, dataIndex) {
-                if (!settings.nTable || settings.nTable.id !== 'example1') return true;
-
-                var row = settings.aoData[dataIndex] && settings.aoData[dataIndex].nTr;
-                if (!row) return true;
-
-                var matches = function (id, attribute) {
-                    var value = $(id).val();
-                    if (!value) return true;
-                    var rowValue = String($(row).data(attribute) || '').toLowerCase();
-                    return attribute === 'suppliers'
-                        ? rowValue.split(',').indexOf(String(value).toLowerCase()) !== -1
-                        : rowValue === String(value).toLowerCase();
-                };
-
-                return matches('#filterOutlet', 'outlet')
-                    && matches('#filterKategori', 'category')
-                    && matches('#filterLokasi', 'location')
-                    && matches('#filterSupplier', 'suppliers')
-                    && matches('#filterSumber', 'source')
-                    && matches('#filterStatus', 'status');
-            });
-
             var table = hasOwner ? $('#example1').DataTable({
-                    order: [[3, 'asc']],
-                    columnDefs: [
-                        { targets: [0, 14], orderable: false, searchable: false },
-                        { targets: [7, 8, 9, 10, 11], className: 'text-right' }
-                    ],
-                    columns: [
-                        { data: null, render: function (data, type, row, meta) { return meta.row + 1; } },
-                        null, null, null, null, null, null, null, null, null, null, null, null, null, null
-                    ]
-                }) : null;
+                processing: true,
+                serverSide: true,
+                searchDelay: 500,
+                pageLength: 25,
+                order: [[3, 'asc']],
+                ajax: {
+                    url: urls.data,
+                    data: function (d) {
+                        d.outlet_id = selectedOutletId;
+                        d.kategori = $('#filterKategori').val();
+                        d.lokasi = $('#filterLokasi').val();
+                        d.supplier_id = $('#filterSupplier').val();
+                        d.sumber = $('#filterSumber').val();
+                        d.status = $('#filterStatus').val();
+                    }
+                },
+                columnDefs: [
+                    { targets: [0, 1, 5, 6, 13, 14], orderable: false },
+                    { targets: [0, 14], searchable: false },
+                    { targets: [7, 8, 9, 10, 11], className: 'text-right' }
+                ],
+                columns: [
+                    { data: null, render: function (data, type, row, meta) { return meta.settings._iDisplayStart + meta.row + 1; } },
+                    { data: 'outlet', render: function (v) { return escapeHtml(v); } },
+                    { data: 'code', render: function (v) { return escapeHtml(v); } },
+                    { data: 'name', render: function (v) { return escapeHtml(v); } },
+                    { data: 'category', render: function (v) { return escapeHtml(v); } },
+                    { data: 'suppliers', render: function (v) { return escapeHtml(v); } },
+                    { data: null, render: function (data, type, row) { return sourceCell(row); } },
+                    { data: 'hpp', render: function (v, type, row) {
+                        return '<button type="button" class="btn btn-xs btn-info btn-price-history" data-toggle="modal" data-target="#priceHistoryModal" data-id="' + row.product_id + '">' + formatRupiah(v) + '</button>';
+                    } },
+                    { data: 'qty_in' },
+                    { data: 'qty_out' },
+                    { data: 'adjustment' },
+                    { data: 'qty', render: function (v, type, row) { return '<strong>' + v + '</strong> ' + escapeHtml(row.satuan); } },
+                    { data: 'expired_at', render: function (v) { return v ? escapeHtml(v) : '-'; } },
+                    { data: 'status', render: function (v) {
+                        var cls = v === 'available' ? 'success' : (v === 'expired' ? 'danger' : 'default');
+                        return '<span class="label label-' + cls + '">' + escapeHtml(v) + '</span>';
+                    } },
+                    { data: null, render: function (data, type, row) {
+                        return '<a class="btn btn-xs btn-info" href="' + urls.kartu + '?outlet_id=' + row.owner_id + '&product_id=' + row.product_id + '"><i class="fa fa-list"></i> Kartu</a> '
+                            + '<button type="button" class="btn btn-xs btn-primary owner-stock-history" data-outlet="' + row.owner_id + '" data-product="' + row.product_id + '" data-toggle="modal" data-target="#ownerStockHistoryModal"><i class="fa fa-history"></i> History</button>';
+                    } }
+                ]
+            }) : null;
 
             $('#filterOutlet, #filterKategori, #filterLokasi, #filterSupplier, #filterSumber, #filterStatus').on('change', function () {
                 if (this.id === 'filterOutlet') {
                     const outletId = $(this).val();
-                    window.location = '{{ route('owner-stocks.index') }}' + (outletId ? '?outlet_id=' + encodeURIComponent(outletId) : '');
+                    window.location = urls.index + (outletId ? '?outlet_id=' + encodeURIComponent(outletId) : '');
                     return;
                 }
-                if (table) table.draw();
+                if (table) table.ajax.reload();
             });
 
             $('#resetOwnerFilters').on('click', function () {
-                window.location = '{{ route('owner-stocks.index') }}';
+                window.location = urls.index;
             });
 
             $('#priceHistoryModal').on('show.bs.modal', function (event) {
@@ -359,8 +348,9 @@
 
                         $('#owner-stock-activity').html(activities || '<tr><td colspan="4" class="text-center">No activity found.</td></tr>');
                         $('#owner-stock-movements').html(movements || '<tr><td colspan="7" class="text-center">No movements found.</td></tr>');
-                        $('#ownerActivityTable').DataTable({ order: [[0, 'asc']] });
-                        $('#ownerMovementTable').DataTable({ order: [[0, 'asc']] });
+                        // Baris placeholder ber-colspan tidak boleh di-init jadi DataTable (error "unknown parameter").
+                        if (activities) $('#ownerActivityTable').DataTable({ order: [[0, 'asc']] });
+                        if (movements) $('#ownerMovementTable').DataTable({ order: [[0, 'asc']] });
                     })
                     .fail(function () {
                         $('#owner-stock-activity').html('<tr><td colspan="4" class="text-center text-danger">Unable to load history.</td></tr>');

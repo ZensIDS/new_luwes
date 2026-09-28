@@ -39,8 +39,6 @@
                                     <td>{{ $value->desc }}</td>
                                     <td>
                                         <a class="btn btn-warning" href="{{ route('outlet.edit', $value->id) }}">Edit</a>
-                                        <a class="btn btn-info" href="{{ route('price-checker.index', ['outlet' => $value->name]) }}"
-                                            target="_blank" rel="noopener">Cek Harga</a>
                                         <form action="{{ route('outlet.destroy', $value->id) }}" method="post"
                                             style="display: inline;">
                                             @method('delete')

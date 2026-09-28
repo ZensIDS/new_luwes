@@ -14,22 +14,20 @@
                     <form action="{{ route('refundPembelian.store') }}" method="POST" id="refund-form">
                         @csrf
 
-                        @php($activeType = $isStaffOutlet ? 'outlet_ke_gudang' : old('type', $selectedType))
-
                         {{-- Hidden type field, updated when tab changes --}}
-                        <input type="hidden" name="type" id="type" value="{{ $activeType }}">
+                        <input type="hidden" name="type" id="type" value="{{ $isStaffOutlet ? 'outlet_ke_gudang' : 'gudang_ke_supplier' }}">
 
                         <div class="box-body">
 
                             {{-- ── Type Tab Selector (hidden for staff-outlet) ── --}}
                             @if (!$isStaffOutlet)
                             <ul class="nav nav-tabs" id="typeTab" style="margin-bottom:20px">
-                                <li class="{{ $activeType === 'gudang_ke_supplier' ? 'active' : '' }}">
+                                <li class="active">
                                     <a href="#tab-supplier" data-toggle="tab" data-type="gudang_ke_supplier">
                                         <i class="fa fa-arrow-up"></i> Gudang ke Supplier
                                     </a>
                                 </li>
-                                <li class="{{ $activeType === 'outlet_ke_gudang' ? 'active' : '' }}">
+                                <li>
                                     <a href="#tab-outlet" data-toggle="tab" data-type="outlet_ke_gudang">
                                         <i class="fa fa-arrow-down"></i> Outlet ke Gudang
                                     </a>
@@ -66,7 +64,7 @@
                                 {{-- ══════════════════════════════════════════════
                             TAB 1: Gudang ke Supplier (hidden for staff-outlet)
                             ══════════════════════════════════════════════ --}}
-                                <div class="tab-pane {{ $activeType === 'gudang_ke_supplier' ? 'active' : '' }}" id="tab-supplier"
+                                <div class="tab-pane {{ $isStaffOutlet ? '' : 'active' }}" id="tab-supplier"
                                     style="{{ $isStaffOutlet ? 'display:none' : '' }}">
                                     <div class="form-group">
                                         <label>Supplier <span class="text-danger">*</span></label>
@@ -120,7 +118,7 @@
                                         </div>
                                         <div class="form-group">
                                             <label>Total Retur (IDR)</label>
-                                            <input type="text" inputmode="numeric" data-currency-input data-currency-decimals="0" class="form-control" name="total"
+                                            <input type="text" class="form-control numeral-mask" name="total"
                                                 id="total-supplier" readonly value="0">
                                         </div>
                                     </div>
@@ -135,7 +133,7 @@
                                 {{-- ══════════════════════════════════════════════
                             TAB 2: Outlet ke Gudang
                             ══════════════════════════════════════════════ --}}
-                                <div class="tab-pane {{ $activeType === 'outlet_ke_gudang' ? 'active' : '' }}" id="tab-outlet">
+                                <div class="tab-pane {{ $isStaffOutlet ? 'active' : '' }}" id="tab-outlet">
                                     <div class="form-group">
                                         <label>Outlet <span class="text-danger">*</span></label>
                                         <select id="outlet_id" class="form-control select2" name="outlet_id"
@@ -223,7 +221,8 @@
         var outletXhr   = null;
 
         // ── Tab switching ──────────────────────────────────────────────────────────
-        function applyType(type) {
+        $('#typeTab a[data-toggle="tab"]').on('shown.bs.tab', function() {
+            var type = $(this).data('type');
             $('#type').val(type);
             if (type === 'gudang_ke_supplier') {
                 $('#outlet_id, #delivery_order_id').prop('disabled', true).removeAttr('required');
@@ -233,10 +232,6 @@
                 $('#outlet_id').prop('disabled', false).attr('required', true);
             }
             checkSubmit();
-        }
-
-        $('#typeTab a[data-toggle="tab"]').on('shown.bs.tab', function() {
-            applyType($(this).data('type'));
         });
 
         // ── Numeral mask ──────────────────────────────────────────────────────────
@@ -526,7 +521,6 @@
                             ${item.product_name}
                             <input type="hidden" name="product[${i}][product_id]" value="${item.product_id}">
                             <input type="hidden" name="product[${i}][stock_id]" value="${item.stock_id}">
-                            <input type="hidden" name="product[${i}][owner_stock_id]" value="${item.owner_stock_id}">
                             <input type="hidden" name="product[${i}][sku]" value="${item.sku}">
                         </td>
                         <td><span class="label label-default">${item.sku}</span></td>
@@ -537,7 +531,7 @@
                                 min="1" max="${item.qty_available}" required>
                         </td>
                         <td>
-                            <input type="text" inputmode="numeric" data-currency-input data-currency-decimals="0" class="form-control input-harga" style="width:100px" name="product[${i}][harga]"
+                            <input type="text" class="form-control numeral-mask input-harga" style="width:100px" name="product[${i}][harga]"
                                 value="${item.harga_beli}" required>
                         </td>
                         <td>
@@ -554,7 +548,6 @@
                 });
 
                 applyMask();
-                window.initCurrencyInputs?.();
                 $('#supplier-product-area').show();
 
                 dtSupplier = $('#tbl-supplier').DataTable({
@@ -623,7 +616,6 @@
                             ${item.product_name}
                             <input type="hidden" name="product[${i}][product_id]" value="${item.product_id}">
                             <input type="hidden" name="product[${i}][stock_id]" value="${item.stock_id}">
-                            <input type="hidden" name="product[${i}][owner_stock_id]" value="${item.owner_stock_id}">
                         </td>
                         <td><span class="label label-default">${item.sku}</span></td>
                         <td><small class="text-muted">${item.do_code}</small></td>
@@ -678,13 +670,11 @@
 
         // ── Auto-load on page ready (browser restore / old() after validation) ──────
         $(function() {
-            applyType($('#type').val());
-
             var sid = $('#supplier_id').val();
             var oid = $('#outlet_id').val();
-            if ($('#type').val() === 'gudang_ke_supplier' && sid) {
+            if (sid) {
                 $('#supplier_id').trigger('change');
-            } else if ($('#type').val() === 'outlet_ke_gudang' && oid) {
+            } else if (oid) {
                 $('#outlet_id').trigger('change');
             }
         });

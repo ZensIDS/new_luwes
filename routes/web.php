@@ -111,6 +111,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::resource('/outlet-purchases', App\Http\Controllers\OutletPurchaseController::class)->only(['index', 'create', 'store', 'show']);
     Route::get('/owner-stock-kartu', [App\Http\Controllers\OwnerStockController::class, 'kartu'])->name('owner-stocks.kartu');
     Route::get('/owner-stock-kartu/data', [App\Http\Controllers\OwnerStockController::class, 'getKartuData'])->name('owner-stocks.kartu.data');
+    Route::get('/owner-stock-kartu/search', [App\Http\Controllers\OwnerStockController::class, 'searchKartuProducts'])->name('owner-stocks.kartu.search');
     Route::get('/owner-stock-opname', [App\Http\Controllers\OwnerStockController::class, 'opname'])->name('owner-stock-opname');
     Route::get('/owner-stock-opname/data', [App\Http\Controllers\OwnerStockController::class, 'getOpnameData'])->name('owner-stock-opname.data');
     Route::post('/owner-stock-opname/save', [App\Http\Controllers\OwnerStockController::class, 'saveOpname'])->name('owner-stock-opname.save');
@@ -232,6 +233,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
 
     // Owner Stocks
     Route::get('owner-stocks', [App\Http\Controllers\OwnerStockController::class, 'index'])->name('owner-stocks.index');
+    Route::get('owner-stocks/data', [App\Http\Controllers\OwnerStockController::class, 'getIndexData'])->name('owner-stocks.index.data');
     Route::get('owner-stocks/history', [App\Http\Controllers\OwnerStockController::class, 'history'])->name('owner-stocks.history');
     Route::get('stocks/data', [StockController::class, 'getIndexData'])->middleware('role:superadmin|admin-gudang|owner')->name('stocks.index.data');
     Route::get('owner-stocks/{owner}', [App\Http\Controllers\OwnerStockController::class, 'show'])->name('owner-stocks.show');

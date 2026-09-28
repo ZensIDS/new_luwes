@@ -3,7 +3,6 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
-use App\Support\IndonesianNumber;
 
 class PembelianRequest extends FormRequest
 {
@@ -29,7 +28,8 @@ class PembelianRequest extends FormRequest
 
     private function cleanNumeric($value)
     {
-        return IndonesianNumber::parse($value);
+        // Remove all non-digit characters (thousand separators: comma or dot)
+        return preg_replace('/[^\d]/', '', $value);
     }
 
     public function authorize()

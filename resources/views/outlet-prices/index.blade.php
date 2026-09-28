@@ -107,11 +107,13 @@
                                 </td>
                             </tr>
                         @empty
-                            <tr>
-                                <td colspan="{{ $selectedOutletId ? 12 : 11 }}" class="text-center">
-                                    {{ $selectedOutletId ? 'Belum ada master harga untuk outlet ini.' : 'Pilih outlet terlebih dahulu untuk melihat master harga.' }}
-                                </td>
-                            </tr>
+                            {{-- Kalau outlet dipilih, tabel adalah DataTable: JANGAN render <td colspan> (bikin error).
+                                 Pesan kosong ditangani DataTables lewat language.emptyTable. --}}
+                            @unless ($selectedOutletId)
+                                <tr>
+                                    <td colspan="11" class="text-center">Pilih outlet terlebih dahulu untuk melihat master harga.</td>
+                                </tr>
+                            @endunless
                         @endforelse
                     </tbody>
                 </table>{{ $prices->links() }}
@@ -147,7 +149,11 @@
                 }
                 // The query is already ordered by updated_at DESC. Keep that
                 // order instead of letting DataTables sort by outlet name.
-                $('#example1').DataTable({ ordering: false, pageLength: 25 });
+                $('#example1').DataTable({
+                    ordering: false,
+                    pageLength: 25,
+                    language: { emptyTable: 'Belum ada master harga untuk outlet ini.' }
+                });
             });
         </script>
     @endif
