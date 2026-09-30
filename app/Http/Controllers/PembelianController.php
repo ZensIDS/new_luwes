@@ -608,8 +608,12 @@ class PembelianController extends Controller
         $length      = $length > 0 ? min($length, 100) : 25;
         $searchValue = trim((string) ($request->input('search.value', '')));
 
-        $orderColIndex = (int) $request->input('order.0.column', 2);
-        $orderDir      = strtolower($request->input('order.0.dir', 'asc')) === 'desc' ? 'desc' : 'asc';
+        // Tanpa parameter urutan dari client -> default PO terbaru dulu (created_at desc),
+        // sama dengan halaman /pembelian. Jangan pakai indeks kolom default: di halaman ini
+        // kolom 2 adalah code_gr, bukan tanggal dibuat.
+        $hasOrder      = $request->has('order.0.column');
+        $orderColIndex = (int) $request->input('order.0.column', -1);
+        $orderDir      = strtolower($request->input('order.0.dir', 'desc')) === 'asc' ? 'asc' : 'desc';
 
         $sortableColumns = [
             0 => 'pembelians.created_at',
@@ -621,8 +625,10 @@ class PembelianController extends Controller
             7 => 'pembelians.receipt_date',
             8 => 'pembelians.receipt_pic',
         ];
-        $orderBy = $sortableColumns[$orderColIndex] ?? 'pembelians.created_at';
-        $orderDirDefault = $request->has('order.0.column') ? $orderDir : 'desc'; // default: PO terbaru dulu, setara ->latest()
+        $orderBy = $hasOrder
+            ? ($sortableColumns[$orderColIndex] ?? 'pembelians.created_at')
+            : 'pembelians.created_at';
+        $orderDirDefault = $hasOrder ? $orderDir : 'desc';
 
         $base = \App\Models\Pembelian::query()
             ->leftJoin('suppliers', 'suppliers.id', '=', 'pembelians.supplier_id');

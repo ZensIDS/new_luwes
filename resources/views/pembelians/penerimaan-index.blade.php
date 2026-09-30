@@ -54,7 +54,7 @@
                 ajax: {
                     url: '{{ route('pembelian.penerimaan.index.data') }}'
                 },
-                order: [[1, 'desc']], // setara ->latest() sebelumnya (server default juga sudah desc by created_at)
+                order: [], // tanpa urutan awal dari client -> server memakai default created_at terbaru dulu (bukan urut Kode PO)
                 columns: [
                     {
                         data: null,
