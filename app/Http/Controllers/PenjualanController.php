@@ -8,11 +8,14 @@ use App\Models\Outlet;
 use App\Models\Penjualan;
 use App\Models\Stock;
 use App\Models\Voucher;
+use App\Services\CashierSaleService;
+use App\Support\OutletAccess;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use PDF;
+use RuntimeException;
 
 class PenjualanController extends Controller
 {
@@ -60,105 +63,41 @@ class PenjualanController extends Controller
         ]);
     }
 
-    public function store(Request $request)
+    public function store(Request $request, CashierSaleService $sales)
     {
-        $request->validate([
-            'customer_id' => 'required',
-            // 'kas_id' => 'required',
-            'kasir_id' => 'nullable',
-            'total' => 'required',
+        // Total, subtotal, diskon, promo, dan kembalian dihitung server dari keranjang
+        // (CashierSaleService), jadi tidak diterima dari client. customer_id boleh kosong
+        // (pelanggan Umum).
+        $data = $request->validate([
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
+            'customer_id' => 'nullable|exists:users,id',
+            'salesman_id' => 'nullable',
+            'paid_amount' => 'required|numeric|min:0',
+            'payment_method_id' => 'nullable|integer|exists:payment_methods,id',
+            'payment_method_name' => 'nullable|string|max:255',
+            'payment_reference' => 'nullable|string|max:255',
+            'voucher_codes' => 'nullable|array',
+            'voucher_codes.*' => 'string|max:100',
+            'promotion_codes' => 'nullable|array',
+            'promotion_codes.*' => 'string|max:100',
         ]);
 
-        DB::beginTransaction();
+        // Kasir / staff outlet hanya boleh bertransaksi di outletnya sendiri.
+        $data['outlet_id'] = OutletAccess::id($request);
 
         try {
-            $lastOrder = Penjualan::where('outlet_id', $request->outlet_id)
-                ->orderBy('created_at', 'desc')
-                ->first();
-            $nextInvoiceNumber = $lastOrder ? ((int) substr($lastOrder->code, 3) + 1) : 1;
-            $nextInvoiceNumber = str_pad($nextInvoiceNumber, 3, '0', STR_PAD_LEFT);
-            $nextInvoiceCode = 'INV'.$nextInvoiceNumber;
-            $order = Penjualan::create([
-                'code' => $nextInvoiceCode,
-                'customer_id' => $request->customer_id,
-                'outlet_id' => $request->outlet_id,
-                'salesman_id' => $request->salesman_id,
-                'kasir_id' => $request->kasir_id,
-                'voucher_id' => $request->voucher_id,
-                'discount' => $request->discount,
-                'total' => $request->total,
-            ]);
-
-            return response()->json([
-                'success' => true,
-                'message' => 'Pesanan berhasil dibuat.',
-                'redirect' => route('outlet.show', $order->outlet_id),
-                'print' => route('penjualan.print', [$order]),
-                'order' => $order,
-            ], 201);
-        } catch (Throwable $e) {
-            report($e);
-
-            $cart = $request->user()->cart()->get();
-            foreach ($cart as $item) {
-                $order->items()->create([
-                    'subtotal' => $item->harga_jual * $item->pivot->qty,
-                    'price' => $item->harga_jual,
-                    'qty' => $item->pivot->qty,
-                    'product_id' => $item->id,
-                    'serial_number' => $item->pivot->serial_number,
-                    'stock_id' => $item->pivot->stock_id,
-                ]);
-
-                if ($item->is_serialized) {
-                    // For serialized items, update specific stock
-                    $stock = Stock::find($item->pivot->stock_id);
-                    if (! $stock || $stock->qty < $item->pivot->qty) {
-                        throw new Exception('Stock not found or insufficient quantity');
-                    }
-                    $stock->qty -= $item->pivot->qty;
-                    $stock->save();
-                } else {
-                    // Existing FIFO logic for non-serialized items
-                    $now = Carbon::now();
-                    $stocks = Stock::where('product_id', $item->id)
-                        ->where('qty', '>', 0)
-                        ->get();
-
-                    if ($stocks->isEmpty()) {
-                        throw new Exception('Stock not found or expired');
-                    }
-
-                    $remainingQty = $item->pivot->qty;
-                    foreach ($stocks as $stock) {
-                        if ($remainingQty <= 0) {
-                            break;
-                        }
-
-                        if ($stock->qty >= $remainingQty) {
-                            $stock->qty -= $remainingQty;
-                            $remainingQty = 0;
-                        } else {
-                            $remainingQty -= $stock->qty;
-                            $stock->qty = 0;
-                        }
-                        $stock->save();
-                    }
-
-                    if ($remainingQty > 0) {
-                        throw new Exception('Insufficient stock quantity');
-                    }
-                }
-            }
-
-            $request->user()->cart()->detach();
-
-            DB::commit();
-        } catch (Exception $e) {
-            DB::rollBack();
-
-            return $e->getMessage();
+            $order = $sales->checkout($request->user(), $data);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Pesanan berhasil dibuat.',
+            'redirect' => route('outlet.show', $order->outlet_id),
+            'print' => route('penjualan.print', [$order]),
+            'order' => $order,
+        ], 201);
     }
 
     public function show(Penjualan $penjualan)

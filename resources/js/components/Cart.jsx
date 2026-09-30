@@ -67,6 +67,9 @@ const Cart = () => {
     const [paidAmount, setPaidAmount] = useState("");
     const [errorMessage, setErrorMessage] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
+    // Guard sinkron: state isSubmitting baru berubah setelah render, sehingga klik ganda / F10 ditahan
+    // masih bisa lolos dan mengirim 2 request sekaligus.
+    const submitLockRef = useRef(false);
     const [completedSale, setCompletedSale] = useState(null);
     const [isPrintingReceipt, setIsPrintingReceipt] = useState(false);
     const [selectedCartProductId, setSelectedCartProductId] = useState(null);
@@ -377,7 +380,7 @@ const Cart = () => {
     };
 
     const handleSubmit = () => {
-        if (isSubmitting || completedSale) return;
+        if (submitLockRef.current || isSubmitting || completedSale) return;
 
         setErrorMessage("");
         const selectedPaymentMethod = paymentMethods.find((method) => String(method.id) === String(paymentMethodId));
@@ -403,6 +406,7 @@ const Cart = () => {
             return;
         }
 
+        submitLockRef.current = true;
         setIsSubmitting(true);
         axios.post("/penjualan", {
             outlet_id: outlet.id,
@@ -415,6 +419,7 @@ const Cart = () => {
             promotion_codes: appliedPromotions.map((promotion) => promotion.code),
         }).then((response) => {
             window.localStorage.setItem("last-pos-sale", response.data.order.id);
+            submitLockRef.current = false;
             setIsSubmitting(false);
             const completedSale = {
                 code: response.data.order.code,
@@ -440,8 +445,14 @@ const Cart = () => {
                 }
             });
         }).catch((error) => {
+            submitLockRef.current = false;
             setIsSubmitting(false);
-            setErrorMessage(error.response?.data?.message || "Checkout gagal.");
+            const errors = error.response?.data?.errors;
+            setErrorMessage(
+                (errors && Object.values(errors).flat().join(" "))
+                || error.response?.data?.message
+                || "Checkout gagal."
+            );
         });
     };
 
