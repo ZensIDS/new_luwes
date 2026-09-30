@@ -159,9 +159,7 @@
                                             <th>Expired</th>
                                             <th>Supplier</th>
                                             <th class="text-right">HPP</th>
-                                            <th class="text-right">Stok Fisik</th>
-                                            <th class="text-right">Saldo Kartu</th>
-                                            <th class="text-right">Selisih</th>
+                                            <th class="text-right">Saldo</th>
                                         </tr>
                                     </thead>
                                     <tbody id="breakdownBody"></tbody>
@@ -169,9 +167,7 @@
                                 </table>
                             </div>
                             <p class="text-muted" style="font-size:12px;">
-                                <b>Stok Fisik</b> = stok toko yang sama dengan menu Stock Toko.
-                                <b>Saldo Kartu</b> = total Masuk &minus; Keluar yang tercatat di log pergerakan.
-                                <b>Selisih</b> &ne; 0 berarti ada perubahan stok yang tidak tercatat (atau tercatat terlambat) di kartu.
+                                <b>Saldo</b> = stok toko real saat ini (sama dengan menu Stock Toko), bukan hasil hitungan log pergerakan.
                             </p>
                         </div>
                     </div>
@@ -210,12 +206,6 @@
             function qtyDisplay(qty) {
                 var converted = konversiDisplay(qty);
                 return escapeHtml(qty) + (converted ? ' <span class="label label-info">' + escapeHtml(converted) + '</span>' : '');
-            }
-
-            function selisihCell(value) {
-                var cls = value === 0 ? '' : 'text-danger';
-                var sign = value > 0 ? '+' : '';
-                return '<td class="text-right ' + cls + '"><strong>' + sign + value + '</strong></td>';
             }
 
             function destroyTable() {
@@ -308,7 +298,7 @@
                 var $foot = $('#breakdownFoot').empty();
 
                 if (!summary.breakdown || !summary.breakdown.length) {
-                    $body.html('<tr><td colspan="9" class="text-center">Tidak ada batch.</td></tr>');
+                    $body.html('<tr><td colspan="7" class="text-center">Tidak ada batch.</td></tr>');
                 } else {
                     var html = summary.breakdown.map(function (item) {
                         return '<tr>' +
@@ -319,8 +309,6 @@
                             '<td>' + escapeHtml(item.supplier || '-') + '</td>' +
                             '<td class="text-right">' + formatRupiah(item.hpp) + '</td>' +
                             '<td class="text-right">' + qtyDisplay(item.qty) + '</td>' +
-                            '<td class="text-right">' + qtyDisplay(item.saldo_kartu) + '</td>' +
-                            selisihCell(item.selisih) +
                             '</tr>';
                     }).join('');
                     $body.html(html);
@@ -329,12 +317,10 @@
                         '<tr>' +
                         '<th colspan="6" class="text-right">TOTAL STOK TOKO (SEMUA BATCH)</th>' +
                         '<th class="text-right">' + qtyDisplay(summary.total_qty) + '</th>' +
-                        '<th class="text-right">' + qtyDisplay(summary.total_saldo_kartu) + '</th>' +
-                        selisihCell(summary.total_selisih) +
                         '</tr>' +
                         '<tr>' +
                         '<th colspan="6" class="text-right">TOTAL NILAI PERSEDIAAN</th>' +
-                        '<th colspan="3" class="text-right">' + formatRupiah(summary.total_nilai) + '</th>' +
+                        '<th class="text-right">' + formatRupiah(summary.total_nilai) + '</th>' +
                         '</tr>'
                     );
                 }

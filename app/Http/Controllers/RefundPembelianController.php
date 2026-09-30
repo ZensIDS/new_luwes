@@ -252,6 +252,22 @@ class RefundPembelianController extends Controller
                         'notes'          => "Retur outlet ke gudang - {$refundPembelian->code} - SKU: {$stock->sku} - Alasan: {$product['alasan']}",
                     ]);
 
+                    // Movement sisi toko (owner_id/owner_stock_id) supaya Kartu Stok Toko ikut mencatat
+                    // pengurangan ini. Tanpa ini, OwnerStock->qty sudah berkurang tapi ledger toko diam.
+                    StockMovement::create([
+                        'product_id'     => $product['product_id'],
+                        'owner_id'       => $ownerStock->owner_id,
+                        'owner_stock_id' => $ownerStock->id,
+                        'user_id'        => auth()->id(),
+                        'type'           => 'out',
+                        'reference_type' => RefundPembelian::class,
+                        'reference_id'   => $refundPembelian->id,
+                        'qty_in'         => 0,
+                        'qty_out'        => $product['qty'],
+                        'balance'        => $ownerStock->qty,
+                        'notes'          => "Retur ke gudang - {$refundPembelian->code} - SKU: {$stock->sku} - Alasan: {$product['alasan']}",
+                    ]);
+
                     RefundPembelianItem::create([
                         'refund_pembelian_id' => $refundPembelian->id,
                         'product_id'          => $product['product_id'],
