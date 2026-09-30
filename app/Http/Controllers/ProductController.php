@@ -15,6 +15,7 @@ use App\Models\Product;
 use App\Models\ProductImport;
 use App\Models\Stock;
 use App\Models\Supplier;
+use App\Support\OutletAccess;
 use Illuminate\Bus\Batch;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Bus;
@@ -43,26 +44,54 @@ class ProductController extends Controller
 
     public function index(Request $request)
     {
+        // Kasir/staff-outlet selalu discope ke outlet miliknya sendiri, terlepas dari
+        // outlet_id yang dikirim dari klien.
+        if (in_array($request->user()?->role, ['staff-outlet', 'kasir'], true)) {
+            $request->merge(['outlet_id' => OutletAccess::id($request)]);
+        }
+        $outletId = $request->input('outlet_id');
         $statusFilter = $request->input('status_produk', 'sudah');
         $products = Product::query();
 
         if ($request->filled('search')) {
-            $search = $request->search;
-            $products = $products->where(function ($query) use ($search) {
-                $query->where('name', 'LIKE', "%{$search}%")
-                    ->orWhere('code', 'LIKE', "%{$search}%")
-                    ->orWhere('harga_jual', 'LIKE', "%{$search}%")
-                    ->orWhere('brand', 'LIKE', "%{$search}%")
-                    ->orWhere('model', 'LIKE', "%{$search}%")
-                    ->orWhereHas('stocks', function ($stockQuery) use ($search) {
-                        $stockQuery->where('serial_number', 'LIKE', "%{$search}%")
-                            ->orWhere('status', 'LIKE', "%{$search}%");
-                    });
-            });
+            $search = trim((string) $request->search);
+            if ($search !== '') {
+                $products = $products->where(function ($query) use ($search, $outletId) {
+                    $query->where('name', 'LIKE', "%{$search}%")
+                        ->orWhere('code', 'LIKE', "%{$search}%")
+                        ->orWhere('harga_jual', 'LIKE', "%{$search}%")
+                        ->orWhere('brand', 'LIKE', "%{$search}%")
+                        ->orWhere('model', 'LIKE', "%{$search}%");
+
+                    if ($outletId) {
+                        // Barcode/serial scan di kasir hanya mencari di stok milik outlet ini.
+                        $query->orWhereHas('ownerStocks', function ($stockQuery) use ($outletId, $search) {
+                            $stockQuery->where('owner_id', $outletId)
+                                ->where('qty', '>', 0)
+                                ->where(function ($expiryQuery) {
+                                    $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                                })
+                                ->whereHas('stock', fn ($stock) => $stock->where('serial_number', 'LIKE', "%{$search}%"));
+                        });
+                    } else {
+                        $query->orWhereHas('stocks', function ($stockQuery) use ($search) {
+                            $stockQuery->where('serial_number', 'LIKE', "%{$search}%")
+                                ->orWhere('status', 'LIKE', "%{$search}%");
+                        });
+                    }
+                });
+            }
         }
 
-        if ($request->filled('outlet_id')) {
-            $products = $products->where('outlet_id', $request->outlet_id);
+        if ($outletId) {
+            // Kasir hanya boleh menjual produk yang benar-benar punya stok di outlet ini.
+            $products = $products->whereHas('ownerStocks', function ($query) use ($outletId) {
+                $query->where('owner_id', $outletId)
+                    ->where('qty', '>', 0)
+                    ->where(function ($expiryQuery) {
+                        $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                    });
+            });
         }
 
         if ($request->filled('category_id')) {
