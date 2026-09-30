@@ -253,6 +253,7 @@ class StockController extends Controller
             });
 
         $movements = StockMovement::where('product_id', $stock->product_id)
+            ->whereNull('owner_id') // exclude movement toko (in di OwnerStock outlet tujuan) - lihat KartuStokBuilder
             ->orderBy('created_at', 'asc')
             ->get()
             ->map(function ($movement) {
