@@ -28,16 +28,16 @@ class CampaignController extends Controller
             'campaignType' => $campaignType,
             'campaign' => null,
             'selectedProducts' => [],
+            'selectedProductOptions' => $this->selectedProductOptions($request->old('products', [])),
             'selectedOutlets' => [],
             'bonusRows' => [],
             'isEdit' => false,
             'routeType' => $campaignType === 'voucher' ? 'voucher' : 'promotion',
-            'products' => Product::orderBy('name')->get(['id', 'code', 'name']),
             'outlets' => OutletAccess::outlets(),
         ]);
     }
 
-    public function edit(string $type, int $id)
+    public function edit(Request $request, string $type, int $id)
     {
         $this->ensureManagementAccess();
 
@@ -71,13 +71,100 @@ class CampaignController extends Controller
             'campaignType' => $campaignType,
             'campaign' => $campaign,
             'selectedProducts' => $selectedProducts,
+            'selectedProductOptions' => $this->selectedProductOptions($request->old('products', $selectedProducts)),
             'selectedOutlets' => $selectedOutlets,
             'bonusRows' => $bonusRows,
             'isEdit' => true,
             'routeType' => $type,
-            'products' => Product::orderBy('name')->get(['id', 'code', 'name']),
             'outlets' => OutletAccess::outlets(),
         ]);
+    }
+
+    /**
+     * Select2 AJAX untuk "Pilih beberapa produk".
+     * Hanya 20 produk per halaman (ambil 1 baris ekstra untuk tahu masih ada halaman berikutnya,
+     * tanpa COUNT(*)), sehingga tetap ringan walau produk ribuan.
+     */
+    public function searchProducts(Request $request)
+    {
+        $this->ensureManagementAccess();
+
+        $search = trim((string) $request->query('q', ''));
+        $page = max((int) $request->query('page', 1), 1);
+        $perPage = 20;
+
+        $query = Product::query();
+
+        if ($search !== '') {
+            $like = addcslashes($search, '\\%_');
+            $query->where(function ($q) use ($like) {
+                $q->where('name', 'like', "%{$like}%")
+                    ->orWhere('code', 'like', "{$like}%");
+            });
+        }
+
+        $rows = $query
+            ->orderBy('name')
+            ->skip(($page - 1) * $perPage)
+            ->take($perPage + 1)
+            ->get(['id', 'code', 'name']);
+
+        return response()->json([
+            'results' => $rows->take($perPage)->map(fn ($product) => [
+                'id' => $product->id,
+                'text' => "{$product->code} — {$product->name}",
+                'code' => $product->code,
+                'name' => $product->name,
+            ])->values(),
+            'pagination' => ['more' => $rows->count() > $perPage],
+        ]);
+    }
+
+    /**
+     * Cari 1 produk berdasarkan kode/barcode persis (untuk kolom scan barcode).
+     */
+    public function scanProduct(Request $request)
+    {
+        $this->ensureManagementAccess();
+
+        $code = trim((string) $request->query('code', ''));
+        $product = $code === ''
+            ? null
+            : Product::where('code', $code)->first(['id', 'code', 'name']);
+
+        if (! $product) {
+            return response()->json(['message' => 'Barcode produk tidak ditemukan.'], 404);
+        }
+
+        return response()->json([
+            'id' => $product->id,
+            'text' => "{$product->code} — {$product->name}",
+            'code' => $product->code,
+            'name' => $product->name,
+        ]);
+    }
+
+    /**
+     * Data produk yang sudah terpilih saja (mode edit / old input setelah validasi gagal),
+     * bukan seluruh katalog produk.
+     */
+    private function selectedProductOptions($products): array
+    {
+        $ids = is_array($products) ? array_values(array_unique(array_map('intval', array_keys($products)))) : [];
+
+        if (empty($ids)) {
+            return [];
+        }
+
+        return Product::whereIn('id', $ids)
+            ->orderBy('name')
+            ->get(['id', 'code', 'name'])
+            ->map(fn ($product) => [
+                'id' => $product->id,
+                'code' => $product->code,
+                'name' => $product->name,
+            ])
+            ->all();
     }
 
     public function store(CampaignRequest $request)

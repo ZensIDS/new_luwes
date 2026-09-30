@@ -166,11 +166,12 @@
                 <div class="row">
                     <div class="col-md-8 form-group">
                         <label for="product-picker">Pilih beberapa produk</label>
-                        <select id="product-picker" class="form-control select2" multiple data-placeholder="Cari dan pilih produk">
-                            @foreach ($products as $product)
-                                <option value="{{ $product->id }}" {{ array_key_exists($product->id, $selectedProducts) ? 'selected' : '' }}>{{ $product->code }} — {{ $product->name }}</option>
+                        <select id="product-picker" class="form-control" multiple data-placeholder="Ketik nama/kode produk untuk mencari">
+                            @foreach ($selectedProductOptions as $product)
+                                <option value="{{ $product['id'] }}" selected>{{ $product['code'] }} — {{ $product['name'] }}</option>
                             @endforeach
                         </select>
+                        <small class="help-block">Ketik minimal 2 huruf. Produk dicari langsung di server, jadi tetap ringan walau produknya ribuan.</small>
                     </div>
                     <div class="col-md-4 form-group">
                         <label for="product-scan">Scan barcode produk</label>
@@ -225,12 +226,45 @@
 @section('page-script')
 <script>
 $(function () {
-    const products = @json($products->map(fn ($product) => ['id' => $product->id, 'code' => $product->code, 'name' => $product->name])->values());
+    const searchUrl = @json(route('campaign.products.search'));
+    const scanUrl = @json(route('campaign.products.scan'));
+    // Cache hanya untuk produk yang sudah terpilih / pernah muncul di hasil pencarian.
+    const productCache = {};
+    @json($selectedProductOptions).forEach(function (product) {
+        productCache[String(product.id)] = product;
+    });
     const rememberedQuantities = @json($selectedProducts);
     let bonusIndex = {{ count($bonusRows) }};
     let codeWasEdited = {{ old('code_auto', $isEdit ? 0 : 1) ? 'false' : 'true' }};
 
     $('.select2').select2({ width: '100%', allowClear: true });
+    $('#product-picker').select2({
+        width: '100%',
+        allowClear: true,
+        minimumInputLength: 2,
+        placeholder: 'Ketik nama/kode produk untuk mencari',
+        ajax: {
+            url: searchUrl,
+            dataType: 'json',
+            delay: 300,
+            cache: true,
+            data: function (params) {
+                return { q: params.term, page: params.page || 1 };
+            },
+            processResults: function (data) {
+                return { results: data.results, pagination: data.pagination };
+            }
+        },
+        language: {
+            inputTooShort: function () { return 'Ketik minimal 2 huruf untuk mencari produk...'; },
+            searching: function () { return 'Mencari...'; },
+            noResults: function () { return 'Produk tidak ditemukan'; },
+            loadingMore: function () { return 'Memuat produk lainnya...'; }
+        }
+    }).on('select2:select', function (event) {
+        const data = event.params.data;
+        productCache[String(data.id)] = { id: data.id, code: data.code, name: data.name };
+    });
     $('#daterange').daterangepicker({
         timePicker: true,
         timePickerIncrement: 30,
@@ -276,9 +310,15 @@ $(function () {
 
     function renderSelectedProducts() {
         rememberProductQuantities();
+        // Ambil data produk terpilih langsung dari Select2 (aman terhadap urutan event select/change).
+        ($('#product-picker').select2('data') || []).forEach(function (item) {
+            if (item && item.code !== undefined) {
+                productCache[String(item.id)] = { id: item.id, code: item.code, name: item.name };
+            }
+        });
         const ids = ($('#product-picker').val() || []).map(String);
         const rows = ids.map(function (id) {
-            const product = products.find(item => String(item.id) === id);
+            const product = productCache[id];
             if (!product) return '';
             const quantity = rememberedQuantities[id] || 1;
             return `<tr data-product-id="${id}">
@@ -348,16 +388,24 @@ $(function () {
     $('#product-scan').on('keydown', function (event) {
         if (event.key !== 'Enter') return;
         event.preventDefault();
-        const code = this.value.trim().toLowerCase();
-        const product = products.find(item => String(item.code || '').toLowerCase() === code);
-        if (!product) {
+        const input = this;
+        const code = input.value.trim();
+        if (!code) return;
+        $.getJSON(scanUrl, { code: code }).done(function (product) {
+            productCache[String(product.id)] = product;
+            const selected = ($('#product-picker').val() || []).map(String);
+            if (!selected.includes(String(product.id))) {
+                // Tambahkan option baru lalu pilih, tanpa memuat daftar produk lain.
+                if (!$('#product-picker option[value="' + product.id + '"]').length) {
+                    $('#product-picker').append(new Option(product.text, product.id, true, true));
+                }
+                selected.push(String(product.id));
+            }
+            $('#product-picker').val(selected).trigger('change');
+            input.value = '';
+        }).fail(function () {
             alert('Barcode produk tidak ditemukan.');
-            return;
-        }
-        const selected = ($('#product-picker').val() || []).map(String);
-        if (!selected.includes(String(product.id))) selected.push(String(product.id));
-        $('#product-picker').val(selected).trigger('change');
-        this.value = '';
+        });
     });
     $('#add-bonus').on('click', function () {
         const index = bonusIndex++;

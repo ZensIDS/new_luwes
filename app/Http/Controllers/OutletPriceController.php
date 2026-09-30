@@ -64,7 +64,7 @@ class OutletPriceController extends Controller
         ]);
     }
 
-    public function create()
+    public function create(Request $request)
     {
         $this->ensureManagementAccess();
         return view('outlet-prices.form', [
@@ -83,7 +83,7 @@ class OutletPriceController extends Controller
                 'is_active' => true,
             ]),
             'outlets' => OutletAccess::outlets(),
-            'products' => Product::orderBy('name')->get(['id', 'code', 'name']),
+            'selectedProduct' => $this->selectedProduct($request->old('product_id')),
             'method' => 'POST',
             'action' => route('outlet-prices.store'),
             'previewHpp' => null,
@@ -109,13 +109,13 @@ class OutletPriceController extends Controller
         return redirect()->route('outlet-prices.index')->with('toast_success', 'Master harga outlet berhasil disimpan.');
     }
 
-    public function edit(OutletPrice $outletPrice)
+    public function edit(Request $request, OutletPrice $outletPrice)
     {
         $this->ensureManagementAccess();
         return view('outlet-prices.form', [
             'price' => $outletPrice,
             'outlets' => OutletAccess::outlets(),
-            'products' => Product::orderBy('name')->get(['id', 'code', 'name']),
+            'selectedProduct' => $this->selectedProduct($request->old('product_id', $outletPrice->product_id)),
             'method' => 'PUT',
             'action' => route('outlet-prices.update', $outletPrice),
             'previewHpp' => OwnerStock::where('owner_id', $outletPrice->outlet_id)
@@ -123,6 +123,51 @@ class OutletPriceController extends Controller
                 ->latest('created_at')
                 ->value('hpp') ?? Product::find($outletPrice->product_id)?->harga_beli,
         ]);
+    }
+
+    /**
+     * Select2 AJAX untuk pilihan produk: 20 produk per halaman, tanpa COUNT(*)
+     * (ambil 1 baris ekstra untuk tahu masih ada halaman berikutnya).
+     */
+    public function searchProducts(Request $request)
+    {
+        $this->ensureManagementAccess();
+
+        $search = trim((string) $request->query('q', ''));
+        $page = max((int) $request->query('page', 1), 1);
+        $perPage = 20;
+
+        $query = Product::query();
+
+        if ($search !== '') {
+            $like = addcslashes($search, '\\%_');
+            $query->where(function ($q) use ($like) {
+                $q->where('name', 'like', "%{$like}%")
+                    ->orWhere('code', 'like', "{$like}%");
+            });
+        }
+
+        $rows = $query
+            ->orderBy('name')
+            ->skip(($page - 1) * $perPage)
+            ->take($perPage + 1)
+            ->get(['id', 'code', 'name']);
+
+        return response()->json([
+            'results' => $rows->take($perPage)->map(fn ($product) => [
+                'id' => $product->id,
+                'text' => "{$product->code} — {$product->name}",
+            ])->values(),
+            'pagination' => ['more' => $rows->count() > $perPage],
+        ]);
+    }
+
+    /**
+     * Hanya produk yang sedang terpilih (edit / old input), bukan seluruh katalog.
+     */
+    private function selectedProduct($productId): ?Product
+    {
+        return $productId ? Product::select(['id', 'code', 'name'])->find($productId) : null;
     }
 
     public function previewHpp(Request $request)

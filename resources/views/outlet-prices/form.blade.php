@@ -68,16 +68,15 @@
                                 </div>
                                 <div class="col-md-6 form-group">
                                     <label for="product_id">Produk <span class="text-danger">*</span></label>
-                                    <select id="product_id" name="product_id" class="form-control select2 price-select"
-                                        data-placeholder="Cari kode atau nama produk" style="width:100%" required
+                                    <select id="product_id" name="product_id" class="form-control product-ajax"
+                                        data-placeholder="Ketik kode atau nama produk" style="width:100%" required
                                         {{ $price->exists ? 'disabled' : '' }}>
                                         <option value=""></option>
-                                        @foreach ($products as $product)
-                                            <option value="{{ $product->id }}"
-                                                {{ old('product_id', $price->product_id) == $product->id ? 'selected' : '' }}>
-                                                {{ $product->code }} — {{ $product->name }}
+                                        @if ($selectedProduct)
+                                            <option value="{{ $selectedProduct->id }}" selected>
+                                                {{ $selectedProduct->code }} — {{ $selectedProduct->name }}
                                             </option>
-                                        @endforeach
+                                        @endif
                                     </select>
                                     @if ($price->exists)
                                         <input type="hidden" name="product_id" value="{{ $price->product_id }}">
@@ -357,6 +356,32 @@
                     allowClear: !$(this).prop('required'),
                     minimumResultsForSearch: $(this).hasClass('price-type') ? Infinity : 0
                 });
+            });
+
+            // Produk dicari di server (20 per halaman), bukan dimuat semua ke halaman.
+            $('#product_id').select2({
+                width: '100%',
+                placeholder: $('#product_id').data('placeholder'),
+                allowClear: false,
+                minimumInputLength: 2,
+                ajax: {
+                    url: '{{ route('outlet-prices.products.search') }}',
+                    dataType: 'json',
+                    delay: 300,
+                    cache: true,
+                    data: function (params) {
+                        return { q: params.term, page: params.page || 1 };
+                    },
+                    processResults: function (data) {
+                        return { results: data.results, pagination: data.pagination };
+                    }
+                },
+                language: {
+                    inputTooShort: function () { return 'Ketik minimal 2 huruf untuk mencari produk...'; },
+                    searching: function () { return 'Mencari...'; },
+                    noResults: function () { return 'Produk tidak ditemukan'; },
+                    loadingMore: function () { return 'Memuat produk lainnya...'; }
+                }
             });
 
             function money(value) {

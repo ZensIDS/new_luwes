@@ -107,6 +107,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
 
     Route::resource('/stock', StockController::class)->middleware('role:superadmin|admin-gudang|owner');
     Route::resource('/outlet-prices', App\Http\Controllers\OutletPriceController::class)->except(['show']);
+    Route::get('/outlet-prices/products/search', [App\Http\Controllers\OutletPriceController::class, 'searchProducts'])->name('outlet-prices.products.search');
     Route::get('/outlet-prices/preview-hpp', [App\Http\Controllers\OutletPriceController::class, 'previewHpp'])->name('outlet-prices.preview-hpp');
     Route::resource('/outlet-purchases', App\Http\Controllers\OutletPurchaseController::class)->only(['index', 'create', 'store', 'show']);
     Route::get('/owner-stock-kartu', [App\Http\Controllers\OwnerStockController::class, 'kartu'])->name('owner-stocks.kartu');
@@ -118,6 +119,8 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/voucher/lookup', [VoucherController::class, 'lookup'])->name('voucher.lookup');
     Route::get('/voucher/options', [VoucherController::class, 'options'])->name('voucher.options');
     Route::get('/campaign/create', [CampaignController::class, 'create'])->name('campaign.create');
+    Route::get('/campaign/products/search', [CampaignController::class, 'searchProducts'])->name('campaign.products.search');
+    Route::get('/campaign/products/scan', [CampaignController::class, 'scanProduct'])->name('campaign.products.scan');
     Route::post('/campaign', [CampaignController::class, 'store'])->name('campaign.store');
     Route::get('/campaign/{type}/{id}/edit', [CampaignController::class, 'edit'])
         ->whereIn('type', ['voucher', 'promotion'])
