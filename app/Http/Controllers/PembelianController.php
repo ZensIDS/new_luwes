@@ -612,6 +612,7 @@ class PembelianController extends Controller
         $orderDir      = strtolower($request->input('order.0.dir', 'asc')) === 'desc' ? 'desc' : 'asc';
 
         $sortableColumns = [
+            0 => 'pembelians.created_at',
             1 => 'pembelians.code',
             2 => 'pembelians.code_gr',
             3 => 'suppliers.name',
