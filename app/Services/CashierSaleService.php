@@ -60,6 +60,8 @@ class CashierSaleService
                 $requestedQty = max(1, (int) $product->pivot->qty);
                 $stocks = $this->lockedStocksForCartItem($product, $outletId);
                 $remaining = $requestedQty;
+                // Harga jual memakai HPP terbaru untuk semua batch; stok tetap berkurang per batch (FIFO).
+                $latestHpp = app(\App\Services\LatestHpp::class)->forProduct((int) $outletId, (int) $product->id);
 
                 foreach ($stocks as $ownerStock) {
                     if ($remaining <= 0) {
@@ -72,7 +74,7 @@ class CashierSaleService
                     }
 
                     $price = $this->calculator->calculateItem(
-                        (float) ($ownerStock->hpp ?? $product->harga_beli ?? 0),
+                        $latestHpp,
                         $rules->get($product->id),
                         $product
                     );
@@ -171,6 +173,9 @@ class CashierSaleService
 
                 $order->items()->create([
                     ...$price,
+                    // Snapshot HPP = biaya asli batch yang terjual (bukan HPP terbaru
+                    // yang dipakai menghitung harga), supaya laba penjualan terbaca benar.
+                    'hpp' => (float) ($ownerStock->hpp ?? $product->harga_beli ?? $price['hpp']),
                     'product_id' => $product->id,
                     'stock_id' => $ownerStock->stock_id,
                     'owner_stock_id' => $ownerStock->id,

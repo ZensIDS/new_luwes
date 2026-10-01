@@ -4,10 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Models\Outlet;
 use App\Models\OutletPrice;
-use App\Models\OwnerStock;
 use App\Models\Product;
 use App\Models\Promotion;
 use App\Models\Voucher;
+use App\Services\LatestHpp;
 use App\Services\PriceCalculator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -50,21 +50,9 @@ class PriceCheckerController extends Controller
                 ->currentlyActive()
                 ->first()
             : null;
-        $ownerStock = $outletId
-            ? OwnerStock::query()
-                ->where('owner_id', $outletId)
-                ->where('product_id', $product->id)
-                ->where('qty', '>', 0)
-                ->where(function ($query) {
-                    $query->whereNull('expired_at')
-                        ->orWhereDate('expired_at', '>=', today());
-                })
-                ->orderBy('created_at')
-                ->first()
-            : null;
-
+        // HPP terbaru dipakai untuk semua batch, sama seperti master harga dan POS.
         $price = $calculator->calculateItem(
-            (float) ($ownerStock?->hpp ?? $product->harga_beli ?? 0),
+            app(LatestHpp::class)->forProduct((int) $outletId, (int) $product->id),
             $priceRule,
             $product
         );

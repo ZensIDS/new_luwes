@@ -81,9 +81,11 @@ class CashierPrintController extends Controller
 
         $products->each(function (Product $product) use ($calculator, $request) {
             $rule = $product->relationLoaded('outletPrices') ? $product->outletPrices->first() : null;
-            $stock = $product->relationLoaded('ownerStocks') ? $product->ownerStocks->first() : null;
             $price = $calculator->calculateItem(
-                (float) ($stock?->hpp ?? $product->harga_beli ?? 0),
+                app(\App\Services\LatestHpp::class)->fromLoaded(
+                    $product->relationLoaded('ownerStocks') ? $product->ownerStocks : null,
+                    $product->harga_beli
+                ),
                 $rule,
                 $product
             );
@@ -264,9 +266,8 @@ class CashierPrintController extends Controller
             $priceProduct = $product ? $pricingProducts->get($product->id) : null;
             $discountAmount = null;
             if ($voucher->jenis === 'satuan' && $priceProduct) {
-                $stock = $priceProduct->ownerStocks->first();
                 $price = $calculator->calculateItem(
-                    (float) ($stock?->hpp ?? $priceProduct->harga_beli ?? 0),
+                    app(\App\Services\LatestHpp::class)->fromLoaded($priceProduct->ownerStocks, $priceProduct->harga_beli),
                     $priceProduct->outletPrices->first(),
                     $priceProduct
                 );
@@ -286,9 +287,8 @@ class CashierPrintController extends Controller
             // Bundles show no product discount. Flash-sale labels can still
             // show the nominal value calculated from their selected product.
             if ($promotion->type !== 'bundle' && $priceProduct) {
-                $stock = $priceProduct->ownerStocks->first();
                 $price = $calculator->calculateItem(
-                    (float) ($stock?->hpp ?? $priceProduct->harga_beli ?? 0),
+                    app(\App\Services\LatestHpp::class)->fromLoaded($priceProduct->ownerStocks, $priceProduct->harga_beli),
                     $priceProduct->outletPrices->first(),
                     $priceProduct
                 );

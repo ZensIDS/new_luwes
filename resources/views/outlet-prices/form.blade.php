@@ -276,12 +276,13 @@
                         </div>
                         <div class="box-body">
                             <div class="form-group">
-                                <label for="preview_hpp">Contoh HPP</label>
+                                <label for="preview_hpp">HPP Terbaru</label>
                                 <div class="input-group">
                                     <span class="input-group-addon">Rp</span>
-                                    <input id="preview_hpp" type="text" inputmode="numeric" data-currency-input data-currency-decimals="0" min="0" step="1" class="form-control" value="{{ $previewHpp ?? 100000 }}">
+                                    <input id="preview_hpp" name="hpp" type="text" inputmode="numeric" data-currency-input data-currency-decimals="0" min="0" step="1" class="form-control" value="{{ old('hpp', $previewHpp ?? 0) }}">
+                                    <input type="hidden" name="hpp_changed" id="hpp_changed" value="0">
                                 </div>
-                                <p class="help-block">Diisi otomatis dari HPP terakhir produk dan outlet. Anda dapat mengubah angka ini untuk simulasi.</p>
+                                <p class="help-block">Diisi otomatis dari HPP terbaru produk di outlet ini. Jika angka ini diubah, HPP terbarunya ikut diperbarui saat aturan harga disimpan.</p>
                             </div>
                             <div class="price-preview-list">
                                 <div><span>HPP</span><strong id="preview-hpp">Rp0</strong></div>
@@ -449,6 +450,14 @@
                 updatePrefixes();
             });
             $('#price-rule-form input').on('input', updatePreview);
+
+            // HPP terakhir yang dimuat dari server; dibandingkan saat submit
+            // untuk menentukan apakah HPP terbaru perlu diperbarui.
+            let loadedHpp = Number(@json((float) ($previewHpp ?? 0)));
+            $('#price-rule-form').on('submit', function () {
+                const changed = Math.round(number('#preview_hpp')) !== Math.round(loadedHpp);
+                $('#hpp_changed').val(changed ? '1' : '0');
+            });
             $('#outlet_id, #product_id').on('change', function () {
                 const outletId = $('#outlet_id').val();
                 const productId = $('#product_id').val();
@@ -458,6 +467,7 @@
                 }
                 $.get('{{ route('outlet-prices.preview-hpp') }}', { outlet_id: outletId, product_id: productId })
                     .done(function (data) {
+                        loadedHpp = Number(data.hpp) || 0;
                         $('#preview_hpp').val(data.hpp).trigger('input');
                     });
                 updatePreview();

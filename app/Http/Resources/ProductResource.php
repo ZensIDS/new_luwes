@@ -22,7 +22,7 @@ class ProductResource extends JsonResource
         $displayPrice = $this->harga_jual;
         if ($isOutletContext && $ownerStocks->first()) {
             $displayPrice = app(\App\Services\PriceCalculator::class)
-                ->calculateItem((float) ($ownerStocks->first()->hpp ?? $this->harga_beli ?? 0), $priceRule, $this->resource)['price'];
+                ->calculateItem(app(\App\Services\LatestHpp::class)->fromLoaded($ownerStocks, $this->harga_beli), $priceRule, $this->resource)['price'];
         }
 
         if ($request->boolean('compact')) {

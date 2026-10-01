@@ -33,6 +33,8 @@ class OutletPriceRequest extends FormRequest
             'effective_from' => 'nullable|date',
             'effective_until' => 'nullable|date|after_or_equal:effective_from',
             'is_active' => 'nullable|boolean',
+            'hpp' => 'nullable|numeric|min:0',
+            'hpp_changed' => 'nullable|boolean',
         ];
     }
 
@@ -45,6 +47,7 @@ class OutletPriceRequest extends FormRequest
             'disc_toko_value' => IndonesianNumber::parse($this->input('disc_toko_value')),
             'pajak_value' => IndonesianNumber::parse($this->input('pajak_value')),
             'outlet_adjustment_value' => IndonesianNumber::parse($this->input('outlet_adjustment_value')),
+            'hpp' => IndonesianNumber::parse($this->input('hpp')),
         ]);
     }
 }

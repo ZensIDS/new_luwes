@@ -146,7 +146,7 @@ class RefundPenjualanController extends Controller
             ->currentlyActive()
             ->first();
         $price = $calculator->calculateItem(
-            (float) ($stock?->hpp ?? $product->harga_beli ?? 0),
+            app(\App\Services\LatestHpp::class)->forProduct((int) $outletId, (int) $product->id),
             $rule,
             $product
         );
@@ -183,9 +183,11 @@ class RefundPenjualanController extends Controller
             })
             ->orderBy('created_at')->orderBy('id')->limit(25)->get();
 
-        return response()->json($stocks->map(function (OwnerStock $stock) use ($calculator, $rules) {
+        $latestHpp = app(\App\Services\LatestHpp::class)->forProducts($outletId, $stocks->pluck('product_id'));
+
+        return response()->json($stocks->map(function (OwnerStock $stock) use ($calculator, $rules, $latestHpp) {
             $price = $calculator->calculateItem(
-                (float) ($stock->hpp ?? $stock->product?->harga_beli ?? 0),
+                (float) ($latestHpp[$stock->product_id] ?? 0),
                 $rules->get($stock->product_id), $stock->product
             )['price'];
 
@@ -332,7 +334,7 @@ class RefundPenjualanController extends Controller
                     $unitPrice = $saleItem
                         ? (float) $saleItem->price
                         : (float) $calculator->calculateItem(
-                            (float) ($stock?->hpp ?? $product->harga_beli ?? 0),
+                            app(\App\Services\LatestHpp::class)->forProduct((int) $outletId, (int) $product->id),
                             $rules->get($product->id), $product
                         )['price'];
                     $returnItems[] = [
@@ -407,7 +409,7 @@ class RefundPenjualanController extends Controller
                             continue;
                         }
                         $price = $calculator->calculateItem(
-                            (float) ($stock->hpp ?? $product?->harga_beli ?? 0),
+                            app(\App\Services\LatestHpp::class)->forProduct((int) $outletId, (int) $productId),
                             $rules->get($productId), $product
                         )['price'];
                         $subtotal = (float) $price * $qty;

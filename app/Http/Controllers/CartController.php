@@ -46,12 +46,14 @@ class CartController extends Controller
                 ->first();
             $remainingQty = max(1, (int) $item->pivot->qty);
             $firstPrice = null;
+            // Harga memakai HPP terbaru untuk semua batch; stok tetap berkurang per batch (FIFO).
+            $latestHpp = app(\App\Services\LatestHpp::class)->forProduct((int) $outletId, (int) $item->id);
             foreach ($ownerStocks as $ownerStock) {
                 if ($remainingQty <= 0) {
                     break;
                 }
                 $price = $calculator->calculateItem(
-                    (float) ($ownerStock->hpp ?? $item->harga_beli ?? 0),
+                    $latestHpp,
                     $rule,
                     $item
                 );

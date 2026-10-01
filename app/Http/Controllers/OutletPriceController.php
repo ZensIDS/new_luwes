@@ -6,10 +6,13 @@ use App\Http\Requests\OutletPriceRequest;
 use App\Models\OutletPrice;
 use App\Models\OwnerStock;
 use App\Models\Product;
+use App\Services\LatestHpp;
 use App\Services\PriceCalculator;
 use App\Support\OutletAccess;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
 
 class OutletPriceController extends Controller
 {
@@ -20,14 +23,7 @@ class OutletPriceController extends Controller
         $prices = $outletId
             ? OutletPrice::with([
                 'outlet',
-                'product.ownerStocks' => fn ($query) => $query
-                    ->where('owner_id', $outletId)
-                    ->where('qty', '>', 0)
-                    ->where(function ($expiryQuery) {
-                        $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
-                    })
-                    ->orderBy('created_at')
-                    ->orderBy('id'),
+                'product',
             ])
                 ->where('outlet_id', $outletId)
                 ->when($request->filled('search'), fn ($query) => $query->whereHas('product', fn ($productQuery) => $productQuery
@@ -39,11 +35,12 @@ class OutletPriceController extends Controller
             : new LengthAwarePaginator([], 0, 25);
 
         if ($outletId) {
-            $prices->getCollection()->each(function (OutletPrice $price) use ($calculator) {
+            $latestHpp = app(LatestHpp::class)->forProducts($outletId, $prices->getCollection()->pluck('product_id'));
+
+            $prices->getCollection()->each(function (OutletPrice $price) use ($calculator, $latestHpp) {
                 $product = $price->product;
-                $stock = $product?->ownerStocks?->first();
                 $calculated = $calculator->calculateItem(
-                    (float) ($stock?->hpp ?? $product?->harga_beli ?? 0),
+                    (float) ($latestHpp[$price->product_id] ?? 0),
                     $price,
                     $product
                 );
@@ -92,19 +89,23 @@ class OutletPriceController extends Controller
 
     public function store(OutletPriceRequest $request)
     {
-        $price = OutletPrice::withTrashed()->firstOrNew([
-            'outlet_id' => $request->outlet_id,
-            'product_id' => $request->product_id,
-        ]);
-        $price->fill([
-            ...$request->validated(),
-            'created_by' => auth()->id(),
-            'is_active' => $request->boolean('is_active', true),
-        ]);
-        if ($price->trashed()) {
-            $price->restore();
-        }
-        $price->save();
+        DB::transaction(function () use ($request) {
+            $price = OutletPrice::withTrashed()->firstOrNew([
+                'outlet_id' => $request->outlet_id,
+                'product_id' => $request->product_id,
+            ]);
+            $price->fill([
+                ...Arr::except($request->validated(), ['hpp', 'hpp_changed']),
+                'created_by' => auth()->id(),
+                'is_active' => $request->boolean('is_active', true),
+            ]);
+            if ($price->trashed()) {
+                $price->restore();
+            }
+            $price->save();
+
+            $this->syncLatestHpp($request, (int) $price->outlet_id, (int) $price->product_id);
+        });
 
         return redirect()->route('outlet-prices.index')->with('toast_success', 'Master harga outlet berhasil disimpan.');
     }
@@ -118,10 +119,7 @@ class OutletPriceController extends Controller
             'selectedProduct' => $this->selectedProduct($request->old('product_id', $outletPrice->product_id)),
             'method' => 'PUT',
             'action' => route('outlet-prices.update', $outletPrice),
-            'previewHpp' => OwnerStock::where('owner_id', $outletPrice->outlet_id)
-                ->where('product_id', $outletPrice->product_id)
-                ->latest('created_at')
-                ->value('hpp') ?? Product::find($outletPrice->product_id)?->harga_beli,
+            'previewHpp' => app(LatestHpp::class)->forProduct((int) $outletPrice->outlet_id, (int) $outletPrice->product_id),
         ]);
     }
 
@@ -178,21 +176,44 @@ class OutletPriceController extends Controller
             'product_id' => 'required|integer|exists:products,id',
         ]);
 
-        $product = Product::findOrFail($request->product_id);
-        $hpp = OwnerStock::where('owner_id', $request->outlet_id)
-            ->where('product_id', $request->product_id)
-            ->latest('created_at')
-            ->value('hpp');
+        return response()->json([
+            'hpp' => app(LatestHpp::class)->forProduct((int) $request->outlet_id, (int) $request->product_id),
+        ]);
+    }
 
-        return response()->json(['hpp' => (float) ($hpp ?? $product->harga_beli ?? 0)]);
+    /**
+     * Kalau HPP diubah dari form master harga, simpan sebagai HPP terbaru.
+     * Hanya jalan bila form menandai angkanya benar-benar diubah (hpp_changed),
+     * supaya angka bawaan form tidak menimpa data tanpa disengaja.
+     */
+    private function syncLatestHpp(Request $request, int $outletId, int $productId): void
+    {
+        if (! $request->boolean('hpp_changed') || $request->input('hpp') === null) {
+            return;
+        }
+
+        $hpp = round((float) $request->input('hpp'), 2);
+        $stock = app(LatestHpp::class)->stockFor($outletId, $productId);
+
+        if ($stock) {
+            $stock->update(['hpp' => $hpp]);
+
+            return;
+        }
+
+        Product::whereKey($productId)->update(['harga_beli' => $hpp]);
     }
 
     public function update(OutletPriceRequest $request, OutletPrice $outletPrice)
     {
-        $outletPrice->update([
-            ...$request->validated(),
-            'is_active' => $request->boolean('is_active'),
-        ]);
+        DB::transaction(function () use ($request, $outletPrice) {
+            $outletPrice->update([
+                ...Arr::except($request->validated(), ['hpp', 'hpp_changed']),
+                'is_active' => $request->boolean('is_active'),
+            ]);
+
+            $this->syncLatestHpp($request, (int) $outletPrice->outlet_id, (int) $outletPrice->product_id);
+        });
 
         return redirect()->route('outlet-prices.index')->with('toast_success', 'Master harga outlet berhasil diperbarui.');
     }

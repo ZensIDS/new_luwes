@@ -141,6 +141,7 @@ class ProductController extends Controller
                             'owner_stocks.product_id',
                             'owner_stocks.qty',
                             'owner_stocks.hpp',
+                            'owner_stocks.created_at',
                         ]);
                     } else {
                         $query->with('stock');
