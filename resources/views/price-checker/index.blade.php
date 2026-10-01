@@ -253,6 +253,10 @@
         .promo-name { color: var(--purple); font-size: 12px; font-weight: 800; }
         .promo-summary { color: #5d5a70; font-size: 12px; line-height: 1.45; }
         .no-promo { color: #aaa8b7; }
+        .promo-meta { display: grid; gap: 6px; margin-top: 4px; }
+        .promo-meta-title { display: block; color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+        .promo-meta ul { margin: 2px 0 0; padding-left: 16px; color: #5d5a70; font-size: 12px; line-height: 1.45; }
+        .promo-period { color: #5d5a70; font-size: 12px; line-height: 1.45; }
         .promo-price { color: var(--success); font-size: 16px; font-weight: 800; white-space: nowrap; }
         .promo-price small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; font-weight: 500; text-decoration: line-through; }
         .pos-price { color: var(--success); font-size: 16px; font-weight: 800; white-space: nowrap; }
@@ -406,6 +410,10 @@
                 inactivityTimer = setTimeout(clearResults, 30000);
             };
 
+            const section = (title, entries) => (entries && entries.length)
+                ? `<div><span class="promo-meta-title">${title}</span><ul>${entries.map((entry) => `<li>${escapeHtml(entry)}</li>`).join('')}</ul></div>`
+                : '';
+
             const render = () => {
                 const items = Array.from(results.values());
                 const totalQty = items.reduce((total, item) => total + item.quantity, 0);
@@ -419,6 +427,14 @@
                             <div class="promo-item">
                                 <span class="promo-name">${escapeHtml(promo.name)}</span>
                                 <span class="promo-summary">${escapeHtml(promo.summary)}</span>
+                                <div class="promo-meta">
+                                    ${section('Syarat', promo.terms)}
+                                    <div>
+                                        <span class="promo-meta-title">Periode</span>
+                                        <span class="promo-period">${escapeHtml(promo.period || 'Tanpa batas waktu')}</span>
+                                    </div>
+                                    ${section('Batasan', promo.limits)}
+                                </div>
                             </div>`).join('')}</div>`
                         : '<span class="no-promo">Tidak ada promo</span>';
                     const promoPrice = item.promotions.find((promo) => promo.price !== null && promo.price !== undefined);

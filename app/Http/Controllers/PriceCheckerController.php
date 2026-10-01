@@ -64,7 +64,7 @@ class PriceCheckerController extends Controller
             : null;
 
         $price = $calculator->calculateItem(
-            (float) ($ownerStock?->hpp ?? $product->harga_beli ?? $product->harga_jual ?? 0),
+            (float) ($ownerStock?->hpp ?? $product->harga_beli ?? 0),
             $priceRule,
             $product
         );
@@ -192,12 +192,14 @@ class PriceCheckerController extends Controller
         $discountType = strtolower(trim((string) $promotion->discount_type));
         $promoPrice = null;
         $discount = 0;
+        $terms = [];
+        $limits = [];
 
         if ($type === 'flash_sale') {
             if ($discountType === 'fixed_price') {
                 $promoPrice = min($basePrice, $calculator->money($promotion->discount_value));
                 $discount = max(0, $basePrice - $promoPrice);
-                $summary = 'Harga promo '.$this->rupiah($promoPrice);
+                $summary = 'Harga spesial flash sale';
             } else {
                 $discount = $calculator->discountAmount(
                     $basePrice,
@@ -206,22 +208,33 @@ class PriceCheckerController extends Controller
                 );
                 $promoPrice = max(0, $basePrice - $discount);
                 $summary = $discountType === 'percentage'
-                    ? 'Diskon '.$this->number($promotion->discount_value).'% · Harga promo '.$this->rupiah($promoPrice)
-                    : 'Hemat '.$this->rupiah($discount).' · Harga promo '.$this->rupiah($promoPrice);
+                    ? 'Diskon '.$this->number($promotion->discount_value).'%'
+                    : 'Hemat '.$this->rupiah($discount);
+            }
+
+            if ($promotion->max_qty !== null) {
+                $limits[] = 'Maks. '.$this->number($promotion->max_qty).' unit berdiskon per transaksi';
             }
         } elseif ($type === 'bundle') {
             $requirements = $promotion->promotionProducts
                 ->map(function ($target) {
                     $name = $target->product?->name ?: 'produk';
-                    $qty = $this->number($target->required_qty);
 
-                    return $qty.'× '.$name;
+                    return $this->number($target->required_qty).'× '.$name;
                 })
                 ->implode(' + ');
-            $summary = 'Bundle: '.$requirements;
+            $summary = 'Promo bundle';
+            if ($requirements !== '') {
+                $terms[] = 'Beli paket: '.$requirements;
+            }
+
             $bundleDiscount = $calculator->money($promotion->bundle_price);
             if ($bundleDiscount > 0) {
-                $summary .= ' · Hemat '.$this->rupiah($bundleDiscount);
+                $summary .= ' · Hemat '.$this->rupiah($bundleDiscount).' per paket';
+            }
+
+            if ($promotion->max_qty !== null) {
+                $limits[] = 'Maks. '.$this->number($promotion->max_qty).' paket per transaksi';
             }
         } else {
             $summary = 'Promo tersedia';
@@ -234,17 +247,29 @@ class PriceCheckerController extends Controller
             $summary .= ' · '.$bonuses;
         }
 
-        if ($promotion->desc) {
-            $summary .= ' · '.trim($promotion->desc);
+        if ((float) $promotion->min_purchase > 0) {
+            $terms[] = 'Min. belanja '.$this->rupiah($promotion->min_purchase);
         }
 
-        if ((float) $promotion->min_purchase > 0) {
-            $summary .= ' · Min. belanja '.$this->rupiah($promotion->min_purchase);
+        if ($promotion->desc && trim($promotion->desc) !== '') {
+            $terms[] = trim($promotion->desc);
+        }
+
+        if ($promotion->quota_qty !== null) {
+            $remaining = max(0, (int) $promotion->quota_qty - (int) $promotion->used_qty);
+            $limits[] = 'Sisa kuota '.$this->number($remaining).' dari '.$this->number($promotion->quota_qty);
+        }
+
+        if (! $promotion->stackable) {
+            $limits[] = 'Tidak dapat digabung dengan promo lain';
         }
 
         return [
             'name' => $promotion->name ?: 'Promo',
             'summary' => $summary,
+            'terms' => $terms,
+            'period' => $this->period($promotion->start_at, $promotion->end_at),
+            'limits' => $limits,
             'price' => $promoPrice,
             'discount' => $discount,
             'type' => $type,
@@ -258,28 +283,55 @@ class PriceCheckerController extends Controller
         $summary = $discountType === 'percentage'
             ? 'Voucher diskon '.$this->number($voucher->value).'%'
             : 'Voucher hemat '.$this->rupiah($voucher->value);
+        $terms = [];
+        $limits = [];
 
-        if ($voucher->min_purchase && $basePrice < (float) $voucher->min_purchase) {
-            $summary .= ' · Min. belanja '.$this->rupiah($voucher->min_purchase);
-        } elseif ($discount > 0) {
-            $summary .= ' · Perkiraan setelah voucher '.$this->rupiah($basePrice - $discount);
+        if ($voucher->min_purchase && (float) $voucher->min_purchase > 0) {
+            $terms[] = 'Min. belanja '.$this->rupiah($voucher->min_purchase);
+        }
+
+        if ($voucher->desc && trim($voucher->desc) !== '') {
+            $terms[] = trim($voucher->desc);
         }
 
         if ($voucher->max_discount_amount !== null) {
-            $summary .= ' · Maks. potongan '.$this->rupiah($voucher->max_discount_amount);
+            $limits[] = 'Maks. potongan '.$this->rupiah($voucher->max_discount_amount);
         }
 
-        if ($voucher->desc) {
-            $summary .= ' · '.trim($voucher->desc);
+        if ($voucher->limit !== null) {
+            $remaining = max(0, (int) $voucher->limit - (int) $voucher->redemptions_count);
+            $limits[] = 'Sisa pemakaian '.$this->number($remaining).' dari '.$this->number($voucher->limit);
         }
 
         return [
             'name' => $voucher->name ?: 'Voucher',
             'summary' => $summary,
+            'terms' => $terms,
+            'period' => $this->period($voucher->start_at, $voucher->end_at),
+            'limits' => $limits,
             'price' => $discount > 0 ? max(0, $basePrice - $discount) : null,
             'discount' => $discount,
             'type' => 'voucher',
         ];
+    }
+
+    private function period($start, $end): string
+    {
+        $format = fn ($date) => $date->copy()->locale('id')->translatedFormat('j M Y, H:i');
+
+        if ($start && $end) {
+            return $format($start).' – '.$format($end);
+        }
+
+        if ($end) {
+            return 'Sampai '.$format($end);
+        }
+
+        if ($start) {
+            return 'Mulai '.$format($start);
+        }
+
+        return 'Tanpa batas waktu';
     }
 
     private function rupiah(float|int|null $amount): string
