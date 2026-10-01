@@ -460,47 +460,13 @@ const Cart = () => {
         if (!printUrl || isPrintingReceipt) return;
 
         setIsPrintingReceipt(true);
-        const frame = document.createElement("iframe");
-        frame.title = "Cetak struk";
-        frame.setAttribute("aria-hidden", "true");
-        Object.assign(frame.style, {
-            position: "fixed",
-            left: "-10000px",
-            top: "0",
-            width: "80mm",
-            height: "1px",
-            border: "0",
-        });
-
-        let fallbackTimer = null;
-        const finishPrinting = () => {
-            if (fallbackTimer) window.clearTimeout(fallbackTimer);
-            frame.remove();
-            setIsPrintingReceipt(false);
-            window.location.reload();
-        };
-
-        frame.addEventListener("load", () => {
-            const printWindow = frame.contentWindow;
-            if (!printWindow) {
-                setIsPrintingReceipt(false);
-                frame.remove();
-                setErrorMessage("Struk tidak dapat disiapkan untuk dicetak.");
-                return;
-            }
-
-            printWindow.addEventListener("afterprint", finishPrinting, { once: true });
-            printWindow.focus();
-            printWindow.print();
-            fallbackTimer = window.setTimeout(finishPrinting, 2000);
-        }, { once: true });
-        frame.addEventListener("error", () => {
-            frame.remove();
-            setIsPrintingReceipt(false);
-            setErrorMessage("Struk tidak dapat disiapkan untuk dicetak.");
-        }, { once: true });
-        document.body.appendChild(frame);
-        frame.src = printUrl;
+        // Pakai halaman struk yang sama persis dengan reprint (/penjualan/{id}/print)
+        // dalam mode auto: halaman itu memanggil dialog print setelah selesai dimuat,
+        // lalu kembali ke kasir setelah dicetak atau dibatalkan. Hanya path yang dipakai
+        // supaya tetap satu origin/sesi dengan halaman kasir.
+        const url = new URL(printUrl, window.location.origin);
+        url.searchParams.set("auto", "1");
+        window.location.href = url.pathname + url.search;
     };
 
     useEffect(() => {
