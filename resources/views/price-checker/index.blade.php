@@ -255,6 +255,8 @@
         .no-promo { color: #aaa8b7; }
         .promo-price { color: var(--success); font-size: 16px; font-weight: 800; white-space: nowrap; }
         .promo-price small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; font-weight: 500; text-decoration: line-through; }
+        .pos-price { color: var(--success); font-size: 16px; font-weight: 800; white-space: nowrap; }
+        .pos-price.is-struck { color: var(--muted); font-size: 13px; font-weight: 500; text-decoration: line-through; }
         .qty { color: var(--ink); font-weight: 750; text-align: center; }
 
         .footer-note {
@@ -345,7 +347,7 @@
                             <th>Produk</th>
                             <th>Harga</th>
                             <th>Promo aktif</th>
-                            <th>Harga promo</th>
+                            <th>Harga Promo</th>
                             <th>Qty</th>
                         </tr>
                     </thead>
@@ -420,13 +422,17 @@
                             </div>`).join('')}</div>`
                         : '<span class="no-promo">Tidak ada promo</span>';
                     const promoPrice = item.promotions.find((promo) => promo.price !== null && promo.price !== undefined);
+                    // Harga Coret ditampilkan sebagai harga biasa (tanpa coret).
+                    const strikePrice = item.price_strike ?? item.price;
+                    // Tanpa promo aktif: tampilkan Harga Jual POS.
+                    // Ada promo aktif: Harga Jual POS dicoret, lalu harga setelah promo.
                     const promoPriceHtml = promoPrice
-                        ? `<span class="promo-price">${rupiah(promoPrice.price)}<small>dari ${rupiah(item.price)}</small></span>`
-                        : '<span class="no-promo">—</span>';
+                        ? `<span class="promo-price"><span class="pos-price is-struck">${rupiah(item.price)}</span><br>${rupiah(promoPrice.price)}</span>`
+                        : `<span class="pos-price">${rupiah(item.price)}</span>`;
 
                     return `<tr>
                         <td><div class="product-name">${escapeHtml(item.product.name)}</div><div class="product-code">${escapeHtml(item.product.barcode)}</div></td>
-                        <td><span class="price">${rupiah(item.price)}</span></td>
+                        <td><span class="price">${rupiah(strikePrice)}</span></td>
                         <td>${promoHtml}</td>
                         <td>${promoPriceHtml}</td>
                         <td class="qty">${item.quantity}</td>

@@ -83,6 +83,11 @@ class PriceCheckerController extends Controller
                 'barcode' => $product->code,
                 'unit' => $product->satuan,
             ],
+            // Sama seperti halaman master harga barang:
+            // Harga Coret = HPP setelah pajak + margin, Harga Jual POS = harga akhir.
+            'price_strike' => (int) $calculator->money(
+                $price['hpp_setelah_pajak'] + $price['margin_amount']
+            ),
             'price' => (int) $price['price'],
             'promotions' => $promotions->concat($vouchers)->values(),
         ]);
