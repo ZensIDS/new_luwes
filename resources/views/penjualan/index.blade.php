@@ -51,7 +51,7 @@
                                                 @php $totalCost = 0; @endphp
                                                 @foreach ($value->items as $item)
                                                     <tr>
-                                                        <td>{{ $item->serial_number ? $item->serial_number : $item->product?->code }} - {{ $item->product->name }}</td>
+                                                        <td>{{ $item->serial_number ? $item->serial_number : $item->product?->code }} - {{ $item->product?->name ?? '(produk dihapus)' }}</td>
                                                         <td>{{ $item->qty }}</td>
                                                         <td>@currency($item->price)</td>
                                                         <td>@currency($item->subtotal ?? ($item->qty * $item->price))</td>

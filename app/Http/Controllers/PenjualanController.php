@@ -48,7 +48,16 @@ class PenjualanController extends Controller
     public function index()
     {
         return view('penjualan.index', [
-            'penjualan' => Penjualan::doesntHave('transaction')->orderBy('created_at', 'desc')->get(),
+            'penjualan' => Penjualan::doesntHave('transaction')
+                ->with([
+                    'outlet',
+                    'kasir',
+                    'cashierShift',
+                    // withTrashed: produk yang sudah di-soft-delete tetap tampil di riwayat penjualan
+                    'items.product' => fn ($q) => $q->withTrashed(),
+                ])
+                ->orderBy('created_at', 'desc')
+                ->get(),
         ]);
     }
 
