@@ -9,12 +9,15 @@ use App\Models\OutletPrice;
 use App\Models\OutletPurchase;
 use App\Models\OwnerStock;
 use App\Models\Penjualan;
+use App\Models\PenjualanItem;
 use App\Models\Product;
 use App\Models\Promotion;
 use App\Models\RefundPenjualan;
+use App\Models\Stock;
 use App\Support\OutletAccess;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class OutletLaporanService
@@ -41,61 +44,49 @@ class OutletLaporanService
         $sales = $this->saleQuery($start, $end, $outletId, $cashierId)
             ->with([
                 'outlet', 'kasir', 'cashierShift', 'paymentMethod',
-                'items.product',
-                'refundPenjualans' => fn ($query) => $query->whereBetween('created_at', [$start, $end]),
-                'refundPenjualans.items',
+                'items.product', 'vouchers.products',
             ])
             ->orderBy('created_at')->orderBy('id')->get();
 
         $rows = collect();
         $transactions = collect();
+        $returnedByItem = $this->returnedQuantities($end, $outletId);
+        $totalVoucher = 0.0;
 
         foreach ($sales as $sale) {
-            $returnedByItem = $sale->refundPenjualans
-                ->flatMap(fn ($refund) => $refund->items)
-                ->where('type', 'return')
-                ->filter(fn ($item) => $item->penjualan_item_id)
-                ->groupBy('penjualan_item_id')
-                ->map(fn ($items) => (float) $items->sum('qty'));
-
+            $voucherByItem = $this->voucherAllocation($sale);
             $saleTotal = 0.0;
-            $returnedValue = 0.0;
             foreach ($sale->items as $item) {
                 $returnedQty = (float) ($returnedByItem[$item->id] ?? 0);
                 $qty = max(0, (float) $item->qty - $returnedQty);
                 $unitPrice = (float) ($item->price ?? 0);
-                $returnedValue += $unitPrice * $returnedQty;
                 if ($qty <= 0) {
                     continue;
                 }
 
-                $referencePrice = (float) ($item->base_price ?? $item->harga_aktif ?? $unitPrice);
-                $discountPerUnit = max(0, $referencePrice - $unitPrice);
-                $discountTotal = $discountPerUnit * $qty;
+                $ratio = (float) $item->qty > 0 ? $qty / (float) $item->qty : 0;
+                $voucher = (float) ($voucherByItem[$item->id] ?? 0) * $ratio;
+                $rafaksi = ((float) ($item->promotion_discount ?? 0) * $ratio + $voucher) / $qty;
                 $subtotal = $unitPrice * $qty;
-                $saleTotal += $subtotal;
+                $saleTotal += $subtotal - $voucher;
+                $totalVoucher += $voucher;
 
                 $rows->push($this->saleRow($sale, $item->product, [
                     'qty' => $qty,
                     'unit_price' => $unitPrice,
-                    'discount_per_unit' => $discountPerUnit,
-                    'discount_total' => $discountTotal,
+                    'rafaksi' => $rafaksi,
                     'subtotal' => $subtotal,
                     'type' => 'Penjualan',
                 ]));
             }
 
-            $recordedTotal = $sale->grand_total ?? $sale->total;
-            $transactionTotal = $recordedTotal !== null
-                ? max(0, (float) $recordedTotal - $returnedValue)
-                : $saleTotal;
             $transactions->push([
                 'date' => $sale->created_at,
                 'invoice' => $sale->code,
                 'outlet' => $sale->outlet?->name ?? '-',
                 'cashier' => $this->cashierName($sale),
                 'payment_method' => $this->paymentMethod($sale),
-                'total' => $transactionTotal,
+                'total' => max(0, $saleTotal),
             ]);
         }
 
@@ -123,8 +114,7 @@ class OutletLaporanService
                     'cashier' => $this->cashierName($refund->penjualan),
                     'qty' => $qty,
                     'unit_price' => $unitPrice,
-                    'discount_per_unit' => 0,
-                    'discount_total' => 0,
+                    'rafaksi' => 0,
                     'subtotal' => $subtotal,
                     'type' => 'Pengganti Retur',
                 ]));
@@ -145,14 +135,20 @@ class OutletLaporanService
         $paymentMethods = $transactions->groupBy('payment_method')->map(fn ($items) => (float) $items->sum('total'));
         $bon = $this->bonTotal($start, $end, $outletId, $cashierId);
         $setoranAkhir = $this->setoranTotal($start, $end, $outletId, $cashierId);
+        $displayRows = $this->withRowSpans(
+            $rows->sortBy([['outlet', 'asc'], ['invoice', 'asc'], ['tanggal', 'asc']])->values(),
+            ['invoice', 'outlet', 'kasir', 'type'],
+            ['invoice', 'outlet']
+        );
 
         return [
-            'rows' => $rows->values(),
+            'rows' => $displayRows,
             'transactions' => $transactions->values(),
             'paymentMethods' => $paymentMethods,
             'summary' => [
                 'total_penjualan' => (float) $transactions->sum('total'),
                 'bon' => $bon,
+                'total_voucher' => $totalVoucher,
                 'setoran_akhir' => $setoranAkhir,
                 'jumlah_transaksi' => $transactions->count(),
             ],
@@ -175,23 +171,12 @@ class OutletLaporanService
             ->whereHas('promotionApplications', function ($query) use ($promotionId) {
                 $query->when($promotionId, fn ($q) => $q->where('promotion_id', $promotionId));
             })
-            ->with([
-                'outlet', 'kasir', 'cashierShift', 'items.product',
-                'refundPenjualans' => fn ($query) => $query->whereBetween('created_at', [$start, $end]),
-                'refundPenjualans.items',
-                'promotionApplications' => fn ($query) => $query->when($promotionId, fn ($q) => $q->where('promotion_id', $promotionId)),
-            ])
+            ->with('items.product')
             ->orderBy('created_at')->orderBy('id')->get();
 
         $rows = collect();
+        $returnedByItem = $this->returnedQuantities($end, $outletId);
         foreach ($sales as $sale) {
-            $returnedByItem = $sale->refundPenjualans
-                ->flatMap(fn ($refund) => $refund->items)
-                ->where('type', 'return')
-                ->filter(fn ($item) => $item->penjualan_item_id)
-                ->groupBy('penjualan_item_id')
-                ->map(fn ($items) => (float) $items->sum('qty'));
-
             foreach ($sale->items as $item) {
                 $details = collect(is_array($item->promotion_details) ? $item->promotion_details : []);
                 if ($promotionId) {
@@ -222,10 +207,7 @@ class OutletLaporanService
                     ->filter()->unique()->implode(', ');
                 $unitPrice = (float) ($item->price ?? 0);
                 $rows->push([
-                    'tanggal' => $sale->created_at,
-                    'invoice' => $sale->code,
-                    'outlet' => $sale->outlet?->name ?? '-',
-                    'kasir' => $this->cashierName($sale),
+                    'product_id' => $item->product_id,
                     'barcode' => $item->product?->code ?? '-',
                     'product' => $item->product?->name ?? '-',
                     'qty' => $rafaksiQty,
@@ -237,6 +219,23 @@ class OutletLaporanService
                 ]);
             }
         }
+        $rows = $rows->groupBy('product_id')->map(function ($productRows) {
+            $first = $productRows->first();
+            $qty = (float) $productRows->sum('qty');
+            $discount = (float) $productRows->sum('discount_total');
+            $subtotal = (float) $productRows->sum('subtotal');
+
+            return [
+                'barcode' => $first['barcode'],
+                'product' => $first['product'],
+                'qty' => $qty,
+                'unit_price' => $qty > 0 ? $subtotal / $qty : 0,
+                'discount_per_unit' => $qty > 0 ? $discount / $qty : 0,
+                'discount_total' => $discount,
+                'subtotal' => $subtotal,
+                'keterangan' => $productRows->pluck('keterangan')->unique()->implode(', '),
+            ];
+        })->sortBy('product')->values();
 
         $promotions = Promotion::query()
             ->when($promotionId, fn ($query) => $query->whereKey($promotionId))
@@ -334,6 +333,7 @@ class OutletLaporanService
             $hppAfterTax = $hpp + $tax;
 
             return [
+                'outlet_id' => $stock->owner_id,
                 'outlet' => $stock->owner?->name ?? '-',
                 'barcode' => $stock->product?->code ?? '-',
                 'product' => $stock->product?->name ?? '-',
@@ -347,6 +347,7 @@ class OutletLaporanService
                 'inventory_after_tax' => $hppAfterTax * $qty,
             ];
         })->values();
+        $rows = $this->withRowSpans($rows, ['outlet'], ['outlet_id']);
 
         return [
             'rows' => $rows,
@@ -370,16 +371,20 @@ class OutletLaporanService
         $windowStart = $windowEnd->copy()->startOfMonth()->subMonths(2);
         $outletId = $this->outletId($request);
 
-        $stockTotals = OwnerStock::query()
-            ->select('owner_id', 'product_id', DB::raw('SUM(qty) as qty'))
+        $outletStocks = OwnerStock::query()
+            ->select('owner_id', 'product_id')
             ->when($outletId, fn ($query) => $query->where('owner_id', $outletId))
             ->groupBy('owner_id', 'product_id')->get();
+        $warehouseStocks = Stock::query()
+            ->select('product_id', DB::raw('SUM(qty) as qty'))
+            ->groupBy('product_id')->pluck('qty', 'product_id');
 
         $historySales = $this->saleQuery(null, $windowEnd, $outletId)
             ->with('items')->get();
         $windowSales = $this->saleQuery($windowStart, $windowEnd, $outletId)
-            ->with(['items', 'refundPenjualans' => fn ($query) => $query->whereDate('created_at', '<=', $windowEnd->toDateString()), 'refundPenjualans.items'])
+            ->with('items')
             ->get();
+        $returnedByItem = $this->returnedQuantities($windowEnd, $outletId);
         $salesQty = collect();
         $firstSales = collect();
 
@@ -395,9 +400,7 @@ class OutletLaporanService
         foreach ($windowSales as $sale) {
             foreach ($sale->items as $item) {
                 $key = $sale->outlet_id.'-'.$item->product_id;
-                $returned = $sale->refundPenjualans->flatMap(fn ($refund) => $refund->items)
-                    ->where('type', 'return')->where('penjualan_item_id', $item->id)
-                    ->sum('qty');
+                $returned = $returnedByItem[$item->id] ?? 0;
                 $salesQty[$key] = ($salesQty[$key] ?? 0) + max(0, (float) $item->qty - (float) $returned);
             }
         }
@@ -411,13 +414,13 @@ class OutletLaporanService
             }
         }
 
-        $outletIds = $stockTotals->pluck('owner_id')->merge($salesQty->keys()
+        $outletIds = $outletStocks->pluck('owner_id')->merge($salesQty->keys()
             ->map(fn ($key) => (int) explode('-', $key)[0]))->filter()->unique()->values();
         if ($outletId) {
             $outletIds = collect([$outletId]);
         }
 
-        $productIds = $stockTotals->pluck('product_id')->merge($salesQty->keys()
+        $productIds = $outletStocks->pluck('product_id')->merge($salesQty->keys()
             ->map(fn ($key) => (int) explode('-', $key)[1]))->filter()->unique()->values();
         $products = Product::with('category')->whereIn('id', $productIds)->get()->keyBy('id');
         $outlets = Outlet::whereIn('id', $outletIds)->get()->keyBy('id');
@@ -427,7 +430,7 @@ class OutletLaporanService
             ->whereDate('purchase_date', '<=', $windowEnd->toDateString())
             ->when($outletId, fn ($query) => $query->where('outlet_id', $outletId))
             ->groupBy('outlet_id')->pluck('total', 'outlet_id');
-        $stockMap = $stockTotals->keyBy(fn ($stock) => $stock->owner_id.'-'.$stock->product_id);
+        $stockMap = $outletStocks->keyBy(fn ($stock) => $stock->owner_id.'-'.$stock->product_id);
 
         $rows = collect();
         foreach ($outletIds as $currentOutletId) {
@@ -449,10 +452,11 @@ class OutletLaporanService
                 $factor = [1 => 2.5, 2 => 1.875, 3 => 1.25, 4 => 0.625][$frequency];
                 $manualMin = (int) ($product->min_stock ?? 0);
                 $minStock = $eligible ? (int) ceil($averageSold * $factor) : $manualMin;
-                $currentQty = (float) ($stockMap[$key]->qty ?? 0);
+                $currentQty = (float) ($warehouseStocks[$productId] ?? 0);
                 $outOfStock = $currentQty < $minStock;
 
                 $rows->push([
+                    'outlet_id' => $currentOutletId,
                     'outlet' => $outlets->get($currentOutletId)?->name ?? '-',
                     'barcode' => $product->code ?? '-',
                     'product' => $product->name ?? '-',
@@ -473,6 +477,7 @@ class OutletLaporanService
                 ]);
             }
         }
+        $rows = $this->withRowSpans($rows, ['outlet'], ['outlet_id']);
 
         return [
             'rows' => $rows->values(),
@@ -497,6 +502,30 @@ class OutletLaporanService
             Carbon::parse($start)->startOfDay(),
             Carbon::parse($end)->endOfDay(),
         ];
+    }
+
+    /** Mark the first row of each consecutive equal value with its table rowspan. */
+    protected function withRowSpans(Collection $rows, array $columns, array $scope): Collection
+    {
+        $displayRows = $rows->values()->all();
+        $count = count($displayRows);
+        foreach ($columns as $column) {
+            for ($index = 0; $index < $count;) {
+                $span = 1;
+                while ($index + $span < $count
+                    && $displayRows[$index + $span][$column] === $displayRows[$index][$column]
+                    && collect($scope)->every(fn ($field) => $displayRows[$index + $span][$field] === $displayRows[$index][$field])) {
+                    $span++;
+                }
+                $displayRows[$index][$column.'_span'] = $span;
+                for ($next = 1; $next < $span; $next++) {
+                    $displayRows[$index + $next][$column.'_span'] = 0;
+                }
+                $index += $span;
+            }
+        }
+
+        return collect($displayRows);
     }
 
     protected function outletId(Request $request): ?int
@@ -534,12 +563,92 @@ class OutletLaporanService
             'product' => $product?->name ?? '-',
             'qty' => (float) ($values['qty'] ?? 0),
             'unit_price' => (float) ($values['unit_price'] ?? 0),
-            'discount_per_unit' => (float) ($values['discount_per_unit'] ?? 0),
-            'discount_total' => (float) ($values['discount_total'] ?? 0),
+            'rafaksi' => (float) ($values['rafaksi'] ?? 0),
             'subtotal' => (float) ($values['subtotal'] ?? 0),
             'payment_method' => $values['payment_method'] ?? ($sale ? $this->paymentMethod($sale) : '-'),
             'type' => $values['type'] ?? 'Penjualan',
         ];
+    }
+
+    /** Allocate returns without a sale item to the newest eligible invoice at the same outlet. */
+    protected function returnedQuantities(Carbon $end, ?int $outletId): \Illuminate\Support\Collection
+    {
+        $refunds = RefundPenjualan::query()
+            ->where('created_at', '<=', $end)
+            ->when($outletId, fn ($query) => $query->where('outlet_id', $outletId))
+            ->with('items')
+            ->orderBy('created_at')->orderBy('id')->get();
+        $items = $refunds->flatMap(fn ($refund) => $refund->items->where('type', 'return'));
+        $allocated = $items->filter(fn ($item) => $item->penjualan_item_id)
+            ->groupBy('penjualan_item_id')
+            ->map(fn ($group) => (float) $group->sum('qty'));
+        $unlinked = $items->reject(fn ($item) => $item->penjualan_item_id);
+        if ($unlinked->isEmpty()) {
+            return $allocated;
+        }
+
+        $candidates = PenjualanItem::query()
+            ->whereIn('product_id', $unlinked->pluck('product_id')->unique())
+            ->whereHas('penjualan', function ($query) use ($end, $outletId) {
+                $query->where('created_at', '<=', $end)
+                    ->where(fn ($q) => $q->where('status', 'paid')->orWhereNull('status'))
+                    ->when($outletId, fn ($q) => $q->where('outlet_id', $outletId));
+            })
+            ->with('penjualan')
+            ->get()
+            ->sort(fn ($a, $b) => $b->penjualan->created_at <=> $a->penjualan->created_at ?: $b->id <=> $a->id)
+            ->groupBy(fn ($item) => $item->penjualan->outlet_id.'-'.$item->product_id);
+
+        foreach ($refunds as $refund) {
+            foreach ($refund->items->where('type', 'return')->reject(fn ($item) => $item->penjualan_item_id) as $item) {
+                $remaining = (float) $item->qty;
+                foreach ($candidates->get($refund->outlet_id.'-'.$item->product_id, collect()) as $candidate) {
+                    if ($remaining <= 0) {
+                        break;
+                    }
+                    if ($candidate->penjualan->created_at->gt($refund->created_at)
+                        || ($refund->penjualan_id && (int) $candidate->penjualan_id !== (int) $refund->penjualan_id)) {
+                        continue;
+                    }
+                    $available = max(0, (float) $candidate->qty - (float) ($allocated[$candidate->id] ?? 0));
+                    $take = min($remaining, $available);
+                    $allocated[$candidate->id] = (float) ($allocated[$candidate->id] ?? 0) + $take;
+                    $remaining -= $take;
+                }
+            }
+        }
+
+        return $allocated;
+    }
+
+    /** Apportion voucher redemptions to the products they apply to. */
+    protected function voucherAllocation(Penjualan $sale): array
+    {
+        $balances = $sale->items->mapWithKeys(fn ($item) => [
+            $item->id => (float) $item->price * (float) $item->qty,
+        ])->all();
+        $allocated = array_fill_keys(array_keys($balances), 0.0);
+        foreach ($sale->vouchers as $voucher) {
+            $eligible = $sale->items->filter(fn ($item) => $voucher->appliesToProduct((int) $item->product_id))
+                ->pluck('id')->all();
+            $base = array_sum(array_intersect_key($balances, array_flip($eligible)));
+            $remaining = min((float) $voucher->pivot->amount, $base);
+            foreach ($eligible as $index => $itemId) {
+                $amount = $index === count($eligible) - 1 ? $remaining
+                    : min($remaining, $base > 0 ? (float) $voucher->pivot->amount * $balances[$itemId] / $base : 0);
+                $allocated[$itemId] += $amount;
+                $balances[$itemId] -= $amount;
+                $remaining -= $amount;
+            }
+        }
+        $missing = max(0, (float) ($sale->voucher_total ?? 0) - array_sum($allocated));
+        $base = array_sum($balances);
+        foreach (array_keys($balances) as $itemId) {
+            $amount = $base > 0 ? $missing * $balances[$itemId] / $base : 0;
+            $allocated[$itemId] += $amount;
+        }
+
+        return $allocated;
     }
 
     protected function paymentMethod(?Penjualan $sale): string

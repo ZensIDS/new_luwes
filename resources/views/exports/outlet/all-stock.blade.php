@@ -9,7 +9,8 @@
     <tbody>
         @foreach ($rows as $row)
             <tr>
-                <td>{{ $row['outlet'] }}</td><td>{{ $row['barcode'] }}</td><td>{{ $row['product'] }}</td><td>{{ $row['category'] }}</td><td>{{ $row['qty'] }}</td><td>{{ $row['satuan'] }}</td>
+                @if ($row['outlet_span'] > 0)<td rowspan="{{ $row['outlet_span'] }}">{{ $row['outlet'] }}</td>@endif
+                <td>{{ $row['barcode'] }}</td><td>{{ $row['product'] }}</td><td>{{ $row['category'] }}</td><td>{{ $row['qty'] }}</td><td>{{ $row['satuan'] }}</td>
                 <td>{{ $row['hpp'] }}</td><td>{{ $row['tax'] }}</td><td>{{ $row['hpp_after_tax'] }}</td><td>{{ $row['inventory_before_tax'] }}</td><td>{{ $row['inventory_after_tax'] }}</td>
             </tr>
         @endforeach

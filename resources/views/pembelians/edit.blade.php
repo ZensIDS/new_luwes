@@ -822,6 +822,7 @@
 
             sorted.forEach(function (p) {
                 const isUnder = p.is_under_minimum;
+                const suggestedQty = Math.max(0, Number(p.effective_min ?? p.min_stock ?? 0) - Number(p.stock_count ?? 0));
                 const code = p.code ? String(p.code).trim() : '';
                 const alreadyInPo = used.ids.has(String(p.id)) || (code && used.codes.has(code));
 
@@ -842,7 +843,7 @@
                     })
                     .css('width', '70px')
                     .prop('disabled', !!alreadyInPo)
-                    .val(0) // Nilai awal kembali ke 0
+                    .val(alreadyInPo ? 0 : (isUnder ? suggestedQty : 0))
                     .on('input', function() {
                         // 1. Hapus semua karakter yang bukan angka (termasuk tanda minus '-')
                         let value = $(this).val().replace(/[^0-9]/g, '');

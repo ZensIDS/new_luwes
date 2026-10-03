@@ -7,7 +7,7 @@
             <th>Outlet</th><th>Barcode</th><th>Produk</th><th>Kategori</th>
             <th>Periode Penjualan</th><th>Penjualan Rata-rata/Bulan</th>
             <th>Jumlah PO (3 Bulan)</th><th>PO/Bulan</th><th>Faktor</th>
-            <th>Min Stock Manual</th><th>Min Stock Hasil Hitung</th><th>Stock Saat Ini</th>
+            <th>Min Stock Manual</th><th>Min Stock Hasil Hitung</th><th>Stok Gudang Saat Ini</th>
             <th>Saran Qty PO</th><th>Status Stock</th><th>Status Perhitungan</th>
             <th>Penjualan Pertama</th><th>Per Tanggal</th>
         </tr>
@@ -15,7 +15,7 @@
     <tbody>
         @foreach ($rows as $row)
             <tr>
-                <td>{{ $row['outlet'] }}</td>
+                @if ($row['outlet_span'] > 0)<td rowspan="{{ $row['outlet_span'] }}">{{ $row['outlet'] }}</td>@endif
                 <td>{{ $row['barcode'] }}</td>
                 <td>{{ $row['product'] }}</td>
                 <td>{{ $row['category'] }}</td>

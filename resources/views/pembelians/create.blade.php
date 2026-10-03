@@ -457,7 +457,7 @@
 
             sorted.forEach(function (p) {
                 const isUnder = p.is_under_minimum;
-                const suggestedQty = Math.max(1, (p.effective_min || p.min_stock || 0) - (p.stock_count || 0));
+                const suggestedQty = Math.max(0, Number(p.effective_min ?? p.min_stock ?? 0) - Number(p.stock_count ?? 0));
 
                 const $tr = $('<tr>').addClass(isUnder ? 'danger' : '');
 
@@ -474,7 +474,7 @@
                         class: 'form-control input-sm cek-qty'
                     })
                     .css('width', '70px')
-                    .val(0) // Nilai awal kembali ke 0
+                    .val(isUnder ? suggestedQty : 0)
                     .on('input', function() {
                         // 1. Hapus semua karakter yang bukan angka (termasuk tanda minus '-')
                         let value = $(this).val().replace(/[^0-9]/g, '');
