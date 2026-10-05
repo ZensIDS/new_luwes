@@ -57,17 +57,18 @@
         html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         :root {
             /* === ATUR KETEBALAN TINTA DI SINI (satuan px, makin besar makin tebal) ===
-               --ink        : teks biasa      (0 = tipis/bolong, 0.3-0.4 = pas, >0.6 = mulai meleleh)
+               --ink        : teks biasa      (0 = normal, 0.1-0.2 = sedikit lebih tebal, >0.4 = mulai meleleh)
                --ink-strong : nama produk / total / nama toko */
-            --ink: 0.35px;
-            --ink-strong: 0.65px;
+            --ink: 0px;
+            --ink-strong: 0.3px;
         }
         body {
             width: {{ $printable }};
             margin: 0 auto;
             padding: 2mm 0 8mm;
-            /* Font sans-serif bergaris merata jauh lebih awet di thermal dibanding Courier New yang tipis */
-            font-family: Tahoma, Verdana, Arial, 'Liberation Sans', sans-serif;
+            /* Sama dengan font test print Windows (Lucida Console): garis tegas, antar huruf lega */
+            font-family: 'Lucida Console', Consolas, 'Courier New', monospace;
+            letter-spacing: .2px;
             font-size: {{ $baseFont }};
             font-weight: normal;
             color: #000;
@@ -152,11 +153,11 @@
             @endphp
             <tr class="item-row"><td colspan="2" class="item-name">{{ \Illuminate\Support\Str::words($item->product?->name ?? 'Produk', 9, '...') }}</td></tr>
             <tr class="item-row qty-price">
-                <td>{{ $item->qty }} x @if ($referencePrice > $unitPrice)<span class="strike">@currency($referencePrice)</span> @endif @currency($unitPrice)</td>
-                <td class="price-col">@currency($lineSubtotal)</td>
+                <td>{{ $item->qty }} x @if ($referencePrice > $unitPrice)<span class="strike">{{ number_format($referencePrice, 0, ',', '.') }}</span> @endif{{ number_format($unitPrice, 0, ',', '.') }}</td>
+                <td class="price-col">{{ number_format($lineSubtotal, 0, ',', '.') }}</td>
             </tr>
             @if ($discountTotal > 0)
-                <tr class="disc-row"><td>Diskon Item ({{ $item->qty }}x @currency($discountPerUnit))</td><td class="disc-value">-@currency($discountTotal)</td></tr>
+                <tr class="disc-row"><td>Diskon Item ({{ $item->qty }}x {{ number_format($discountPerUnit, 0, ',', '.') }})</td><td class="disc-value">-{{ number_format($discountTotal, 0, ',', '.') }}</td></tr>
             @endif
         @endforeach
     </table>
