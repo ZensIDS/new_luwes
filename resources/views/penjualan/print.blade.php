@@ -55,20 +55,29 @@
         @page { size: {{ $paperWidth }} auto; margin: 0; }
         * { box-sizing: border-box; }
         html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        :root {
+            /* === ATUR KETEBALAN TINTA DI SINI (satuan px, makin besar makin tebal) ===
+               --ink        : teks biasa      (0 = tipis/bolong, 0.3-0.4 = pas, >0.6 = mulai meleleh)
+               --ink-strong : nama produk / total / nama toko */
+            --ink: 0.35px;
+            --ink-strong: 0.65px;
+        }
         body {
             width: {{ $printable }};
             margin: 0 auto;
             padding: 2mm 0 8mm;
-            font-family: 'Courier New', ui-monospace, monospace;
+            /* Font sans-serif bergaris merata jauh lebih awet di thermal dibanding Courier New yang tipis */
+            font-family: Tahoma, Verdana, Arial, 'Liberation Sans', sans-serif;
             font-size: {{ $baseFont }};
             font-weight: normal;
             color: #000;
             line-height: 1.3;
+            -webkit-text-stroke: var(--ink) #000;
         }
         .center { text-align: center; }
         .bold { font-weight: bold; }
         .store-logo { max-width: {{ $paper === '58' ? '28mm' : '40mm' }}; max-height: 18mm; margin-bottom: 1mm; filter: grayscale(1) contrast(1.6); }
-        .store-name { font-size: {{ $titleFont }}; font-weight: bold; letter-spacing: .5px; word-break: break-word; }
+        .store-name { font-size: {{ $titleFont }}; font-weight: normal; -webkit-text-stroke: var(--ink-strong) #000; letter-spacing: .5px; word-break: break-word; }
         .small { font-size: {{ $smallFont }}; }
         hr { border: none; border-top: 1px dashed #000; margin: 5px 0; }
         table { width: 100%; border-collapse: collapse; table-layout: auto; }
@@ -77,8 +86,9 @@
         .meta td:first-child { white-space: nowrap; padding-right: 3px; }
         .meta td:last-child { text-align: right; word-break: break-word; }
         .item-row td { padding: 1px 0; }
-        .item-name { word-break: break-word; overflow-wrap: anywhere; font-weight: bold; }
+        .item-name { word-break: break-word; overflow-wrap: anywhere; -webkit-text-stroke: var(--ink-strong) #000; }
         .qty-price { font-size: {{ $smallFont }}; }
+        .qty-price td:first-child { white-space: nowrap; }
         .price-col { text-align: right; white-space: nowrap; padding-left: 3px; }
         .disc-row { font-size: {{ $smallFont }}; }
         .disc-value { text-align: right; white-space: nowrap; padding-left: 3px; }
@@ -86,12 +96,12 @@
         .totals td { padding: 1px 0; }
         .totals .label { text-align: left; }
         .totals .value { text-align: right; white-space: nowrap; padding-left: 3px; }
-        .grand-total { font-size: {{ $totalFont }}; font-weight: bold; }
+        .grand-total { font-size: {{ $totalFont }}; font-weight: normal; -webkit-text-stroke: var(--ink-strong) #000; }
         .footer-msg { margin-top: 6px; font-size: {{ $smallFont }}; word-break: break-word; }
         .footer-msg img { max-width: 100%; }
 
         /* Tampilan layar saja (tombol & petunjuk) */
-        .no-print { margin: 14px auto 0; width: 100%; max-width: 340px; font-family: Arial, sans-serif; font-weight: normal; font-size: 14px; }
+        .no-print { margin: 14px auto 0; width: 100%; max-width: 340px; font-family: Arial, sans-serif; font-weight: normal; font-size: 14px; -webkit-text-stroke: 0; }
         .no-print a, .no-print button { display: block; width: 100%; margin-top: 6px; padding: 10px; border: 1px solid #777; background: #fff; color: #000; font: inherit; text-align: center; text-decoration: none; cursor: pointer; border-radius: 4px; }
         .no-print .primary { background: #111; color: #fff; border-color: #111; font-weight: bold; }
         .no-print .papers { display: flex; gap: 6px; }
@@ -140,7 +150,7 @@
                 $discountPerUnit = max(0, $referencePrice - $unitPrice);
                 $discountTotal = $discountPerUnit * (float) $item->qty;
             @endphp
-            <tr class="item-row"><td colspan="2" class="item-name">{{ $item->product?->name ?? 'Produk' }}</td></tr>
+            <tr class="item-row"><td colspan="2" class="item-name">{{ \Illuminate\Support\Str::words($item->product?->name ?? 'Produk', 9, '...') }}</td></tr>
             <tr class="item-row qty-price">
                 <td>{{ $item->qty }} x @if ($referencePrice > $unitPrice)<span class="strike">@currency($referencePrice)</span> @endif @currency($unitPrice)</td>
                 <td class="price-col">@currency($lineSubtotal)</td>
