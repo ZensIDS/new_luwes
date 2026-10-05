@@ -61,10 +61,9 @@
             padding: 2mm 0 8mm;
             font-family: 'Courier New', ui-monospace, monospace;
             font-size: {{ $baseFont }};
-            font-weight: bold; /* thermal cenderung pucat, bold bikin tulisan tegas */
+            font-weight: normal;
             color: #000;
             line-height: 1.3;
-            -webkit-font-smoothing: none;
         }
         .center { text-align: center; }
         .bold { font-weight: bold; }
@@ -78,7 +77,7 @@
         .meta td:first-child { white-space: nowrap; padding-right: 3px; }
         .meta td:last-child { text-align: right; word-break: break-word; }
         .item-row td { padding: 1px 0; }
-        .item-name { word-break: break-word; overflow-wrap: anywhere; }
+        .item-name { word-break: break-word; overflow-wrap: anywhere; font-weight: bold; }
         .qty-price { font-size: {{ $smallFont }}; }
         .price-col { text-align: right; white-space: nowrap; padding-left: 3px; }
         .disc-row { font-size: {{ $smallFont }}; }
