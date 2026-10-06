@@ -9,11 +9,41 @@
             <div class="col-xs-12">
                 <div class="box">
                     <div class="box-header with-border">
+                        @if ($canManageSales)
                         <a href="{{ route('penjualan.create') }}" class="btn btn-primary"><i class="fa fa-plus"></i> Buat Penjualan Baru</a>
+                        @endif
                         <a href="{{ route('owner-stocks.index') }}" class="btn btn-default"><i class="fa fa-cubes"></i> Lihat Stock Toko</a>
                         <a href="{{ route('cashier.history') }}" class="btn btn-info"><i class="fa fa-history"></i> History Kasir</a>
                         <a href="{{ route('refundPenjualan.create') }}" class="btn btn-warning"><i class="fa fa-exchange"></i> Retur / Ganti Barang</a>
                     </div>
+                    <div class="box-body" style="padding-bottom:0">
+                        <form method="GET" action="{{ route('penjualan.index') }}" class="form-inline">
+                            <div class="form-group" style="min-width:320px">
+                                <label for="kasir_id" style="margin-right:8px">Akun Kasir</label>
+                                <select name="kasir_id" id="kasir_id" class="form-control" style="min-width:260px"
+                                    {{ $isCashier ? 'disabled' : '' }} onchange="this.form.submit()">
+                                    @unless ($isCashier)
+                                        <option value="">-- Pilih akun kasir --</option>
+                                    @endunless
+                                    @foreach ($cashiers as $cashier)
+                                        <option value="{{ $cashier->id }}" {{ (int) $selectedCashierId === $cashier->id ? 'selected' : '' }}>
+                                            {{ $cashier->name }}@if ($cashier->outlet) — {{ $cashier->outlet->name }}@endif
+                                        </option>
+                                    @endforeach
+                                </select>
+                            </div>
+                            @unless ($isCashier)
+                                <button type="submit" class="btn btn-default"><i class="fa fa-filter"></i> Tampilkan</button>
+                            @endunless
+                        </form>
+                    </div>
+                    @if (! $selectedCashierId)
+                        <div class="box-body">
+                            <div class="alert alert-info text-center" style="margin-bottom:0">
+                                Pilih akun kasir terlebih dahulu untuk menampilkan data penjualan.
+                            </div>
+                        </div>
+                    @else
                     <div class="box-body table-responsive text-nowrap">
                         <table id="example1" class="table table-bordered table-striped">
                             <thead>
@@ -81,6 +111,7 @@
                                     <td>
                                         <a class="btn btn-info" href="{{ route('penjualan.show', $value->id) }}">Show</a>
                                         <a class="btn btn-warning" href="{{ route('penjualan.print', $value->id) }}">Re-Print</a>
+                                        @if ($canManageSales)
                                         <form action="{{ route('penjualan.destroy', $value->id) }}" method="post"
                                             style="display: inline;">
                                             @method('delete')
@@ -88,6 +119,7 @@
                                             <button class="border-0 btn btn-danger"
                                                 onclick="return confirm('Are you sure?')">Hapus</button>
                                         </form>
+                                        @endif
                                     </td>
                                 </tr>
                             @endforeach
@@ -95,10 +127,14 @@
                         </table>
                         @if ($penjualan->isEmpty())
                             <div class="alert alert-info text-center" style="margin-top:15px;margin-bottom:0">
-                                Belum ada penjualan. <a href="{{ route('penjualan.create') }}">Buka Kasir POS untuk membuat transaksi pertama.</a>
+                                Belum ada penjualan untuk akun kasir ini.
+                                @if ($canManageSales)
+                                    <a href="{{ route('penjualan.create') }}">Buka Kasir POS untuk membuat transaksi.</a>
+                                @endif
                             </div>
                         @endif
                     </div><!-- /.box-body -->
+                    @endif
                 </div><!-- /.box -->
             </div><!-- /.col -->
         </div><!-- /.row -->

@@ -172,8 +172,8 @@
         </li>
         @endif
 
-        {{-- Penjualan (superadmin, kasir) --}}
-        @if (in_array($role, ['superadmin', 'kasir']))
+        {{-- Penjualan (superadmin, staff-outlet, kasir) --}}
+        @if (in_array($role, ['superadmin', 'staff-outlet', 'kasir']))
         <li class="{{ request()->is('penjualan*') ? 'active' : '' }}">
             <a href="{{ route('penjualan.index') }}"><i class="fa fa-file-text"></i><span>Penjualan</span></a>
         </li>

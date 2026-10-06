@@ -7,6 +7,7 @@ use App\Models\Kas;
 use App\Models\Outlet;
 use App\Models\Penjualan;
 use App\Models\Stock;
+use App\Models\User;
 use App\Models\Voucher;
 use App\Services\CashierSaleService;
 use App\Support\OutletAccess;
@@ -45,10 +46,39 @@ class PenjualanController extends Controller
         ]);
     }
 
-    public function index()
+    public function index(Request $request)
     {
-        return view('penjualan.index', [
-            'penjualan' => Penjualan::doesntHave('transaction')
+        $user = $request->user();
+        $isCashier = $user->role === 'kasir';
+        $isStaffOutlet = $user->role === 'staff-outlet';
+
+        // Akun yang boleh dipilih di filter (hanya role kasir):
+        // - kasir        : hanya dirinya sendiri
+        // - staff-outlet : kasir di outlet-nya saja
+        // - lainnya      : semua akun kasir
+        $cashiers = User::query()
+            ->where('role', 'kasir')
+            ->when($isCashier, fn ($q) => $q->whereKey($user->id))
+            ->when($isStaffOutlet, fn ($q) => $q->where('outlet_id', $user->outlet_id))
+            ->with('outlet:id,name')
+            ->orderBy('name')
+            ->get(['id', 'name', 'role', 'outlet_id']);
+
+        // Kasir otomatis terkunci ke akunnya sendiri (input request diabaikan).
+        // Role lain default kosong dan harus memilih akun dulu.
+        $selectedCashierId = $isCashier ? $user->id : $request->input('kasir_id');
+        if ($selectedCashierId && ! $cashiers->contains('id', (int) $selectedCashierId)) {
+            $selectedCashierId = null;
+        }
+
+        $penjualan = collect();
+        if ($selectedCashierId) {
+            // Tidak memakai doesntHave('transaction'): penjualan POS yang memilih metode
+            // bayar ikut membuat record Transaction, sehingga akan ikut tersaring keluar.
+            // Penjualan marketplace tidak punya kasir_id, jadi tidak masuk filter ini.
+            $penjualan = Penjualan::query()
+                ->where('kasir_id', (string) $selectedCashierId)
+                ->when($isStaffOutlet, fn ($q) => $q->where('outlet_id', $user->outlet_id))
                 ->with([
                     'outlet',
                     'kasir',
@@ -57,8 +87,31 @@ class PenjualanController extends Controller
                     'items.product' => fn ($q) => $q->withTrashed(),
                 ])
                 ->orderBy('created_at', 'desc')
-                ->get(),
+                ->get();
+        }
+
+        return view('penjualan.index', [
+            'penjualan' => $penjualan,
+            'cashiers' => $cashiers,
+            'selectedCashierId' => $selectedCashierId ? (int) $selectedCashierId : null,
+            'isCashier' => $isCashier,
+            'canManageSales' => ! $isStaffOutlet,
         ]);
+    }
+
+    /**
+     * Kasir hanya boleh membuka penjualannya sendiri; staff-outlet hanya
+     * penjualan di outlet-nya.
+     */
+    private function ensurePenjualanAccess(Penjualan $penjualan): void
+    {
+        $user = auth()->user();
+
+        if ($user->role === 'kasir') {
+            abort_unless((string) $penjualan->kasir_id === (string) $user->id, 403, 'Anda tidak memiliki akses ke penjualan ini.');
+        } elseif ($user->role === 'staff-outlet') {
+            abort_unless((int) $penjualan->outlet_id === (int) $user->outlet_id, 403, 'Anda tidak memiliki akses ke penjualan ini.');
+        }
     }
 
     public function create()
@@ -111,6 +164,8 @@ class PenjualanController extends Controller
 
     public function show(Penjualan $penjualan)
     {
+        $this->ensurePenjualanAccess($penjualan);
+
         // dd($penjualan->load(['kasir', 'customer', 'items.product'])->toArray());
         // $pdf = PDF::loadView('penjualan.penjualan_pdf', ['penjualan' => $penjualan]);
 
@@ -122,6 +177,8 @@ class PenjualanController extends Controller
 
     public function print(Penjualan $penjualan)
     {
+        $this->ensurePenjualanAccess($penjualan);
+
         return view('penjualan.print', [
             'penjualan' => $penjualan,
         ]);
@@ -145,6 +202,10 @@ class PenjualanController extends Controller
 
     public function destroy(Penjualan $penjualan)
     {
+        $this->ensurePenjualanAccess($penjualan);
+        // staff-outlet hanya boleh melihat penjualan
+        abort_if(auth()->user()->role === 'staff-outlet', 403, 'Staff outlet tidak dapat menghapus penjualan.');
+
         $penjualan->delete();
 
         return redirect(route('penjualan.index'))->with('toast_success', 'Berhasil Menghapus Data!');
