@@ -105,7 +105,9 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
         ->name('product.minimum-adjustment.store');
     Route::resource('/product', ProductController::class);
 
-    Route::resource('/stock', StockController::class)->middleware('role:superadmin|admin-gudang|owner');
+    // Stok Gudang: staff-outlet hanya boleh melihat (index), tidak boleh aksi lain (show/destroy/dll)
+    Route::resource('/stock', StockController::class)->only(['index'])->middleware('role:superadmin|admin-gudang|owner|staff-outlet');
+    Route::resource('/stock', StockController::class)->except(['index'])->middleware('role:superadmin|admin-gudang|owner');
     Route::resource('/outlet-prices', App\Http\Controllers\OutletPriceController::class)->except(['show']);
     Route::get('/outlet-prices/products/search', [App\Http\Controllers\OutletPriceController::class, 'searchProducts'])->name('outlet-prices.products.search');
     Route::get('/outlet-prices/preview-hpp', [App\Http\Controllers\OutletPriceController::class, 'previewHpp'])->name('outlet-prices.preview-hpp');
@@ -240,16 +242,16 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('owner-stocks', [App\Http\Controllers\OwnerStockController::class, 'index'])->name('owner-stocks.index');
     Route::get('owner-stocks/data', [App\Http\Controllers\OwnerStockController::class, 'getIndexData'])->name('owner-stocks.index.data');
     Route::get('owner-stocks/history', [App\Http\Controllers\OwnerStockController::class, 'history'])->name('owner-stocks.history');
-    Route::get('stocks/data', [StockController::class, 'getIndexData'])->middleware('role:superadmin|admin-gudang|owner')->name('stocks.index.data');
+    Route::get('stocks/data', [StockController::class, 'getIndexData'])->middleware('role:superadmin|admin-gudang|owner|staff-outlet')->name('stocks.index.data');
     Route::get('owner-stocks/{owner}', [App\Http\Controllers\OwnerStockController::class, 'show'])->name('owner-stocks.show');
 
     Route::get('/product/{product}/price-history', [App\Http\Controllers\ProductController::class, 'priceHistory'])->name('product.price-history');
-    Route::get('/stock/{stock}/history', [App\Http\Controllers\StockController::class, 'history'])->middleware('role:superadmin|admin-gudang|owner')->name('stock.history');
+    Route::get('/stock/{stock}/history', [App\Http\Controllers\StockController::class, 'history'])->middleware('role:superadmin|admin-gudang|owner|staff-outlet')->name('stock.history');
 
     // Stock Kartu
-    Route::get('/stock-kartu', [App\Http\Controllers\StockController::class, 'kartu'])->middleware('role:superadmin|admin-gudang|owner')->name('stock.kartu');
-    Route::get('/stocks/search', [StockController::class, 'searchStock'])->middleware('role:superadmin|admin-gudang|owner')->name('stocks.search');
-    Route::get('/stock/kartu/data', [App\Http\Controllers\StockController::class, 'getKartuData'])->middleware('role:superadmin|admin-gudang|owner')->name('stock.kartu.data');
+    Route::get('/stock-kartu', [App\Http\Controllers\StockController::class, 'kartu'])->middleware('role:superadmin|admin-gudang|owner|staff-outlet')->name('stock.kartu');
+    Route::get('/stocks/search', [StockController::class, 'searchStock'])->middleware('role:superadmin|admin-gudang|owner|staff-outlet')->name('stocks.search');
+    Route::get('/stock/kartu/data', [App\Http\Controllers\StockController::class, 'getKartuData'])->middleware('role:superadmin|admin-gudang|owner|staff-outlet')->name('stock.kartu.data');
 
     // Stock Opname
     Route::get('/stock-opname', [App\Http\Controllers\StockController::class, 'opname'])->middleware('role:superadmin|admin-gudang|owner')->name('stock.opname');

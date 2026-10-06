@@ -11,7 +11,7 @@ class PromotionRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return in_array($this->user()?->role, ['superadmin', 'admin-gudang', 'owner'], true);
+        return in_array($this->user()?->role, ['superadmin', 'admin-gudang', 'owner', 'staff-outlet'], true);
     }
 
     public function rules(): array

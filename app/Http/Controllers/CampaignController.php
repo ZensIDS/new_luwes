@@ -475,6 +475,6 @@ class CampaignController extends Controller
 
     private function ensureManagementAccess(): void
     {
-        abort_unless(in_array(auth()->user()?->role, ['superadmin', 'admin-gudang', 'owner'], true), 403);
+        abort_unless(in_array(auth()->user()?->role, ['superadmin', 'admin-gudang', 'owner', 'staff-outlet'], true), 403);
     }
 }
