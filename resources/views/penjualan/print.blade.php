@@ -38,16 +38,33 @@
         $totalFont = $paper === '58' ? '15px' : '18px';
         $items = $penjualan->items;
         $itemCount = $items->sum(fn ($item) => (int) $item->qty);
-        $subtotalBeforePromotion = $items->sum(fn ($item) => (float) (
-            $item->base_subtotal
-                ?? ($item->base_price !== null
-                    ? (float) $item->qty * (float) $item->base_price
-                    : ($item->subtotal ?? ((float) $item->qty * (float) $item->price)))
-        ));
-        $promotionTotal = (float) ($penjualan->promotion_total ?? 0);
+        // Rincian per item dihitung dari satu sumber supaya semua angka di struk saling menjumlah:
+        // harga normal x qty - diskon toko - diskon rafaksi = subtotal item.
+        $lines = $items->map(function ($item) {
+            $qty = (int) $item->qty;
+            $net = (float) ($item->subtotal ?? ($qty * (float) $item->price));
+            $afterStore = (float) ($item->base_subtotal ?? $net);
+            $afterStore = max($afterStore, $net);
+            $normalPrice = (float) ($item->harga_aktif ?? 0);
+            $gross = max($normalPrice * $qty, $afterStore);
+
+            return [
+                'item' => $item,
+                'qty' => $qty,
+                'gross' => $gross,
+                'unit' => $qty > 0 ? $gross / $qty : $gross,
+                'store' => $gross - $afterStore,
+                'promo' => $afterStore - $net,
+                'net' => $net,
+            ];
+        });
+        $subtotalGross = (float) $lines->sum('gross');
+        $storeDiscountTotal = (float) $lines->sum('store');
+        $promotionTotal = (float) $lines->sum('promo');
+        $discountTotal = $storeDiscountTotal + $promotionTotal;
         $voucherTotal = (float) ($penjualan->voucher_total ?? 0);
         $grandTotal = (float) ($penjualan->grand_total
-            ?? max(0, $subtotalBeforePromotion - $promotionTotal - $voucherTotal));
+            ?? max(0, $subtotalGross - $discountTotal - $voucherTotal));
         $paidAmount = (float) ($penjualan->paid_amount ?? $penjualan->total ?? 0);
         $changeAmount = (float) ($penjualan->change_amount ?? max(0, $paidAmount - $grandTotal));
     @endphp
@@ -135,21 +152,17 @@
     <hr>
 
     <table>
-        @foreach ($items as $item)
-            @php
-                $lineSubtotal = (float) ($item->subtotal ?? ((float) $item->qty * (float) $item->price));
-                $unitPrice = (float) $item->price;
-                $referencePrice = (float) ($item->harga_aktif ?? $item->base_price ?? $unitPrice);
-                $discountPerUnit = max(0, $referencePrice - $unitPrice);
-                $discountTotal = $discountPerUnit * (float) $item->qty;
-            @endphp
-            <tr class="item-row"><td colspan="2" class="item-name">{{ \Illuminate\Support\Str::words($item->product?->name ?? 'Produk', 9, '...') }}</td></tr>
+        @foreach ($lines as $line)
+            <tr class="item-row"><td colspan="2" class="item-name">{{ \Illuminate\Support\Str::words($line['item']->product?->name ?? 'Produk', 9, '...') }}</td></tr>
             <tr class="item-row qty-price">
-                <td>{{ $item->qty }} x @if ($referencePrice > $unitPrice)<span class="strike">{{ number_format($referencePrice, 0, ',', '.') }}</span> @endif{{ number_format($unitPrice, 0, ',', '.') }}</td>
-                <td class="price-col">{{ number_format($lineSubtotal, 0, ',', '.') }}</td>
+                <td>{{ $line['qty'] }} x {{ number_format($line['unit'], 0, ',', '.') }}</td>
+                <td class="price-col">{{ number_format($line['gross'], 0, ',', '.') }}</td>
             </tr>
-            @if ($discountTotal > 0)
-                <tr class="disc-row"><td>Diskon Item ({{ $item->qty }}x {{ number_format($discountPerUnit, 0, ',', '.') }})</td><td class="disc-value">-{{ number_format($discountTotal, 0, ',', '.') }}</td></tr>
+            @if ($line['store'] > 0)
+                <tr class="disc-row"><td>&nbsp;Diskon Toko</td><td class="disc-value">-{{ number_format($line['store'], 0, ',', '.') }}</td></tr>
+            @endif
+            @if ($line['promo'] > 0)
+                <tr class="disc-row"><td>&nbsp;Diskon Rafaksi</td><td class="disc-value">-{{ number_format($line['promo'], 0, ',', '.') }}</td></tr>
             @endif
         @endforeach
     </table>
@@ -158,11 +171,14 @@
 
     <table class="totals">
         <tr><td class="label">Jumlah Item</td><td class="value">{{ $itemCount }}</td></tr>
-        <tr><td class="label">Subtotal</td><td class="value">@currency($subtotalBeforePromotion)</td></tr>
-        @if ($promotionTotal > 0)<tr><td class="label">Diskon Rafaksi</td><td class="value">-@currency($promotionTotal)</td></tr>@endif
+        <tr><td class="label">Subtotal</td><td class="value">@currency($subtotalGross)</td></tr>
+        @if ($discountTotal > 0)<tr><td class="label">Total Diskon</td><td class="value">-@currency($discountTotal)</td></tr>@endif
         @if ($voucherTotal > 0)<tr><td class="label">Voucher</td><td class="value">-@currency($voucherTotal)</td></tr>@endif
         <tr class="grand-total"><td class="label">TOTAL</td><td class="value">@currency($grandTotal)</td></tr>
     </table>
+    @if (($discountTotal + $voucherTotal) > 0)
+        <div class="center small" style="margin-top:3px;">Anda hemat @currency($discountTotal + $voucherTotal)</div>
+    @endif
 
     <hr>
 

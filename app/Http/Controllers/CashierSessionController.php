@@ -9,6 +9,7 @@ use App\Models\Outlet;
 use App\Support\OutletAccess;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Support\IndonesianNumber;
 use Spatie\Activitylog\Models\Activity;
 
 class CashierSessionController extends Controller
@@ -19,6 +20,10 @@ class CashierSessionController extends Controller
         OutletAccess::id($request);
         $request->merge([
             'opening_cashier_name' => trim((string) $request->input('opening_cashier_name')),
+        ]);
+
+        $request->merge([
+            'opening_cash' => IndonesianNumber::parse($request->input('opening_cash')),
         ]);
 
         $data = $request->validate([
@@ -95,9 +100,13 @@ class CashierSessionController extends Controller
         $this->ensureOperationAccess($cashierSession);
         abort_unless($cashierSession->status === 'open', 422, 'Sesi kasir sudah ditutup.');
 
+        $request->merge([
+            'amount' => IndonesianNumber::parse($request->input('amount')),
+        ]);
+
         $data = $request->validate([
             'type' => ['required', 'in:bon,check'],
-            'amount' => ['required', 'numeric', 'min:0'],
+            'amount' => ['required', 'numeric', $request->input('type') === 'bon' ? 'gt:0' : 'min:0'],
             'note' => ['required', 'string', 'max:1000'],
         ]);
 

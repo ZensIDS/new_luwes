@@ -28,16 +28,12 @@
                 @endif
             </div>
             <div class="pos-header-actions">
-                <span class="pos-shortcuts">F2 Cari · F3 Scan · F8 Voucher · F10 Process</span>
                 <a class="btn btn-xs btn-warning" href="{{ route('refundPenjualan.create', ['outlet_id' => $outlet->id]) }}">
                     <i class="fa fa-exchange"></i> Retur barang
                 </a>
                 @if ($cashierSession)
                     <button type="button" class="btn btn-xs btn-warning" data-toggle="modal" data-target="#bonModal">
                         <i class="fa fa-minus-circle"></i> Catat BON
-                    </button>
-                    <button type="button" class="btn btn-xs btn-default" data-toggle="modal" data-target="#drawerCheckModal">
-                        <i class="fa fa-calculator"></i> Cek drawer
                     </button>
                     <button type="button" class="btn btn-xs btn-warning" data-toggle="modal" data-target="#changeShiftModal">
                         <i class="fa fa-refresh"></i> Ganti shift
@@ -107,7 +103,7 @@
                                 <label for="bon_amount">Nominal</label>
                                 <div class="input-group">
                                     <span class="input-group-addon">Rp</span>
-                                    <input id="bon_amount" type="number" name="amount" class="form-control" min="1" step="1000" required>
+                                    <input id="bon_amount" type="text" inputmode="numeric" name="amount" class="form-control" data-currency-input data-currency-decimals="0" autocomplete="off" placeholder="0" required>
                                 </div>
                             </div>
                             <div class="form-group">
@@ -264,6 +260,9 @@
         .pos-cashier-details > .row { margin-bottom:0; }
         .pos-cashier-details > .table-responsive:nth-child(2) table { margin-bottom:0; }
         .pos-cashier-details tr[tabindex="0"]:focus, .pos-mode tr[tabindex="0"]:focus { outline:2px solid #605ca8; outline-offset:-2px; }
+        .pos-quick-field { position:fixed; left:-10000px; top:0; width:420px; max-width:92vw; }
+        .pos-quick-field:focus-within { left:50%; top:25%; transform:translateX(-50%); z-index:1060; padding:14px; background:#fff; border-radius:4px; box-shadow:0 8px 30px rgba(0,0,0,.35); }
+        .pos-cashier-details > .pos-quick-field { flex:0 0 auto; }
         .cashier-open-gate { flex:1 1 auto; display:flex; align-items:center; justify-content:center; overflow:auto; }
         .cashier-open-card { width:100%; max-width:460px; padding:30px; text-align:center; background:#fff; border-top:4px solid #00a65a; box-shadow:0 2px 8px rgba(0,0,0,.1); }
         .cashier-open-card h2 { margin-top:10px; }

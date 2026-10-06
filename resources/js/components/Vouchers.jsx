@@ -336,18 +336,6 @@ const Vouchers = ({
 
     return (
         <>
-            <div className="row" style={{ marginTop: 12 }}>
-                <div className="col-sm-6">
-                    <button type="button" className="btn btn-default btn-block" onClick={() => setVoucherModalOpen(true)}>
-                        <i className="fa fa-ticket"></i> Voucher <small>(F8)</small>
-                    </button>
-                </div>
-                <div className="col-sm-6">
-                    <button type="button" className="btn btn-warning btn-block" onClick={() => setPromotionModalOpen(true)}>
-                        <i className="fa fa-bolt"></i> Promo aktif <small>(F6)</small>
-                    </button>
-                </div>
-            </div>
             {info && <div><small className="text-success">{info}</small></div>}
             {error && <div><small className="text-danger">{error}</small></div>}
             {renderVoucherModal()}

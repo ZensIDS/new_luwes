@@ -51,6 +51,7 @@ const CartTable = ({
     cartTableRef,
 }) => {
     const change = Math.max(0, parseIdNumber(paidAmount) - grandTotal);
+    const selectedCustomer = customers.find((customer) => String(customer.id) === String(customerId));
     const selectedPaymentMethod = paymentMethods.find((method) => String(method.id) === String(paymentMethodId));
     const requiresPaymentReference = Boolean(paymentMethodId) && !/tunai|cash/i.test(selectedPaymentMethod?.name || "");
 
@@ -82,37 +83,21 @@ const CartTable = ({
                     </tbody>
                 </table>
             </div>
-            <div className="table-responsive text-nowrap" style={{ marginTop: 0 }}>
-                <table className="table table-sm table-bordered" style={{ marginBottom: 0 }}>
-                    <tbody>
-                        <tr>
-                            <td colSpan="4">Subtotal setelah Disc Toko</td>
-                            <td className="text-right">{formatRupiah(getBaseSubtotal(cart))}</td>
-                        </tr>
-                        {promotionTotal > 0 && <tr>
-                            <td colSpan="4">Potongan promo rafaksi / bundling</td>
-                            <td className="text-right text-danger">-{formatRupiah(promotionTotal)}</td>
-                        </tr>}
-                        <tr>
-                            <td colSpan="4">Subtotal setelah promo</td>
-                            <td className="text-right">{formatRupiah(getSubtotal(cart))}</td>
-                        </tr>
-                        {voucherBreakdown.map((voucher) => (
-                            <tr key={voucher.code}>
-                                <td colSpan="4">Voucher {voucher.code}</td>
-                                <td className="text-right text-danger">-{formatRupiah(voucher.amount)}</td>
-                            </tr>
-                        ))}
-                        <tr>
-                            <td colSpan="4">Total Voucher</td>
-                            <td className="text-right text-danger">-{formatRupiah(voucherTotal)}</td>
-                        </tr>
-                        <tr>
-                            <th colSpan="4">Grand Total</th>
-                            <th className="text-right">{formatRupiah(grandTotal)}</th>
-                        </tr>
-                    </tbody>
-                </table>
+            <div className="table-responsive" style={{ marginTop: 0, border: "1px solid #ddd", borderTop: 0, background: "#fafafa", padding: "4px 10px" }}>
+                <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: "2px 18px", fontSize: 12, color: "#555" }}>
+                    <span>Subtotal: <b>{formatRupiah(getBaseSubtotal(cart))}</b></span>
+                    {promotionTotal > 0 && <span className="text-danger">Promo: <b>-{formatRupiah(promotionTotal)}</b></span>}
+                    {promotionTotal > 0 && <span>Setelah promo: <b>{formatRupiah(getSubtotal(cart))}</b></span>}
+                    {voucherTotal > 0 && (
+                        <span className="text-danger" title={voucherBreakdown.map((voucher) => `${voucher.code}: -${formatRupiah(voucher.amount)}`).join("\n")}>
+                            Voucher{voucherBreakdown.length ? ` (${voucherBreakdown.map((voucher) => voucher.code).join(", ")})` : ""}: <b>-{formatRupiah(voucherTotal)}</b>
+                        </span>
+                    )}
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                    <span style={{ fontSize: 15, fontWeight: 700 }}>Grand Total</span>
+                    <span style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.2 }}>{formatRupiah(grandTotal)}</span>
+                </div>
             </div>
             <Vouchers
                 appliedVouchers={appliedVouchers}
@@ -129,39 +114,50 @@ const CartTable = ({
                 voucherBreakdown={voucherBreakdown}
                 onSyncPromotions={onSyncPromotions}
             />
+            <div className="pos-quick-field" data-quick-field="customer">
+                <label>Customer <small>(F4)</small></label>
+                <ReactSelectField
+                    ref={customerInputRef}
+                    value={customerId}
+                    onChange={(value) => {
+                        setCustomerId(value);
+                        window.setTimeout(() => customerInputRef.current?.blur?.(), 0);
+                    }}
+                    placeholder="Pilih customer"
+                    isClearable={false}
+                    options={[
+                        { value: "", label: "Umum" },
+                        ...customers.map((customer) => ({
+                            value: customer.id,
+                            label: `${customer.name}${customer.no_telp ? ` — ${customer.no_telp}` : ""}`,
+                        })),
+                    ]}
+                />
+            </div>
+            <div className="pos-quick-field" data-quick-field="payment">
+                <label>Metode Pembayaran <small>(F7)</small></label>
+                <ReactSelectField
+                    ref={paymentMethodInputRef}
+                    value={paymentMethodId}
+                    onChange={(value) => {
+                        setPaymentMethodId(value);
+                        window.setTimeout(() => paymentMethodInputRef.current?.blur?.(), 0);
+                    }}
+                    placeholder="Pilih metode pembayaran"
+                    isClearable={false}
+                    options={[
+                        { value: "", label: "Tunai / belum dipilih" },
+                        ...paymentMethods.map((method) => ({ value: method.id, label: method.name })),
+                    ]}
+                />
+            </div>
+            <div className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>
+                Customer: <b>{selectedCustomer?.name || "Umum"}</b> &nbsp;·&nbsp; Pembayaran: <b>{selectedPaymentMethod?.name || "Tunai"}</b>
+            </div>
             <div className="row">
-                <div className="col-md-6">
-                    <label>Customer <small>(F4)</small></label>
-                    <ReactSelectField
-                        ref={customerInputRef}
-                        value={customerId}
-                        onChange={setCustomerId}
-                        placeholder="Pilih customer"
-                        isClearable={false}
-                        options={[
-                            { value: "", label: "Umum" },
-                            ...customers.map((customer) => ({
-                                value: customer.id,
-                                label: `${customer.name}${customer.no_telp ? ` — ${customer.no_telp}` : ""}`,
-                            })),
-                        ]}
-                    />
-                </div>
-                <div className="col-md-6">
-                    <label>Metode Pembayaran <small>(F7)</small></label>
-                    <ReactSelectField
-                        ref={paymentMethodInputRef}
-                        value={paymentMethodId}
-                        onChange={setPaymentMethodId}
-                        placeholder="Pilih metode pembayaran"
-                        isClearable={false}
-                        options={[
-                            { value: "", label: "Tunai / belum dipilih" },
-                            ...paymentMethods.map((method) => ({ value: method.id, label: method.name })),
-                        ]}
-                    />
-                    {requiresPaymentReference && (
-                        <div className="form-group" style={{ marginTop: 10 }}>
+                {requiresPaymentReference && (
+                    <div className="col-md-12">
+                        <div className="form-group" style={{ marginTop: 6, marginBottom: 6 }}>
                             <label>Nomor Referensi <span className="text-danger">*</span></label>
                             <input
                                 ref={paymentReferenceInputRef}
@@ -174,8 +170,8 @@ const CartTable = ({
                                 onChange={(event) => setPaymentReference(event.target.value)}
                             />
                         </div>
-                    )}
-                </div>
+                    </div>
+                )}
                 <div className="col-md-6">
                     <label>Uang Diterima <span className="text-danger">*</span> <small>(F9)</small></label>
                     <div className="input-group input-group-sm">
@@ -194,7 +190,6 @@ const CartTable = ({
                             }}
                         />
                     </div>
-                    <small className="text-muted">Masukkan contoh: 100.000. Nilai disimpan sebagai 100000.</small>
                 </div>
                 <div className="col-md-6">
                     <label>Kembalian</label>
@@ -203,7 +198,7 @@ const CartTable = ({
                     </div>
                 </div>
             </div>
-            <p className="text-muted small" style={{ marginTop: 10, marginBottom: 0 }}>
+            <p style={{ marginTop: 8, marginBottom: 0, padding: "6px 10px", background: "#f4f4f8", borderLeft: "4px solid #605ca8", fontSize: 13, fontWeight: 700, color: "#222" }}>
                 <i className="fa fa-keyboard-o"></i> F2 Cari produk &nbsp;|&nbsp; F3 Scan &nbsp;|&nbsp; F4 Customer &nbsp;|&nbsp; F5 Item &nbsp;|&nbsp; F6 Promo &nbsp;|&nbsp; F7 Pembayaran &nbsp;|&nbsp; F8 Voucher &nbsp;|&nbsp; F9 Uang &nbsp;|&nbsp; F10 Proses &nbsp;|&nbsp; Delete hapus baris terpilih
             </p>
             {errorMessage && <div className="alert alert-danger" style={{ marginTop: 8 }}>{errorMessage}</div>}
