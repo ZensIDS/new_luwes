@@ -1238,6 +1238,137 @@ class PembelianController extends Controller
         }
     }
 
+    /**
+     * Batalkan penerimaan satu baris (satu batch/SKU) pada PO ini, misalnya karena
+     * checkbox terpencet. Semua efek penerimaan dikembalikan seperti sebelum dicentang:
+     *  - batch stok dihapus (stok gudang berkurang)
+     *  - qty kembali ke "stok menunggu diterima" (StockPembelian)
+     *  - qty_diterima pada item PO dihitung ulang
+     *  - baris stock movement penerimaan batch itu dihapus (kartu stok bersih)
+     *  - HPP produk dikembalikan bila batch ini adalah penerimaan terakhir produk tsb
+     * Ditolak bila batch sudah dipakai transaksi lain.
+     */
+    public function cancelPenerimaanItem(Request $request, Pembelian $pembelian)
+    {
+        $validated = $request->validate([
+            'stock_id' => 'required|exists:stocks,id',
+        ], [
+            'stock_id.required' => 'Item ini belum diterima, tidak ada yang dibatalkan.',
+            'stock_id.exists'   => 'Stock tidak ditemukan.',
+        ]);
+
+        try {
+            $info = DB::transaction(function () use ($validated, $pembelian) {
+                $stock = Stock::lockForUpdate()->find($validated['stock_id']);
+
+                if (! $stock || (int) $stock->pembelian_id !== (int) $pembelian->id) {
+                    throw new \RuntimeException('Stock tidak ditemukan atau tidak sesuai pembelian ini.', 404);
+                }
+
+                if (
+                    $this->stockAlreadyUsed($stock)
+                    || \App\Models\PickingListItem::where('stock_id', $stock->id)->exists()
+                    || \App\Models\StockAdjustment::where('stock_id', $stock->id)->exists()
+                    || (float) ($stock->qty_reserved ?? 0) > 0
+                ) {
+                    throw new \RuntimeException(
+                        "SKU {$stock->sku} sudah dipakai transaksi (picking/pengiriman/retur/opname) sehingga penerimaannya tidak bisa dibatalkan. "
+                        . 'Selesaikan atau batalkan transaksi tersebut terlebih dahulu.',
+                        422
+                    );
+                }
+
+                $product = Product::lockForUpdate()->findOrFail($stock->product_id);
+                $qty     = (int) $stock->qty;
+                $sku     = (string) $stock->sku;
+                $price   = (float) $stock->harga_beli;
+
+                // --- HPP: balikkan hanya jika batch ini penerimaan terbaru produk tsb ---
+                $totalWithBatch = (int) $product->stocks()->sum('qty');
+                $isLatest = ! Stock::where('product_id', $product->id)->where('id', '>', $stock->id)->exists();
+                $remainingTotal = $totalWithBatch - $qty;
+                $hppRestored = false;
+                if ($isLatest && $remainingTotal > 0) {
+                    $previousHpp = (($product->harga_beli * $totalWithBatch) - ($qty * $price)) / $remainingTotal;
+                    $product->harga_beli = (int) max(0, round($previousHpp));
+                    $hppRestored = true;
+                }
+
+                // --- Stock movement: hapus semua baris penerimaan milik batch (SKU) ini ---
+                $pattern = '/SKU: ?' . preg_quote($sku, '/') . '(?=,|\s|$)/';
+                $movementIds = StockMovement::where('reference_type', Pembelian::class)
+                    ->where('reference_id', $pembelian->id)
+                    ->where('product_id', $product->id)
+                    ->get(['id', 'notes'])
+                    ->filter(fn ($m) => preg_match($pattern, (string) $m->notes) === 1)
+                    ->pluck('id');
+                if ($movementIds->isNotEmpty()) {
+                    StockMovement::whereIn('id', $movementIds)->delete();
+                }
+
+                // --- Kembalikan ke stok menunggu diterima (StockPembelian) ---
+                $pending = StockPembelian::withTrashed()
+                    ->where('pembelian_id', $pembelian->id)
+                    ->where('product_id', $product->id)
+                    ->first();
+                if ($pending) {
+                    if ($pending->trashed()) {
+                        $pending->restore();
+                        $pending->qty = $qty;
+                    } else {
+                        $pending->qty = (int) $pending->qty + $qty;
+                    }
+                    $pending->harga_beli = $price;
+                    $pending->subtotal   = $pending->qty * $price;
+                    $pending->save();
+                } else {
+                    StockPembelian::create([
+                        'pembelian_id' => $pembelian->id,
+                        'product_id'   => $product->id,
+                        'harga_beli'   => $price,
+                        'qty'          => $qty,
+                        'subtotal'     => $qty * $price,
+                        'condition'    => 'new',
+                        'status'       => 'available',
+                    ]);
+                }
+
+                // --- Hapus batch stok (permanen supaya SKU/penomoran bersih) ---
+                $stock->forceDelete();
+
+                // --- qty_diterima item PO = sisa batch yang masih diterima ---
+                $stillReceived = (int) Stock::where('pembelian_id', $pembelian->id)
+                    ->where('product_id', $product->id)
+                    ->sum('qty');
+                $pembelian->pembelianProducts()
+                    ->where('product_id', $product->id)
+                    ->update(['qty_diterima' => $stillReceived]);
+
+                $product->save();
+                $product->updateStockValue();
+
+                // Tidak ada lagi barang diterima -> PO kembali ke status belum diterima.
+                $reopened = false;
+                if (! Stock::where('pembelian_id', $pembelian->id)->exists()) {
+                    $pembelian->update(['receipt_status' => 'draft', 'is_published' => false]);
+                    $reopened = true;
+                }
+
+                return compact('sku', 'qty', 'hppRestored', 'reopened');
+            });
+
+            return response()->json([
+                'success' => true,
+                'message' => "Penerimaan SKU {$info['sku']} ({$info['qty']} pcs) dibatalkan. Stok dan movement dikembalikan.",
+                'reopened' => $info['reopened'],
+            ]);
+        } catch (\RuntimeException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], in_array($e->getCode(), [404, 422], true) ? $e->getCode() : 422);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => 'Gagal membatalkan penerimaan: ' . $e->getMessage()], 500);
+        }
+    }
+
     public function updatePenerimaanExpired(Request $request, Pembelian $pembelian)
     {
         $validated = $request->validate([

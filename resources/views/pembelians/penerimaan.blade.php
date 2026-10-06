@@ -71,6 +71,7 @@
                                         <th>SKU</th>
                                         <th>Expired</th>
                                         <th>Qty Terima</th>
+                                        <th class="text-center">Aksi</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -166,6 +167,18 @@
                                                             {{ $stock ? 'readonly' : '' }}
                                                             required>
                                                     @endif
+                                                </td>
+                                                <td class="text-center">
+                                                    <button type="button"
+                                                        class="btn btn-danger btn-xs btn-cancel-receipt"
+                                                        data-stock-id="{{ $stock->id ?? '' }}"
+                                                        data-sku="{{ $stock->sku ?? '' }}"
+                                                        data-product="{{ $item->product->name }}"
+                                                        title="Batalkan penerimaan produk ini"
+                                                        style="{{ $stock ? '' : 'display:none' }}">
+                                                        <i class="fa fa-undo"></i> Batalkan
+                                                    </button>
+                                                    <span class="text-muted cancel-placeholder" style="{{ $stock ? 'display:none' : '' }}">-</span>
                                                 </td>
                                             </tr>
                                         @endforeach
@@ -373,6 +386,14 @@
                     $row.find('.btn-update-expired')
                         .prop('disabled', false)
                         .data('stock-id', response.stock_id);
+
+                    // Munculkan tombol Batalkan langsung tanpa refresh
+                    $row.find('.btn-cancel-receipt')
+                        .data('stock-id', response.stock_id)
+                        .data('sku', sku)
+                        .prop('disabled', false)
+                        .show();
+                    $row.find('.cancel-placeholder').hide();
                 } else {
                     alert(response.message);
                     $checkbox.prop('checked', false);
@@ -385,6 +406,54 @@
                 $(`#confirmed-${rowIndexForConfirm}`).val(0);
 
                 let msg = 'Gagal menyimpan item.';
+                if (xhr.responseJSON && xhr.responseJSON.message) {
+                    msg = xhr.responseJSON.message;
+                }
+                alert(msg);
+            }
+        });
+    });
+
+    $(document).on('click', '.btn-cancel-receipt', function() {
+        let $btn    = $(this);
+        let stockId = $btn.data('stock-id');
+        let sku     = $btn.data('sku');
+        let product = $btn.data('product');
+
+        if (!stockId) {
+            return;
+        }
+
+        if (!confirm('Batalkan penerimaan "' + product + '" (SKU ' + sku + ')?\n\nStok batch ini akan dihapus dan dikembalikan ke belum diterima, riwayat movement penerimaannya ikut dibersihkan.')) {
+            return;
+        }
+
+        let $icon = $btn.find('i');
+        $btn.prop('disabled', true);
+        $icon.removeClass('fa-undo').addClass('fa-spinner fa-spin');
+
+        $.ajax({
+            url: "{{ route('pembelian.penerimaan.cancel-item', $pembelian->id) }}",
+            method: 'POST',
+            data: {
+                _token: '{{ csrf_token() }}',
+                stock_id: stockId,
+            },
+            dataType: 'json',
+            success: function(response) {
+                if (response.success) {
+                    window.location.reload();
+                } else {
+                    $btn.prop('disabled', false);
+                    $icon.removeClass('fa-spinner fa-spin').addClass('fa-undo');
+                    alert(response.message);
+                }
+            },
+            error: function(xhr) {
+                $btn.prop('disabled', false);
+                $icon.removeClass('fa-spinner fa-spin').addClass('fa-undo');
+
+                let msg = 'Gagal membatalkan penerimaan.';
                 if (xhr.responseJSON && xhr.responseJSON.message) {
                     msg = xhr.responseJSON.message;
                 }

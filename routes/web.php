@@ -159,6 +159,8 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
         ->name('pembelian.penerimaan.save-item');
     Route::post('/pembelian/{pembelian}/penerimaan/update-expired', [PembelianController::class, 'updatePenerimaanExpired'])
         ->name('pembelian.penerimaan.update-expired');
+    Route::post('/pembelian/{pembelian}/penerimaan/cancel-item', [PembelianController::class, 'cancelPenerimaanItem'])
+        ->name('pembelian.penerimaan.cancel-item');
 
     Route::get('/pembelian/{pembelian}/print', [PembelianController::class, 'print'])->name('pembelian.print');
     Route::get('/pembelian/{id}/destroy', [PembelianController::class, 'stockDestroy'])->name('pembelian.stock.destroy');
