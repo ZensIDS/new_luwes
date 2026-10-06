@@ -29,6 +29,7 @@ class RoleMiddleware
             'customer'     => 'market.index',
             'admin-gudang' => 'dashboard',
             'staff-outlet' => 'dashboard',
+            'kasir'        => 'dashboard',
             'owner'        => 'dashboard',
             'superadmin'   => 'dashboard',
         ];

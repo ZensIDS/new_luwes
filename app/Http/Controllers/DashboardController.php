@@ -24,7 +24,7 @@ class DashboardController extends Controller
     {
         $user = auth()->user();
 
-        if ($user->role === 'staff-outlet') {
+        if (in_array($user->role, ['staff-outlet', 'kasir'], true)) {
             $requestOrdersBase = RequestOrder::where('owner_id', $user->outlet_id);
 
             return view('dashboard.index', [

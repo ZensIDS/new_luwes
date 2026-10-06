@@ -16,7 +16,7 @@ class AdminRequest extends FormRequest
         return [
             'name' => 'required',
             'username' => 'required',
-            'outlet_id' => 'nullable',
+            'outlet_id' => 'required_if:role,staff-outlet,admin-gudang,kasir',
             'role' => 'required',
             'status' => 'required',
             'email' => 'required|email',
