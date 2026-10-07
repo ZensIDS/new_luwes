@@ -14,10 +14,7 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule)
     {
-        $schedule->command('queue:work --queue=imports --stop-when-empty --tries=1 --timeout=1200')
-            ->everyMinute()
-            ->withoutOverlapping()
-            ->runInBackground();
+        // Tidak ada jadwal. Fitur import produk (queue:work --queue=imports) sudah dihapus.
     }
 
     /**

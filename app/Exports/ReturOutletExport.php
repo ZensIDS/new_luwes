@@ -42,8 +42,7 @@ class ReturOutletExport implements FromCollection, WithHeadings, WithMapping, Wi
             'refundPembelianItems.stock',
         ])
             ->where('type', 'outlet_ke_gudang')
-            ->whereDate('tanggal', '>=', $this->mulai)
-            ->whereDate('tanggal', '<=', $this->selesai)
+            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'tanggal', $this->mulai, $this->selesai))
             ->orderBy('tanggal')
             ->get()
             ->flatMap(function ($retur) {

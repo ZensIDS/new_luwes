@@ -52,11 +52,11 @@ class LaporanPergerakanExport implements FromCollection, WithHeadings, WithTitle
             ->keyBy('product_id');
 
         // Per PRODUK dengan stok fisik = SUM(stocks.qty) semua batch (bukan per baris batch)
-        $products = \App\Models\Product::with('category')
+        $productsQuery = \App\Models\Product::with('category')
             ->withSum('stocks as stock_qty', 'qty')
             ->whereHas('stocks')
             ->orderBy('code')
-            ->get();
+            ->orderBy('id');
 
         $activeAdjs = \App\Models\ProductMinimumAdjustment::activeOn(now()->toDateString())
             ->orderByDesc('active_from')
@@ -67,6 +67,8 @@ class LaporanPergerakanExport implements FromCollection, WithHeadings, WithTitle
         $rows = collect();
         $no = 1;
 
+        // Dibaca per potongan (chunk), bukan ->get() semua produk sekaligus.
+        $productsQuery->chunk(1000, function ($products) use (&$rows, &$no, $movementStats, $activeAdjs) {
         foreach ($products as $p) {
             $s = (object) ['product_id' => $p->id, 'product' => $p, 'qty' => (int) ($p->stock_qty ?? 0)];
             $stat = $movementStats[$s->product_id] ?? null;
@@ -101,6 +103,7 @@ class LaporanPergerakanExport implements FromCollection, WithHeadings, WithTitle
                 '',
             ]);
         }
+        });
 
         return $rows;
     }

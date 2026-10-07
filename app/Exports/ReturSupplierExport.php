@@ -41,8 +41,7 @@ class ReturSupplierExport implements FromCollection, WithHeadings, WithMapping, 
             'refundPembelianItems.stock.pembelian',
         ])
             ->where('type', 'gudang_ke_supplier')
-            ->whereDate('tanggal', '>=', $this->mulai)
-            ->whereDate('tanggal', '<=', $this->selesai)
+            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'tanggal', $this->mulai, $this->selesai))
             ->orderBy('tanggal')
             ->get()
             ->flatMap(function ($retur) {

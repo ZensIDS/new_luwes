@@ -14,11 +14,10 @@ class DatabaseStorage extends Model
 
     public function get($key)
     {
-        if ($this->has($key)) {
-            return new CartCollection(DatabaseStorageModel::find($key)->cart_data);
-        } else {
-            return [];
-        }
+        // Cukup 1 query find() (sebelumnya has() + find() = 2 query per akses).
+        $row = DatabaseStorageModel::find($key);
+
+        return $row ? new CartCollection($row->cart_data) : [];
     }
 
     public function put($key, $value)

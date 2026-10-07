@@ -29,7 +29,7 @@ class PenjualanExport implements FromView
     {
         return view('exports.laporan-penjualan', [
             'penjualans' => Penjualan::when($this->hari, function ($query, $hari) {
-                return $query->whereDate('created_at', $hari);
+                return \App\Support\ReportQuery::onDate($query, 'created_at', $hari);
             })->when($this->outlet_id, function ($query, $outlet_id) {
                 return $query->where('outlet_id', $outlet_id);
             })->when($this->startDate && $this->endDate, function ($query) {

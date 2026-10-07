@@ -65,10 +65,10 @@ class OutletPrice extends Model
         return $query
             ->where('is_active', true)
             ->where(function (Builder $query) use ($date) {
-                $query->whereNull('effective_from')->orWhereDate('effective_from', '<=', $date);
+                $query->whereNull('effective_from')->orWhere('effective_from', '<=', $date);
             })
             ->where(function (Builder $query) use ($date) {
-                $query->whereNull('effective_until')->orWhereDate('effective_until', '>=', $date);
+                $query->whereNull('effective_until')->orWhere('effective_until', '>=', $date);
             });
     }
 }

@@ -115,7 +115,7 @@ class RefundPenjualanController extends Controller
         $stockQuery = OwnerStock::with(['product', 'stock'])
             ->where('owner_id', $outletId)
             ->where(function ($query) {
-                $query->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                $query->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
             });
 
         $product = Product::query()->where('code', $barcode)->first();
@@ -171,7 +171,7 @@ class RefundPenjualanController extends Controller
             ->where('owner_id', $outletId)
             ->where('qty', '>', 0)
             ->where(function ($query) {
-                $query->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                $query->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
             })
             ->when($search !== '', function ($query) use ($search) {
                 $query->where(function ($scope) use ($search) {
@@ -299,7 +299,7 @@ class RefundPenjualanController extends Controller
                         $stockCandidates[$productId] = OwnerStock::with(['product', 'stock'])
                             ->where('owner_id', $outletId)->where('product_id', $productId)
                             ->where(function ($query) {
-                                $query->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                                $query->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
                             })->orderBy('created_at')->orderBy('id')->lockForUpdate()->first();
                     }
 
@@ -393,7 +393,7 @@ class RefundPenjualanController extends Controller
                 $replacementStocks = OwnerStock::with('product')->where('owner_id', $outletId)
                     ->whereIn('product_id', $replacementProductIds->all())->where('qty', '>', 0)
                     ->where(function ($query) {
-                        $query->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                        $query->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
                     })->orderBy('created_at')->orderBy('id')->lockForUpdate()->get()->groupBy('product_id');
                 $replacementItems = [];
                 $replacementTotal = 0;

@@ -40,12 +40,14 @@ class PembelianController extends Controller
 
     public function getProductsBySupplier(Supplier $supplier)
     {
+        // stok fisik gudang = SUM(stocks.qty) (sama dengan menu Stok/Produk/Dashboard), dihitung 1x di query
         $products = $supplier->products()
             ->select('products.id', 'code', 'name', 'is_serialized', 'harga_beli', 'konversi_qty', 'satuan_besar', 'satuan')
+            ->withSum('stocks as stock_sum_qty', 'qty')
             ->get()
             ->map(function ($product) {
-                // stok fisik gudang = SUM(stocks.qty) (sama dengan menu Stok/Produk/Dashboard)
-                $product->stock_count = (int) $product->stocks()->sum('qty');
+                $product->stock_count = (int) ($product->stock_sum_qty ?? 0);
+                unset($product->stock_sum_qty);
 
                 return $product;
             });
@@ -57,6 +59,7 @@ class PembelianController extends Controller
     {
         $products = Product::select('id', 'code', 'name', 'is_serialized', 'harga_beli', 'min_stock', 'konversi_qty', 'satuan_besar', 'satuan')
             ->withSum('stocks', 'qty')
+            ->withEffectiveMin() // min efektif dihitung di query, bukan 1 query adjustment per produk
             ->orderBy('name');
 
         if (request()->filled('supplier_id')) {
@@ -67,7 +70,7 @@ class PembelianController extends Controller
         $products = $products->get()
             ->map(function ($product) {
                 $currentStock = (int) ($product->stocks_sum_qty ?? 0);
-                $effectiveMin = $product->effective_min_stock;   // ← compute once
+                $effectiveMin = $product->effective_min_stock;   // dari withEffectiveMin(), tanpa query tambahan
                 $product->stock_count      = $currentStock;
                 $product->effective_min    = $effectiveMin;      // ← expose as 'effective_min'
                 $product->is_under_minimum = $currentStock < $effectiveMin;
@@ -805,7 +808,7 @@ class PembelianController extends Controller
             fn($q) =>
             $q->where('supplier_id', $pembelian->supplier_id)
         )
-            ->whereDate('created_at', now()->toDateString())
+            ->where('created_at', '>=', now()->startOfDay())
             ->count();
 
         $counter = max($baseCount, $offset);
@@ -858,7 +861,7 @@ class PembelianController extends Controller
             fn($q) =>
             $q->where('supplier_id', $pembelian->supplier_id)
         )
-            ->whereDate('created_at', now()->toDateString())
+            ->where('created_at', '>=', now()->startOfDay())
             ->count();
 
         // Tambah juga SKU yang sudah ada di pembelian ini (yang belum tersimpan sebagai stock)
@@ -921,6 +924,11 @@ class PembelianController extends Controller
                 'receipt_photo' => $photoPath,
             ]);
 
+            // Muat produk sekali (bukan Product::find per item).
+            $productsById = Product::whereIn('id', collect($request->items)->pluck('product_id')->filter()->unique()->all())
+                ->get()
+                ->keyBy('id');
+
             foreach ($request->items as $itemData) {
                 // Hanya proses item yang benar-benar sudah dicentang/dikonfirmasi
                 // oleh user (lewat checkbox penerimaan per-item). Ini mencegah
@@ -934,7 +942,7 @@ class PembelianController extends Controller
                 $sku = trim($itemData['sku']);
                 $expiredAt = ! empty($itemData['expired_at']) ? $itemData['expired_at'] : null;
 
-                $product = Product::find($itemData['product_id']);
+                $product = $productsById[$itemData['product_id']] ?? null;
                 $pembelianProduct = $pembelian->pembelianProducts()
                     ->where('product_id', $itemData['product_id'])
                     ->first();
@@ -1421,8 +1429,13 @@ class PembelianController extends Controller
     private function updateStock($request, $pembelian)
     {
         if ($pembelian->is_published) {
+            // Muat produk sekali (bukan Product::find per item).
+            $productsById = Product::whereIn('id', collect($request)->pluck('product_id')->filter()->unique()->all())
+                ->get()
+                ->keyBy('id');
+
             foreach ($request as $productData) {
-                $product = Product::find($productData->product_id);
+                $product = $productsById[$productData->product_id];
                 if ($product->is_serialized && ! empty($productData->serial_numbers)) {
                     $serialNumbers = is_array($productData->serial_numbers)
                         ? $productData->serial_numbers
@@ -1482,8 +1495,12 @@ class PembelianController extends Controller
             }
         } else {
             if (isset($request->product)) {
+                $productsById = Product::whereIn('id', collect($request->product)->pluck('product_id')->filter()->unique()->all())
+                    ->get()
+                    ->keyBy('id');
+
                 foreach ($request->product as $productData) {
-                    $product = Product::find($productData['product_id']);
+                    $product = $productsById[$productData['product_id']];
                     // Process serial numbers for PembelianProduct
                     $serialNumbers = null;
                     if (isset($productData['serial_numbers']) && ! empty($productData['serial_numbers'])) {
@@ -1504,7 +1521,7 @@ class PembelianController extends Controller
                     );
 
                     // Add StockPembelian for non-published products
-                    if (Product::find($productData['product_id'])->is_serialized && ! empty($serialNumbers)) {
+                    if ($product->is_serialized && ! empty($serialNumbers)) {
                         foreach ($serialNumbers as $serial) {
                             StockPembelian::updateOrCreate(
                                 [
@@ -1759,7 +1776,7 @@ class PembelianController extends Controller
             $today = now()->format('Ymd');
 
             $countToday = Pembelian::where('supplier_id', $supplierId)
-                ->whereDate('created_at', now()->toDateString())
+                ->where('created_at', '>=', now()->startOfDay())
                 ->lockForUpdate()
                 ->count();
 

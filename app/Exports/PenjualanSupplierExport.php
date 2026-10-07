@@ -28,7 +28,7 @@ class PenjualanSupplierExport implements FromView
     public function view(): View
     {
         $penjualans = Penjualan::when($this->hari, function ($query, $hari) {
-            return $query->whereDate('created_at', $hari);
+            return \App\Support\ReportQuery::onDate($query, 'created_at', $hari);
         })
             ->when($this->startDate && $this->endDate, function ($query) {
                 return $query->whereBetween('created_at', [$this->startDate, $this->endDate]);

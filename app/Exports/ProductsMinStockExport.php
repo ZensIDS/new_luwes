@@ -3,17 +3,20 @@
 namespace App\Exports;
 
 use App\Models\Product;
-use Maatwebsite\Excel\Concerns\FromCollection;
+use Maatwebsite\Excel\Concerns\FromQuery;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
 
-class ProductsMinStockExport implements FromCollection, WithHeadings, WithMapping
+class ProductsMinStockExport implements FromQuery, WithHeadings, WithMapping
 {
     public function __construct(private bool $templateOnly = false) {}
 
-    public function collection()
+    /** Dibaca per potongan (chunk). `id` sebagai pembeda urutan agar paging stabil. */
+    public function query()
     {
-        return $this->templateOnly ? collect([]) : Product::orderBy('code')->get();
+        $query = Product::query()->select(['id', 'code', 'name', 'min_stock'])->orderBy('code')->orderBy('id');
+
+        return $this->templateOnly ? $query->whereRaw('1 = 0') : $query;
     }
 
     public function headings(): array

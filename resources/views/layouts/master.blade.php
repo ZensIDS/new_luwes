@@ -76,8 +76,8 @@
                 <!-- Navbar Right Menu -->
                 <div class="navbar-custom-menu">
                     <ul class="nav navbar-nav">
-                        @if (auth()->user()->role != 'staff-outlet')
-                        <!-- Notifications -->
+                        @if (auth()->user()->role === 'admin-gudang')
+                        <!-- Notifications (stok minimum, hanya admin-gudang) -->
                         <li class="dropdown notifications-menu">
                             <a href="#" class="dropdown-toggle" data-toggle="dropdown">
                                 <i class="fa fa-bell-o"></i>

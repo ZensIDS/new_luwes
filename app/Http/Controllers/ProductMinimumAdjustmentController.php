@@ -8,6 +8,46 @@ use Illuminate\Http\Request;
 
 class ProductMinimumAdjustmentController extends Controller
 {
+    /**
+     * Daftar produk untuk modal "Pengaturan Min Stok" di dashboard.
+     * Dimuat lewat AJAX saat modal pertama kali dibuka (bukan di setiap load dashboard).
+     */
+    public function products()
+    {
+        abort_unless(in_array(auth()->user()?->role, ['admin-gudang', 'superadmin'], true), 403);
+
+        $activeAdjustments = ProductMinimumAdjustment::query()
+            ->activeOn()
+            ->orderByDesc('active_from')
+            ->orderByDesc('id')
+            ->get()
+            ->groupBy('product_id');
+
+        $rows = Product::select('id', 'code', 'name', 'min_stock')
+            ->withSum('stocks', 'qty')
+            ->orderBy('name')
+            ->get()
+            ->map(function ($p) use ($activeAdjustments) {
+                $adj = $activeAdjustments->get($p->id)?->first();
+                $effectiveMin = $adj
+                    ? (int) ceil($p->min_stock * (1 + $adj->adjustment_percentage / 100))
+                    : (int) $p->min_stock;
+
+                return [
+                    'id'            => $p->id,
+                    'code'          => $p->code,
+                    'name'          => $p->name,
+                    'current_stock' => (int) ($p->stocks_sum_qty ?? 0),
+                    'min_stock'     => $p->min_stock,
+                    'effective_min' => $effectiveMin,
+                    'active_from'   => $adj?->active_from?->format('d M Y'),
+                    'active_until'  => $adj?->active_until?->format('d M Y'),
+                ];
+            });
+
+        return response()->json(['data' => $rows]);
+    }
+
     public function store(Request $request)
     {
         $data = $request->validate([
@@ -35,17 +75,20 @@ class ProductMinimumAdjustmentController extends Controller
         $activeUntilBound = $data['active_until'] ?? '9999-12-31';
 
         // Collect product IDs that already have an overlapping adjustment.
+        // Satu query untuk semua produk (sebelumnya exists() per produk).
+        $overlappingSet = ProductMinimumAdjustment::whereIn('product_id', $data['product_ids'])
+            ->where('active_from', '<=', $activeUntilBound)
+            ->where(function ($q) use ($data) {
+                $q->whereNull('active_until')
+                    ->orWhere('active_until', '>=', $data['active_from']);
+            })
+            ->distinct()
+            ->pluck('product_id')
+            ->flip();
+
         $skippedIds = [];
         foreach ($data['product_ids'] as $productId) {
-            $overlap = ProductMinimumAdjustment::where('product_id', $productId)
-                ->where('active_from', '<=', $activeUntilBound)
-                ->where(function ($q) use ($data) {
-                    $q->whereNull('active_until')
-                        ->orWhere('active_until', '>=', $data['active_from']);
-                })
-                ->exists();
-
-            if ($overlap) {
+            if ($overlappingSet->has((int) $productId)) {
                 $skippedIds[] = $productId;
             }
         }

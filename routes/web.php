@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AdminController;
+use App\Http\Controllers\MaintenanceController;
 use App\Http\Controllers\CartController;
 use App\Http\Controllers\CartUserController;
 use App\Http\Controllers\CampaignController;
@@ -34,19 +35,16 @@ use App\Http\Controllers\SupplierController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\VoucherController;
 use App\Http\Controllers\WishlistController;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/', function () {
-    return redirect('/dashboard');
-});
+Route::redirect('/', '/dashboard');
 
 // Public in-store product price and promotion checker. The kiosk does not
 // require a customer account; the optional outlet_id keeps the result tied to
 // the store where the checker is installed.
 Route::get('/price-checker', [PriceCheckerController::class, 'index'])->name('price-checker.index');
 Route::get('/price-checker/lookup', [PriceCheckerController::class, 'lookup'])
-    ->middleware('throttle:120,1')
+    ->middleware('throttle:60,1,pricechecker')
     ->name('price-checker.lookup');
 
 Route::middleware('auth')->group(function () {
@@ -91,6 +89,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::resource('/kas', KasController::class);
     Route::resource('/payment', PaymentMethodController::class);
     Route::get('/outlet/{outlet}/products', [ProductController::class, 'outletProducts'])
+        ->middleware('throttle:120,1,search')
         ->name('outlet.products');
     Route::resource('/outlet', OutletController::class);
     Route::get('/outlet/{outlet_id}/kas', [OutletController::class, 'getKas']);
@@ -101,6 +100,8 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/category-product-create', [CategoryController::class, 'createProduct'])->name('category.product.create');
     Route::get('/category-product/{category}/edit', [CategoryController::class, 'editProduct'])->name('category.product.edit');
 
+    Route::get('/product/minimum-adjustment/products', [ProductMinimumAdjustmentController::class, 'products'])
+        ->name('product.minimum-adjustment.products');
     Route::post('/product/minimum-adjustment', [ProductMinimumAdjustmentController::class, 'store'])
         ->name('product.minimum-adjustment.store');
     Route::resource('/product', ProductController::class);
@@ -109,20 +110,20 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::resource('/stock', StockController::class)->only(['index'])->middleware('role:superadmin|admin-gudang|owner|staff-outlet');
     Route::resource('/stock', StockController::class)->except(['index'])->middleware('role:superadmin|admin-gudang|owner');
     Route::resource('/outlet-prices', App\Http\Controllers\OutletPriceController::class)->except(['show']);
-    Route::get('/outlet-prices/products/search', [App\Http\Controllers\OutletPriceController::class, 'searchProducts'])->name('outlet-prices.products.search');
+    Route::get('/outlet-prices/products/search', [App\Http\Controllers\OutletPriceController::class, 'searchProducts'])->middleware('throttle:120,1,search')->name('outlet-prices.products.search');
     Route::get('/outlet-prices/preview-hpp', [App\Http\Controllers\OutletPriceController::class, 'previewHpp'])->name('outlet-prices.preview-hpp');
     Route::resource('/outlet-purchases', App\Http\Controllers\OutletPurchaseController::class)->only(['index', 'create', 'store', 'show']);
     Route::get('/owner-stock-kartu', [App\Http\Controllers\OwnerStockController::class, 'kartu'])->name('owner-stocks.kartu');
     Route::get('/owner-stock-kartu/data', [App\Http\Controllers\OwnerStockController::class, 'getKartuData'])->name('owner-stocks.kartu.data');
-    Route::get('/owner-stock-kartu/search', [App\Http\Controllers\OwnerStockController::class, 'searchKartuProducts'])->name('owner-stocks.kartu.search');
+    Route::get('/owner-stock-kartu/search', [App\Http\Controllers\OwnerStockController::class, 'searchKartuProducts'])->middleware('throttle:120,1,search')->name('owner-stocks.kartu.search');
     Route::get('/owner-stock-opname', [App\Http\Controllers\OwnerStockController::class, 'opname'])->name('owner-stock-opname');
     Route::get('/owner-stock-opname/data', [App\Http\Controllers\OwnerStockController::class, 'getOpnameData'])->name('owner-stock-opname.data');
     Route::post('/owner-stock-opname/save', [App\Http\Controllers\OwnerStockController::class, 'saveOpname'])->name('owner-stock-opname.save');
     Route::get('/voucher/lookup', [VoucherController::class, 'lookup'])->name('voucher.lookup');
     Route::get('/voucher/options', [VoucherController::class, 'options'])->name('voucher.options');
     Route::get('/campaign/create', [CampaignController::class, 'create'])->name('campaign.create');
-    Route::get('/campaign/products/search', [CampaignController::class, 'searchProducts'])->name('campaign.products.search');
-    Route::get('/campaign/products/scan', [CampaignController::class, 'scanProduct'])->name('campaign.products.scan');
+    Route::get('/campaign/products/search', [CampaignController::class, 'searchProducts'])->middleware('throttle:120,1,search')->name('campaign.products.search');
+    Route::get('/campaign/products/scan', [CampaignController::class, 'scanProduct'])->middleware('throttle:120,1,search')->name('campaign.products.scan');
     Route::post('/campaign', [CampaignController::class, 'store'])->name('campaign.store');
     Route::get('/campaign/{type}/{id}/edit', [CampaignController::class, 'edit'])
         ->whereIn('type', ['voucher', 'promotion'])
@@ -178,24 +179,24 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
 
     Route::get('/laporan', [LaporanController::class, 'index'])->name('laporan.index');
     Route::get('/laporan/outlet', [LaporanController::class, 'indexOutlet'])->name('laporan.outlet.index');
-    Route::get('/laporan/outlet/minimal-stock', [LaporanController::class, 'exportOutletMinimalStock'])->name('laporan.outlet.minimal-stock');
-    Route::get('/laporan/outlet/penjualan', [LaporanController::class, 'exportOutletPenjualan'])->name('laporan.outlet.penjualan');
-    Route::get('/laporan/outlet/rafaksi', [LaporanController::class, 'exportOutletRafaksi'])->name('laporan.outlet.rafaksi');
-    Route::get('/laporan/outlet/retur', [LaporanController::class, 'exportOutletRetur'])->name('laporan.outlet.retur');
-    Route::get('/laporan/outlet/all-stock', [LaporanController::class, 'exportOutletAllStock'])->name('laporan.outlet.all-stock');
+    Route::get('/laporan/outlet/minimal-stock', [LaporanController::class, 'exportOutletMinimalStock'])->name('laporan.outlet.minimal-stock')->middleware('throttle:10,1');
+    Route::get('/laporan/outlet/penjualan', [LaporanController::class, 'exportOutletPenjualan'])->name('laporan.outlet.penjualan')->middleware('throttle:10,1');
+    Route::get('/laporan/outlet/rafaksi', [LaporanController::class, 'exportOutletRafaksi'])->name('laporan.outlet.rafaksi')->middleware('throttle:10,1');
+    Route::get('/laporan/outlet/retur', [LaporanController::class, 'exportOutletRetur'])->name('laporan.outlet.retur')->middleware('throttle:10,1');
+    Route::get('/laporan/outlet/all-stock', [LaporanController::class, 'exportOutletAllStock'])->name('laporan.outlet.all-stock')->middleware('throttle:10,1');
     Route::get('/laporan/pembelian/{id?}', [LaporanController::class, 'exportPembelian'])->name('laporan.pembelian');
     Route::get('/laporan/pickinglist/{id?}', [LaporanController::class, 'exportPickingList'])->name('laporan.pickinglist');
     Route::get('/laporan/request-order/{id?}', [LaporanController::class, 'exportRequestOrder'])->name('laporan.request-order');
     Route::get('/laporan/delivery-order/{id?}', [LaporanController::class, 'exportDeliveryOrder'])->name('laporan.delivery-order');
     Route::get('/laporan/kartu-stok/{id?}', [LaporanController::class, 'exportKartuStok'])->name('laporan.kartu-stok');
-    Route::get('/laporan/stock-opname', [LaporanController::class, 'exportStockOpname'])->name('laporan.stock-opname');
+    Route::get('/laporan/stock-opname', [LaporanController::class, 'exportStockOpname'])->name('laporan.stock-opname')->middleware('throttle:10,1');
     Route::get('/laporan/penerimaan/{pembelian}/{type?}', [LaporanController::class, 'exportPenerimaan'])->name('laporan.penerimaan');
 
-    Route::get('/laporan/pembelian-supplier', [LaporanController::class, 'exportPembelianSupplier'])->name('laporan.pembelian-supplier');
-    Route::get('/laporan/penjualan', [LaporanController::class, 'exportPenjualan'])->name('laporan.penjualan');
-    Route::get('/laporan/penjualan-kasir', [LaporanController::class, 'exportPenjualanKasir'])->name('laporan.penjualan-kasir');
-    Route::get('/laporan/penjualan-supplier', [LaporanController::class, 'exportPenjualanSupplier'])->name('laporan.penjualan-supplier');
-    Route::get('/laporan/stock', [LaporanController::class, 'exportStock'])->name('laporan.stock');
+    Route::get('/laporan/pembelian-supplier', [LaporanController::class, 'exportPembelianSupplier'])->name('laporan.pembelian-supplier')->middleware('throttle:10,1');
+    Route::get('/laporan/penjualan', [LaporanController::class, 'exportPenjualan'])->name('laporan.penjualan')->middleware('throttle:10,1');
+    Route::get('/laporan/penjualan-kasir', [LaporanController::class, 'exportPenjualanKasir'])->name('laporan.penjualan-kasir')->middleware('throttle:10,1');
+    Route::get('/laporan/penjualan-supplier', [LaporanController::class, 'exportPenjualanSupplier'])->name('laporan.penjualan-supplier')->middleware('throttle:10,1');
+    Route::get('/laporan/stock', [LaporanController::class, 'exportStock'])->name('laporan.stock')->middleware('throttle:10,1');
     Route::get('/laporan/pengeluaran', [LaporanController::class, 'exportPengeluaran'])->name('laporan.pengeluaran');
     Route::get('/laporan/labarugi', [LaporanController::class, 'exportLabaRugi'])->name('laporan.labarugi');
 
@@ -250,7 +251,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
 
     // Stock Kartu
     Route::get('/stock-kartu', [App\Http\Controllers\StockController::class, 'kartu'])->middleware('role:superadmin|admin-gudang|owner|staff-outlet')->name('stock.kartu');
-    Route::get('/stocks/search', [StockController::class, 'searchStock'])->middleware('role:superadmin|admin-gudang|owner|staff-outlet')->name('stocks.search');
+    Route::get('/stocks/search', [StockController::class, 'searchStock'])->middleware(['role:superadmin|admin-gudang|owner|staff-outlet', 'throttle:120,1,search'])->name('stocks.search');
     Route::get('/stock/kartu/data', [App\Http\Controllers\StockController::class, 'getKartuData'])->middleware('role:superadmin|admin-gudang|owner|staff-outlet')->name('stock.kartu.data');
 
     // Stock Opname
@@ -260,8 +261,8 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/stock-opname/export-template', [App\Http\Controllers\StockController::class, 'exportOpnameTemplate'])->middleware('role:superadmin|admin-gudang|owner')->name('stock.opname.export-template');
 
     // Supplier
-    Route::get('suppliers/export', [SupplierController::class, 'export'])->name('supplier.export');
-    Route::get('suppliers/export-template', [SupplierController::class, 'exportTemplate'])->name('supplier.export.template');
+    Route::get('suppliers/export', [SupplierController::class, 'export'])->name('supplier.export')->middleware('throttle:10,1');
+    Route::get('suppliers/export-template', [SupplierController::class, 'exportTemplate'])->name('supplier.export.template')->middleware('throttle:10,1');
     Route::post('suppliers/import', [SupplierController::class, 'import'])->name('supplier.import');
 
     // Category
@@ -271,72 +272,62 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::post('categories/import', [CategoryController::class, 'import'])->name('category.import');
 
     // Product
-    Route::get('products/export', [ProductController::class, 'export'])->name('product.export');
-    Route::get('products/export-template', [ProductController::class, 'exportTemplate'])->name('product.export.template');
-    Route::post('products/import', [ProductController::class, 'import'])->name('product.import');
-    Route::get('products/import-statuses', [ProductController::class, 'importStatuses'])->name('product.import-statuses');
-    Route::get('products/min-stock/export', [ProductController::class, 'exportMinStock'])->name('product.min-stock.export');
-    Route::get('products/min-stock/export-template', [ProductController::class, 'exportMinStockTemplate'])->name('product.min-stock.export.template');
-    Route::post('products/min-stock/import', [ProductController::class, 'importMinStock'])->name('product.min-stock.import');
+    Route::get('products/export', [ProductController::class, 'export'])->name('product.export')->middleware('throttle:10,1');
+    Route::get('products/export-template', [ProductController::class, 'exportTemplate'])->name('product.export.template')->middleware('throttle:10,1');
+    Route::get('products/min-stock/export', [ProductController::class, 'exportMinStock'])->name('product.min-stock.export')->middleware('throttle:10,1');
+    Route::get('products/min-stock/export-template', [ProductController::class, 'exportMinStockTemplate'])->name('product.min-stock.export.template')->middleware('throttle:10,1');
 
     // Laporan PDF & Excel
-    Route::get('laporan/pdf/po', [LaporanController::class, 'pdfPO'])->name('laporan.pdf.po');
-    Route::get('laporan/pdf/pr', [LaporanController::class, 'pdfPR'])->name('laporan.pdf.pr');
-    Route::get('laporan/pdf/barang-masuk', [LaporanController::class, 'pdfBarangMasuk'])->name('laporan.pdf.barang-masuk');
-    Route::get('laporan/pdf/barang-keluar', [LaporanController::class, 'pdfBarangKeluar'])->name('laporan.pdf.barang-keluar');
-    Route::get('laporan/pdf/stok', [LaporanController::class, 'pdfStok'])->name('laporan.pdf.stok');
-    Route::get('laporan/pdf/kartu-stok/{id}', [LaporanController::class, 'pdfKartuStok'])->name('laporan.pdf.kartu-stok');
-    Route::get('laporan/pdf/penerimaan', [LaporanController::class, 'pdfPenerimaanBarang'])->name('laporan.pdf.penerimaan');
-    Route::get('laporan/pdf/penerimaan/{id}', [LaporanController::class, 'pdfPenerimaanSingle'])->name('laporan.pdf.penerimaan-single');
-    Route::get('laporan/pdf/pengiriman', [LaporanController::class, 'pdfPengiriman'])->name('laporan.pdf.pengiriman');
-    Route::get('laporan/pdf/picking', [LaporanController::class, 'pdfPicking'])->name('laporan.pdf.picking');
-    Route::get('laporan/pdf/aktifitas', [LaporanController::class, 'pdfAktifitas'])->name('laporan.pdf.aktifitas');
-    Route::get('laporan/pdf/pembelian', [LaporanController::class, 'pdfPembelianBarang'])->name('laporan.pdf.pembelian');
-    Route::get('laporan/pdf/faktur-pembelian/{id}', [LaporanController::class, 'pdfFakturPembelian'])->name('laporan.pdf.faktur-pembelian');
-    Route::get('laporan/pdf/opname', [LaporanController::class, 'pdfOpname'])->name('laporan.pdf.opname');
-    Route::get('laporan/pdf/pergerakan', [LaporanController::class, 'pdfPergerakan'])->name('laporan.pdf.pergerakan');
+    Route::get('laporan/pdf/po', [LaporanController::class, 'pdfPO'])->name('laporan.pdf.po')->middleware('throttle:10,1');
+    Route::get('laporan/pdf/pr', [LaporanController::class, 'pdfPR'])->name('laporan.pdf.pr')->middleware('throttle:10,1');
+    Route::get('laporan/pdf/barang-masuk', [LaporanController::class, 'pdfBarangMasuk'])->name('laporan.pdf.barang-masuk')->middleware('throttle:10,1');
+    Route::get('laporan/pdf/barang-keluar', [LaporanController::class, 'pdfBarangKeluar'])->name('laporan.pdf.barang-keluar')->middleware('throttle:10,1');
+    Route::get('laporan/pdf/stok', [LaporanController::class, 'pdfStok'])->name('laporan.pdf.stok')->middleware('throttle:10,1');
+    Route::get('laporan/pdf/kartu-stok/{id}', [LaporanController::class, 'pdfKartuStok'])->name('laporan.pdf.kartu-stok')->middleware('throttle:10,1');
+    Route::get('laporan/pdf/penerimaan', [LaporanController::class, 'pdfPenerimaanBarang'])->name('laporan.pdf.penerimaan')->middleware('throttle:10,1');
+    Route::get('laporan/pdf/penerimaan/{id}', [LaporanController::class, 'pdfPenerimaanSingle'])->name('laporan.pdf.penerimaan-single')->middleware('throttle:10,1');
+    Route::get('laporan/pdf/pengiriman', [LaporanController::class, 'pdfPengiriman'])->name('laporan.pdf.pengiriman')->middleware('throttle:10,1');
+    Route::get('laporan/pdf/picking', [LaporanController::class, 'pdfPicking'])->name('laporan.pdf.picking')->middleware('throttle:10,1');
+    Route::get('laporan/pdf/aktifitas', [LaporanController::class, 'pdfAktifitas'])->name('laporan.pdf.aktifitas')->middleware('throttle:10,1');
+    Route::get('laporan/pdf/pembelian', [LaporanController::class, 'pdfPembelianBarang'])->name('laporan.pdf.pembelian')->middleware('throttle:10,1');
+    Route::get('laporan/pdf/faktur-pembelian/{id}', [LaporanController::class, 'pdfFakturPembelian'])->name('laporan.pdf.faktur-pembelian')->middleware('throttle:10,1');
+    Route::get('laporan/pdf/opname', [LaporanController::class, 'pdfOpname'])->name('laporan.pdf.opname')->middleware('throttle:10,1');
+    Route::get('laporan/pdf/pergerakan', [LaporanController::class, 'pdfPergerakan'])->name('laporan.pdf.pergerakan')->middleware('throttle:10,1');
 
-    Route::get('laporan/export/po', [LaporanController::class, 'exportLaporanPO'])->name('laporan.export.po');
-    Route::get('laporan/export/pr', [LaporanController::class, 'exportPR'])->name('laporan.export.pr');
-    Route::get('laporan/export/barang-masuk', [LaporanController::class, 'exportBarangMasuk'])->name('laporan.export.barang-masuk');
-    Route::get('laporan/export/barang-keluar', [LaporanController::class, 'exportBarangKeluar'])->name('laporan.export.barang-keluar');
-    Route::get('laporan/export/penerimaan', [LaporanController::class, 'exportPenerimaanBarang'])->name('laporan.export.penerimaan');
-    Route::get('laporan/export/pengiriman', [LaporanController::class, 'exportPengiriman'])->name('laporan.export.pengiriman');
-    Route::get('laporan/export/picking', [LaporanController::class, 'exportPickingPacking'])->name('laporan.export.picking');
-    Route::get('laporan/export/aktifitas', [LaporanController::class, 'exportAktifitas'])->name('laporan.export.aktifitas');
-    Route::get('laporan/export/pembelian', [LaporanController::class, 'exportPembelianBarang'])->name('laporan.export.pembelian');
-    Route::get('laporan/export/pergerakan', [LaporanController::class, 'exportPergerakan'])->name('laporan.export.pergerakan');
+    Route::get('laporan/export/po', [LaporanController::class, 'exportLaporanPO'])->name('laporan.export.po')->middleware('throttle:10,1');
+    Route::get('laporan/export/pr', [LaporanController::class, 'exportPR'])->name('laporan.export.pr')->middleware('throttle:10,1');
+    Route::get('laporan/export/barang-masuk', [LaporanController::class, 'exportBarangMasuk'])->name('laporan.export.barang-masuk')->middleware('throttle:10,1');
+    Route::get('laporan/export/barang-keluar', [LaporanController::class, 'exportBarangKeluar'])->name('laporan.export.barang-keluar')->middleware('throttle:10,1');
+    Route::get('laporan/export/penerimaan', [LaporanController::class, 'exportPenerimaanBarang'])->name('laporan.export.penerimaan')->middleware('throttle:10,1');
+    Route::get('laporan/export/pengiriman', [LaporanController::class, 'exportPengiriman'])->name('laporan.export.pengiriman')->middleware('throttle:10,1');
+    Route::get('laporan/export/picking', [LaporanController::class, 'exportPickingPacking'])->name('laporan.export.picking')->middleware('throttle:10,1');
+    Route::get('laporan/export/aktifitas', [LaporanController::class, 'exportAktifitas'])->name('laporan.export.aktifitas')->middleware('throttle:10,1');
+    Route::get('laporan/export/pembelian', [LaporanController::class, 'exportPembelianBarang'])->name('laporan.export.pembelian')->middleware('throttle:10,1');
+    Route::get('laporan/export/pergerakan', [LaporanController::class, 'exportPergerakan'])->name('laporan.export.pergerakan')->middleware('throttle:10,1');
 
-    Route::get('/laporan/retur-supplier', [LaporanController::class, 'exportReturSupplier'])->name('laporan.retur-supplier');
-    Route::get('/laporan/retur-outlet', [LaporanController::class, 'exportReturOutlet'])->name('laporan.retur-outlet');
+    Route::get('/laporan/retur-supplier', [LaporanController::class, 'exportReturSupplier'])->name('laporan.retur-supplier')->middleware('throttle:10,1');
+    Route::get('/laporan/retur-outlet', [LaporanController::class, 'exportReturOutlet'])->name('laporan.retur-outlet')->middleware('throttle:10,1');
 
     Route::get('/laporan/retur-pembelian/{refundPembelian}/export', [LaporanController::class, 'exportReturPembelianSingle'])->name('laporan.retur-pembelian.single');
     Route::get('/laporan/retur-outlet/{refundPembelian}/export', [LaporanController::class, 'exportReturOutletSingle'])->name('laporan.retur-outlet.single');
-    Route::get('/laporan/pdf/retur-pembelian/{refundPembelian}', [LaporanController::class, 'pdfReturPembelianSingle'])->name('laporan.pdf.retur-pembelian-single');
-    Route::get('/laporan/pdf/retur-outlet/{refundPembelian}', [LaporanController::class, 'pdfReturOutletSingle'])->name('laporan.pdf.retur-outlet-single');
+    Route::get('/laporan/pdf/retur-pembelian/{refundPembelian}', [LaporanController::class, 'pdfReturPembelianSingle'])->name('laporan.pdf.retur-pembelian-single')->middleware('throttle:10,1');
+    Route::get('/laporan/pdf/retur-outlet/{refundPembelian}', [LaporanController::class, 'pdfReturOutletSingle'])->name('laporan.pdf.retur-outlet-single')->middleware('throttle:10,1');
 
-    Route::get('/laporan/pdf/retur-supplier', [LaporanController::class, 'pdfReturSupplier'])->name('laporan.pdf.retur-supplier');
-    Route::get('/laporan/pdf/retur-outlet', [LaporanController::class, 'pdfReturOutlet'])->name('laporan.pdf.retur-outlet');
-    Route::get('/laporan/pdf/outlet/minimal-stock', [LaporanController::class, 'pdfOutletMinimalStock'])->name('laporan.pdf.outlet.minimal-stock');
-    Route::get('/laporan/pdf/outlet/penjualan', [LaporanController::class, 'pdfOutletPenjualan'])->name('laporan.pdf.outlet.penjualan');
-    Route::get('/laporan/pdf/outlet/rafaksi', [LaporanController::class, 'pdfOutletRafaksi'])->name('laporan.pdf.outlet.rafaksi');
-    Route::get('/laporan/pdf/outlet/retur', [LaporanController::class, 'pdfOutletRetur'])->name('laporan.pdf.outlet.retur');
-    Route::get('/laporan/pdf/outlet/all-stock', [LaporanController::class, 'pdfOutletAllStock'])->name('laporan.pdf.outlet.all-stock');
+    Route::get('/laporan/pdf/retur-supplier', [LaporanController::class, 'pdfReturSupplier'])->name('laporan.pdf.retur-supplier')->middleware('throttle:10,1');
+    Route::get('/laporan/pdf/retur-outlet', [LaporanController::class, 'pdfReturOutlet'])->name('laporan.pdf.retur-outlet')->middleware('throttle:10,1');
+    Route::get('/laporan/pdf/outlet/minimal-stock', [LaporanController::class, 'pdfOutletMinimalStock'])->name('laporan.pdf.outlet.minimal-stock')->middleware('throttle:10,1');
+    Route::get('/laporan/pdf/outlet/penjualan', [LaporanController::class, 'pdfOutletPenjualan'])->name('laporan.pdf.outlet.penjualan')->middleware('throttle:10,1');
+    Route::get('/laporan/pdf/outlet/rafaksi', [LaporanController::class, 'pdfOutletRafaksi'])->name('laporan.pdf.outlet.rafaksi')->middleware('throttle:10,1');
+    Route::get('/laporan/pdf/outlet/retur', [LaporanController::class, 'pdfOutletRetur'])->name('laporan.pdf.outlet.retur')->middleware('throttle:10,1');
+    Route::get('/laporan/pdf/outlet/all-stock', [LaporanController::class, 'pdfOutletAllStock'])->name('laporan.pdf.outlet.all-stock')->middleware('throttle:10,1');
 });
 
 Route::middleware(['role:superadmin'])->group(function () {
     Route::resource('/admin', AdminController::class);
+
+    // Perintah perawatan lewat URL: hanya superadmin (sebelumnya terbuka tanpa login).
+    Route::get('/optimize-clear', [MaintenanceController::class, 'optimizeClear'])->name('maintenance.optimize-clear');
+    Route::get('/storage-link', [MaintenanceController::class, 'storageLink'])->name('maintenance.storage-link');
 });
 
 require __DIR__ . '/auth.php';
-
-//* Artisan Commands
-Route::get('/optimize-clear', function () {
-    Artisan::call('optimize:clear');
-    return redirect('/login')->with(['success' => 'Optimization Berhasil']);
-});
-
-Route::get('/storage-link', function () {
-    Artisan::call('storage:link');
-    return redirect('/login')->with(['success' => 'Optimization Berhasil']);
-});

@@ -132,6 +132,8 @@ class Product extends Model
             ->withSum('ownerStocks as owner_stock_qty', 'qty');
     }
 
+    // PERINGATAN: tiap akses = 1 query SUM. Jangan dipakai di loop/koleksi;
+    // gunakan scopeWithStockTotals() / withSum('stocks as stock_qty', 'qty').
     // Total stok fisik gudang (SUM qty semua batch/SKU)
     public function getTotalStockAttribute()
     {
@@ -154,12 +156,15 @@ class Product extends Model
         $this->save();
     }
 
+    // PERINGATAN: tiap akses = 1 query SUM. Jangan dipakai di loop/koleksi.
     // Hanya untuk kebutuhan validasi/alokasi (qty - reserved). Jangan dipakai untuk menampilkan "stok".
     public function getTotalAvailableStockAttribute()
     {
         return $this->stocks()->sum('qty_available');
     }
 
+    // PERINGATAN: tiap akses = 1 query SUM. Jangan dipakai di loop/koleksi;
+    // gunakan scopeWithStockTotals() (reserved_stock_qty).
     public function getTotalReservedStockAttribute()
     {
         return $this->stocks()->sum('qty_reserved');
@@ -192,17 +197,56 @@ class Product extends Model
         return $this->hasMany(RefundPembelianItem::class);
     }
 
+    // PERINGATAN: memicu 2 query per produk (total_stock + effective_min_stock). Hanya untuk 1 produk;
+    // untuk daftar produk pakai LowStockService atau withStockTotals() + withEffectiveMin().
     public function isLowStock(): bool
     {
         return $this->total_stock <= $this->effective_min_stock;
     }
 
     /**
+     * Tambahkan kolom `active_adjustment_pct` (persen adjustment aktif terbaru, NULL bila tidak ada)
+     * lewat subselect, sehingga getEffectiveMinStockAttribute() tidak perlu query per produk.
+     * Pakai pada query daftar produk yang akan membaca effective_min_stock di dalam loop.
+     */
+    public function scopeWithEffectiveMin(Builder $query, ?string $date = null): Builder
+    {
+        $date = $date ?? now()->toDateString();
+
+        if (empty($query->getQuery()->columns)) {
+            $query->select($query->getModel()->getTable() . '.*');
+        }
+
+        return $query->selectRaw(
+            '(SELECT a.adjustment_percentage
+                FROM product_minimum_adjustments a
+               WHERE a.product_id = products.id
+                 AND a.active_from <= ?
+                 AND (a.active_until IS NULL OR a.active_until >= ?)
+               ORDER BY a.active_from DESC, a.id DESC
+               LIMIT 1) AS active_adjustment_pct',
+            [$date, $date]
+        );
+    }
+
+    /**
      * Returns min_stock raised by the active adjustment percentage, if any.
      * Falls back to bare min_stock when no active adjustment exists.
+     *
+     * PERINGATAN: tanpa scopeWithEffectiveMin() ini = 1 query per akses. Jangan dipakai di loop
+     * tanpa scope tersebut.
      */
     public function getEffectiveMinStockAttribute(): int
     {
+        // Sudah di-preload oleh scopeWithEffectiveMin(): hitung tanpa query.
+        if (array_key_exists('active_adjustment_pct', $this->attributes)) {
+            $pct = $this->attributes['active_adjustment_pct'];
+
+            return $pct === null
+                ? (int) $this->min_stock
+                : (int) ceil($this->min_stock * (1 + $pct / 100));
+        }
+
         $adjustment = ProductMinimumAdjustment::where('product_id', $this->id)
             ->activeOn()
             ->orderByDesc('active_from')

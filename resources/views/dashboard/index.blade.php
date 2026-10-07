@@ -412,7 +412,7 @@
 
     </section>
 
-@if(!($isStaffOutletDashboard ?? false))
+@if(!($isStaffOutletDashboard ?? false) && in_array(auth()->user()->role, ['admin-gudang', 'superadmin']))
 <!-- STOCK ADJUSTMENT MODAL -->
 <div class="modal fade" id="modalMinStockAdj" tabindex="-1" role="dialog">
     <div class="modal-dialog modal-lg" role="document">
@@ -458,28 +458,7 @@
                             <th>Min Efektif (tanggal)</th>
                         </tr>
                     </thead>
-                    <tbody id="adjProductBody">
-                        @foreach($adjustmentProducts as $p)
-                            <tr>
-                                <td class="text-center">
-                                    <input type="checkbox" class="adj-product-check" value="{{ $p->id }}">
-                                </td>
-                                <td>{{ $p->code }}</td>
-                                <td>{{ $p->name }}</td>
-                                <td class="text-center">{{ $p->current_stock }}</td>
-                                <td class="text-center">{{ $p->min_stock }}</td>
-                                <td class="text-center">
-                                    {{ $p->effective_min }}
-                                    @if($p->effective_min > $p->min_stock)
-                                        <span class="label label-info">+{{ $p->effective_min - $p->min_stock }}</span>
-                                    @endif
-                                </td>
-                                <td>
-                                    {{ $p->active_from?->format('d M Y') }} - {{ $p->active_until?->format('d M Y') }}
-                                </td>
-                            </tr>
-                        @endforeach
-                    </tbody>
+                    <tbody id="adjProductBody"></tbody>
                 </table>
             </div>
             <div class="modal-footer">
@@ -562,24 +541,62 @@
         });
     </script>
     <script>
-        // Min Stock Adjustment Modal
+        // Min Stock Adjustment Modal (hanya admin-gudang & superadmin).
+        // Daftar produk dimuat lewat AJAX saat modal pertama kali dibuka.
         let adjTable = null;
+        let adjLoading = false;
+
+        function escHtml(v) {
+            return $('<div>').text(v == null ? '' : v).html();
+        }
 
         $('#modalMinStockAdj').on('shown.bs.modal', function () {
-            if (!adjTable) {
-                adjTable = $('#tableAdjProducts').DataTable({
-                    pageLength: 10,
-                    order: [[2, 'asc']],
-                    columnDefs: [{ orderable: false, targets: [0] }],
-                    language: {
-                        search: "Cari:",
-                        lengthMenu: "Tampilkan _MENU_ baris",
-                        info: "Menampilkan _START_-_END_ dari _TOTAL_ produk",
-                        paginate: { previous: "Prev", next: "Next" },
-                        zeroRecords: "Tidak ada produk"
-                    }
-                });
-            }
+            if (adjTable || adjLoading) return;
+            adjLoading = true;
+            $('#adjProductBody').html('<tr><td colspan="7" class="text-center">Memuat data...</td></tr>');
+
+            $.ajax({
+                url: '{{ route("product.minimum-adjustment.products") }}',
+                method: 'GET',
+                success: function (res) {
+                    let rows = '';
+                    (res.data || []).forEach(function (p) {
+                        const diff = p.effective_min > p.min_stock
+                            ? ' <span class="label label-info">+' + (p.effective_min - p.min_stock) + '</span>' : '';
+                        const period = (p.active_from || p.active_until)
+                            ? escHtml(p.active_from || '') + ' - ' + escHtml(p.active_until || '') : '';
+                        rows += '<tr>' +
+                            '<td class="text-center"><input type="checkbox" class="adj-product-check" value="' + p.id + '"></td>' +
+                            '<td>' + escHtml(p.code) + '</td>' +
+                            '<td>' + escHtml(p.name) + '</td>' +
+                            '<td class="text-center">' + p.current_stock + '</td>' +
+                            '<td class="text-center">' + p.min_stock + '</td>' +
+                            '<td class="text-center">' + p.effective_min + diff + '</td>' +
+                            '<td>' + period + '</td>' +
+                            '</tr>';
+                    });
+                    $('#adjProductBody').html(rows);
+
+                    adjTable = $('#tableAdjProducts').DataTable({
+                        pageLength: 10,
+                        order: [[2, 'asc']],
+                        columnDefs: [{ orderable: false, targets: [0] }],
+                        language: {
+                            search: "Cari:",
+                            lengthMenu: "Tampilkan _MENU_ baris",
+                            info: "Menampilkan _START_-_END_ dari _TOTAL_ produk",
+                            paginate: { previous: "Prev", next: "Next" },
+                            zeroRecords: "Tidak ada produk"
+                        }
+                    });
+                },
+                error: function () {
+                    $('#adjProductBody').html('<tr><td colspan="7" class="text-center text-danger">Gagal memuat data produk. Tutup lalu buka lagi modal ini.</td></tr>');
+                },
+                complete: function () {
+                    adjLoading = false;
+                }
+            });
         });
 
         $(document).on('change', '#adjCheckAll', function () {

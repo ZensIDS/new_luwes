@@ -5,16 +5,16 @@ namespace App\Http\Controllers;
 use App\Models\DeliveryOrder;
 use App\Models\DeliveryOrderItem;
 use App\Models\Pembelian;
-use App\Models\Penjualan;
 use App\Models\Product;
-use App\Models\ProductMinimumAdjustment;
 use App\Models\RefundPembelian;
 use App\Models\RequestOrder;
 use App\Models\RequestOrderItem;
 use App\Models\Stock;
 use App\Models\Supplier;
+use App\Services\LowStockService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 
@@ -31,6 +31,16 @@ class DashboardController extends Controller
                 'isStaffOutletDashboard' => true,
                 'outletRequestTotal' => (clone $requestOrdersBase)->count(),
                 'outletRequestPending' => (clone $requestOrdersBase)->where('status', 'pending')->count(),
+            ]);
+        }
+
+        if ($request->wantsJson()) {
+            return response()->json([
+                'bestBuyProducts'  => [],
+                'bestBuySuppliers' => [],
+                'salesGraph'       => [],
+                'productGraph'     => [],
+                'monthlyRevenue'   => [],
             ]);
         }
 
@@ -58,46 +68,20 @@ class DashboardController extends Controller
 
         // Semua angka stok di dashboard memakai SUM(stocks.qty) = stok fisik gudang
         // (sama dengan menu Stok, Produk, dan Laporan).
+        // whereDate() membungkus kolom dengan DATE() dan mematikan index -> pakai rentang waktu.
         $nearExpiryStocks = Stock::with('product:id,name,code')
             ->where('qty', '>', 0)
             ->whereNotNull('expired_at')
-            ->whereDate('expired_at', '>=', now()->toDateString())
-            ->whereDate('expired_at', '<=', now()->addDays(60)->toDateString())
+            ->where('expired_at', '>=', now()->startOfDay())
+            ->where('expired_at', '<=', now()->addDays(60)->endOfDay())
             ->orderBy('expired_at')
             ->get(['id', 'product_id', 'qty', 'expired_at', 'batch_number', 'sku']);
 
-        $activeAdjustments = ProductMinimumAdjustment::query()
-            ->activeOn()
-            ->orderByDesc('active_from')
-            ->orderByDesc('id')
-            ->get()
-            ->groupBy('product_id');
-
-        $lowVelocityProducts = Product::select('id', 'code', 'name', 'min_stock')
-            ->withSum('stocks', 'qty')
-            ->where('min_stock', '>', 0)
-            ->orderBy('name')
-            ->get()
-            ->map(function ($product) use ($activeAdjustments) {
-                $adj          = $activeAdjustments->get($product->id)?->first();
-                $effectiveMin = $adj
-                    ? (int) ceil($product->min_stock * (1 + $adj->adjustment_percentage / 100))
-                    : (int) $product->min_stock;
-                $currentStock = (int) ($product->stocks_sum_qty ?? 0);
-
-                $product->effective_min         = $effectiveMin;
-                $product->current_stock         = $currentStock;
-                $product->adjustment_percentage = $adj?->adjustment_percentage ?? 0;
-                $product->deficit               = max(0, $effectiveMin - $currentStock);
-
-                return $product;
-            })
-            ->filter(fn ($p) => $p->current_stock <= $p->effective_min)
-            ->sortByDesc('deficit')
-            ->values();
+        // Dihitung di SQL (realtime) lewat service yang sama dengan lonceng notifikasi.
+        $lowVelocityProducts = app(LowStockService::class)->dashboardList();
 
         // Stat cards
-        $totalStock        = (int) Stock::sum('qty');
+        $totalStock        = (int) Stock::sum('qty'); // dipakai juga untuk kartu 'stocks' (tidak dihitung dua kali)
         $pendingOrdersCount = RequestOrder::where('status', 'pending')->count();
         $deliveredCount    = DeliveryOrder::where('status', 'delivered')->count();
         $refundCount       = RefundPembelian::count();
@@ -137,51 +121,24 @@ class DashboardController extends Controller
             ->limit(5)
             ->get();
 
-        // Slow moving: products with stock but not delivered in last 90 days
-        $recentlyDeliveredIds = DeliveryOrderItem::where('created_at', '>=', now()->subDays(90))
-            ->distinct()
-            ->pluck('product_id');
+        // Slow moving: produk yang tidak ada pengiriman dalam 90 hari terakhir.
+        // NOT EXISTS agar MySQL yang menyaring (tidak membuat daftar ID besar di PHP).
+        $deliveredSince = now()->subDays(90);
 
         $slowMovingProducts = Product::select('id', 'code', 'name')
             ->withSum('stocks', 'qty')
-            ->whereNotIn('id', $recentlyDeliveredIds)
+            ->whereNotExists(function ($query) use ($deliveredSince) {
+                $query->select(DB::raw(1))
+                    ->from('delivery_order_items as doi')
+                    ->whereColumn('doi.product_id', 'products.id')
+                    ->where('doi.created_at', '>=', $deliveredSince);
+            })
             ->orderByDesc('stocks_sum_qty')
             ->limit(5)
             ->get();
 
-        if ($request->wantsJson()) {
-            return response()->json([
-                'bestBuyProducts'  => [],
-                'bestBuySuppliers' => [],
-                'salesGraph'       => [],
-                'productGraph'     => [],
-                'monthlyRevenue'   => [],
-            ]);
-        }
-
-        $adjustmentProducts = Product::select('id', 'code', 'name', 'min_stock')
-            ->withSum('stocks', 'qty')
-            ->orderBy('name')
-            ->get()
-            ->map(function ($p) use ($activeAdjustments) {
-                $adj = $activeAdjustments->get($p->id)?->first();
-                $p->active_from   = $adj?->active_from;
-                $p->active_until  = $adj?->active_until;
-                $p->current_stock = (int) ($p->stocks_sum_qty ?? 0);
-                $p->effective_min = $adj
-                    ? (int) ceil($p->min_stock * (1 + $adj->adjustment_percentage / 100))
-                    : (int) $p->min_stock;
-
-                return $p;
-            });
-
         return view('dashboard.index', [
             'isStaffOutletDashboard' => false,
-            'products'           => Product::count(),
-            'stocks'             => Stock::sum('qty'),
-            'penjualans'         => Penjualan::count(),
-            'pembelianTerkirim'  => Pembelian::where('is_published', true)->count(),
-            'totalRevenue'       => 0,
             // Stat cards
             'totalStock'         => $totalStock,
             'pendingOrdersCount' => $pendingOrdersCount,
@@ -200,7 +157,6 @@ class DashboardController extends Controller
             'urgentSuppliers'    => $urgentSuppliers,
             'nearExpiryStocks'   => $nearExpiryStocks,
             'lowVelocityProducts' => $lowVelocityProducts,
-            'adjustmentProducts' => $adjustmentProducts,
             'pendingOwnerApprovals' => $pendingOwnerApprovals,
         ]);
     }

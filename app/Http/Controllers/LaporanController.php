@@ -164,8 +164,7 @@ class LaporanController extends Controller
         $lokasiFilter = $lokasi ? fn($q) => $q->where('lokasi', $lokasi) : null;
 
         $query = StockAdjustment::with(['product', 'stock'])
-            ->whereDate('adjustment_date', '>=', $mulai)
-            ->whereDate('adjustment_date', '<=', $selesai);
+            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'adjustment_date', $mulai, $selesai));
 
         if ($lokasiFilter) {
             $query->whereHas('product', $lokasiFilter);
@@ -334,8 +333,7 @@ class LaporanController extends Controller
             'refundPembelianItems.stock.pembelian',
         ])
             ->where('type', 'gudang_ke_supplier')
-            ->whereDate('tanggal', '>=', $mulai)
-            ->whereDate('tanggal', '<=', $selesai)
+            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'tanggal', $mulai, $selesai))
             ->orderBy('tanggal')
             ->get()
             ->flatMap(fn($retur) => $retur->refundPembelianItems->each(fn($item) => $item->retur = $retur));
@@ -357,8 +355,7 @@ class LaporanController extends Controller
             'refundPembelianItems.stock',
         ])
             ->where('type', 'outlet_ke_gudang')
-            ->whereDate('tanggal', '>=', $mulai)
-            ->whereDate('tanggal', '<=', $selesai)
+            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'tanggal', $mulai, $selesai))
             ->orderBy('tanggal')
             ->get()
             ->flatMap(fn($retur) => $retur->refundPembelianItems->each(fn($item) => $item->retur = $retur));
@@ -389,7 +386,7 @@ class LaporanController extends Controller
         $settings = $this->getSettings();
 
         $pembelians = Pembelian::with(['supplier', 'pembelianProducts.product'])
-            ->whereDate('created_at', '>=', $mulai)->whereDate('created_at', '<=', $selesai)
+            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'created_at', $mulai, $selesai))
             ->orderBy('created_at')->get();
 
         $rows = [];
@@ -427,7 +424,7 @@ class LaporanController extends Controller
         $settings = $this->getSettings();
 
         $orders = RequestOrder::with(['owner', 'items.product'])
-            ->whereDate('request_date', '>=', $mulai)->whereDate('request_date', '<=', $selesai)
+            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'request_date', $mulai, $selesai))
             ->orderBy('request_date')->get();
 
         $rows = [];
@@ -558,7 +555,7 @@ class LaporanController extends Controller
 
         $stocks = Stock::with(['pembelian.supplier', 'product'])
             ->whereHas('pembelian')
-            ->whereDate('created_at', '>=', $mulai)->whereDate('created_at', '<=', $selesai)
+            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'created_at', $mulai, $selesai))
             ->orderBy('created_at')->get();
 
         return Pdf::loadView('exports.pdf.laporan-penerimaan', compact('stocks', 'settings', 'mulai', 'selesai'))
@@ -586,7 +583,7 @@ class LaporanController extends Controller
         $settings = $this->getSettings();
 
         $deliveries = DeliveryOrder::with(['owner', 'requestOrder', 'items.product'])
-            ->whereDate('delivery_date', '>=', $mulai)->whereDate('delivery_date', '<=', $selesai)
+            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'delivery_date', $mulai, $selesai))
             ->orderBy('delivery_date')->get();
 
         $rows = [];
@@ -621,7 +618,7 @@ class LaporanController extends Controller
         $settings = $this->getSettings();
 
         $pickings = PickingList::with(['requestOrder.owner', 'items.product'])
-            ->whereDate('created_at', '>=', $mulai)->whereDate('created_at', '<=', $selesai)
+            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'created_at', $mulai, $selesai))
             ->orderBy('created_at')->get();
 
         $rows = [];
@@ -692,7 +689,7 @@ class LaporanController extends Controller
         $settings = $this->getSettings();
 
         $pembelians = Pembelian::with(['supplier', 'pembelianProducts.product'])
-            ->whereDate('created_at', '>=', $mulai)->whereDate('created_at', '<=', $selesai)
+            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'created_at', $mulai, $selesai))
             ->orderBy('created_at')->get();
 
         $rows = [];
@@ -744,7 +741,7 @@ class LaporanController extends Controller
         $settings = $this->getSettings();
 
         $adjustments = StockAdjustment::with(['product', 'stock'])
-            ->whereDate('adjustment_date', '>=', $mulai)->whereDate('adjustment_date', '<=', $selesai)
+            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'adjustment_date', $mulai, $selesai))
             ->orderBy('adjustment_date')->get();
 
         return Pdf::loadView('exports.pdf.laporan-opname', compact('adjustments', 'settings', 'mulai', 'selesai'))

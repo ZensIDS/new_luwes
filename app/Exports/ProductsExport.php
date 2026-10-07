@@ -3,17 +3,24 @@
 namespace App\Exports;
 
 use App\Models\Product;
-use Maatwebsite\Excel\Concerns\FromCollection;
+use Maatwebsite\Excel\Concerns\FromQuery;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
 
-class ProductsExport implements FromCollection, WithHeadings, WithMapping
+class ProductsExport implements FromQuery, WithHeadings, WithMapping
 {
     public function __construct(private bool $templateOnly = false) {}
 
-    public function collection()
+    /**
+     * Dibaca per potongan (chunk) oleh Laravel Excel, bukan ->get() sekaligus.
+     * `suppliers` di-eager-load karena dipakai di map() (sebelumnya 1 query per baris).
+     * Mode template: query yang tidak menghasilkan baris, hanya heading.
+     */
+    public function query()
     {
-        return $this->templateOnly ? collect([]) : Product::with('category')->get();
+        $query = Product::query()->with(['category', 'suppliers'])->orderBy('id');
+
+        return $this->templateOnly ? $query->whereRaw('1 = 0') : $query;
     }
 
     public function headings(): array

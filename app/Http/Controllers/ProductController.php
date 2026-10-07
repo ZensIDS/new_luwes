@@ -6,19 +6,13 @@ use App\Exports\ProductsExport;
 use App\Exports\ProductsMinStockExport;
 use App\Http\Requests\ProductRequest;
 use App\Http\Resources\ProductResource;
-use App\Imports\ProductsImport;
-use App\Imports\ProductsMinStockImport;
-use App\Jobs\ProcessProductImportChunk;
 use App\Models\Category;
 use App\Models\Outlet;
 use App\Models\Product;
-use App\Models\ProductImport;
 use App\Models\Stock;
 use App\Models\Supplier;
 use App\Support\OutletAccess;
-use Illuminate\Bus\Batch;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
 use Maatwebsite\Excel\Facades\Excel;
 use Spatie\Activitylog\Models\Activity;
@@ -53,26 +47,46 @@ class ProductController extends Controller
         $statusFilter = $request->input('status_produk', 'sudah');
         $products = Product::query();
 
-        if ($request->filled('search')) {
-            $search = trim((string) $request->search);
-            if ($search !== '') {
-                $products = $products->where(function ($query) use ($search, $outletId) {
+        // Stok outlet yang masih bisa dijual (qty > 0 dan belum kedaluwarsa).
+        // expired_at dibandingkan langsung (bukan whereDate) supaya index bisa dipakai.
+        $outletStockScope = function ($query) use ($outletId) {
+            $query->where('owner_id', $outletId)
+                ->where('qty', '>', 0)
+                ->where(function ($expiryQuery) {
+                    $expiryQuery->whereNull('expired_at')->orWhere('expired_at', '>=', today());
+                });
+        };
+
+        $search = trim((string) $request->input('search', ''));
+        if ($search !== '') {
+            // Jalur scan barcode/serial (kasir): pencocokan eksak dulu. Bila ketemu, tidak perlu
+            // menjalankan LIKE '%...%' di 5 kolom + subquery serial yang berat.
+            $exactIds = $outletId ? $this->exactScanMatches($search, $outletId, $outletStockScope) : collect();
+
+            if ($exactIds->isNotEmpty()) {
+                $products = $products->whereIn('products.id', $exactIds);
+            } else {
+                $products = $products->where(function ($query) use ($search, $outletId, $outletStockScope) {
                     $query->where('name', 'LIKE', "%{$search}%")
                         ->orWhere('code', 'LIKE', "%{$search}%")
-                        ->orWhere('harga_jual', 'LIKE', "%{$search}%")
                         ->orWhere('brand', 'LIKE', "%{$search}%")
                         ->orWhere('model', 'LIKE', "%{$search}%");
 
+                    if (! $outletId) {
+                        // Pencarian harga hanya dipertahankan di daftar produk gudang (admin);
+                        // di kasir kolom angka ini tidak berguna dan memperberat query.
+                        $query->orWhere('harga_jual', 'LIKE', "%{$search}%");
+                    }
+
                     if ($outletId) {
-                        // Barcode/serial scan di kasir hanya mencari di stok milik outlet ini.
-                        $query->orWhereHas('ownerStocks', function ($stockQuery) use ($outletId, $search) {
-                            $stockQuery->where('owner_id', $outletId)
-                                ->where('qty', '>', 0)
-                                ->where(function ($expiryQuery) {
-                                    $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
-                                })
-                                ->whereHas('stock', fn ($stock) => $stock->where('serial_number', 'LIKE', "%{$search}%"));
-                        });
+                        // Serial number hanya dicari bila input terlihat seperti serial (>= 4 karakter, tanpa spasi),
+                        // karena subquery bersarang ke owner_stocks -> stocks ini bagian terberat pencarian.
+                        if ($this->looksLikeSerial($search, 4)) {
+                            $query->orWhereHas('ownerStocks', function ($stockQuery) use ($outletStockScope, $search) {
+                                $outletStockScope($stockQuery);
+                                $stockQuery->whereHas('stock', fn ($stock) => $stock->where('serial_number', 'LIKE', "%{$search}%"));
+                            });
+                        }
                     } else {
                         $query->orWhereHas('stocks', function ($stockQuery) use ($search) {
                             $stockQuery->where('serial_number', 'LIKE', "%{$search}%")
@@ -85,13 +99,7 @@ class ProductController extends Controller
 
         if ($outletId) {
             // Kasir hanya boleh menjual produk yang benar-benar punya stok di outlet ini.
-            $products = $products->whereHas('ownerStocks', function ($query) use ($outletId) {
-                $query->where('owner_id', $outletId)
-                    ->where('qty', '>', 0)
-                    ->where(function ($expiryQuery) {
-                        $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
-                    });
-            });
+            $products = $products->whereHas('ownerStocks', $outletStockScope);
         }
 
         if ($request->filled('category_id')) {
@@ -127,12 +135,8 @@ class ProductController extends Controller
             if ($outletId) {
                 // Cashier searches only need stock owned by this outlet. Do not
                 // hydrate warehouse stocks for every search result.
-                $relations['ownerStocks'] = function ($query) use ($outletId, $compact) {
-                    $query->where('owner_id', $outletId)
-                        ->where('qty', '>', 0)
-                        ->where(function ($expiryQuery) {
-                            $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
-                        });
+                $relations['ownerStocks'] = function ($query) use ($outletStockScope, $compact) {
+                    $outletStockScope($query);
 
                     if ($compact) {
                         $query->select([
@@ -155,7 +159,6 @@ class ProductController extends Controller
                 };
             }
 
-            $perPage = min(max($request->integer('per_page', 25), 1), 50);
             if ($compact) {
                 $products->select([
                     'products.id',
@@ -169,6 +172,12 @@ class ProductController extends Controller
                 ]);
             }
 
+            if (! $outletId) {
+                // Konteks gudang: total stok dihitung di query (1 subselect), bukan accessor total_stock per baris.
+                $products->withSum('stocks as stock_qty', 'qty');
+            }
+
+            // Halaman selalu 10 baris (klien kasir tidak lagi mengirim per_page).
             $products = $products
                 ->with($relations)
                 ->latest()
@@ -182,6 +191,7 @@ class ProductController extends Controller
             // stock_qty (SUM qty), reserved_stock_qty (SUM qty_reserved), owner_stock_qty (SUM owner_stocks.qty)
             // -> sumber angka yang sama dengan menu Stok, Dashboard, dan Laporan
             ->withStockTotals()
+            ->withEffectiveMin() // view membaca effective_min_stock per baris -> hitung di query
             ->withSum([
                 'stockPembelians as approved_stock_pembelians_qty' => function ($query) {
                     $query->whereHas('pembelian', fn($pembelian) => $pembelian->where('owner_approval_status', 'approved'));
@@ -193,11 +203,6 @@ class ProductController extends Controller
 
         return view('products.index', [
             'products' => $products,
-            'recentImports' => ProductImport::query()
-                ->latest()
-                ->take(5)
-                ->get()
-                ->map(fn(ProductImport $productImport) => $this->formatProductImport($productImport)),
             'categories' => Category::orderBy('name')->get(['id', 'name']),
             'locations' => Product::query()
                 ->whereNotNull('lokasi')
@@ -360,17 +365,6 @@ class ProductController extends Controller
         return response()->json(['success' => true, 'data' => $activities]);
     }
 
-    public function importStatuses()
-    {
-        $imports = ProductImport::query()
-            ->latest()
-            ->take(5)
-            ->get()
-            ->map(fn(ProductImport $productImport) => $this->formatProductImport($productImport));
-
-        return response()->json(['data' => $imports]);
-    }
-
     ///-----------------------------------------------------------------------------------------------
 
     public function export()
@@ -383,77 +377,6 @@ class ProductController extends Controller
         return Excel::download(new ProductsExport(templateOnly: true), 'template_products.xlsx');
     }
 
-    public function import(Request $request)
-    {
-        $request->validate(['file' => 'required|mimes:xlsx,xls,csv']);
-        $file = $request->file('file');
-        $storedFilePath = $file->store('imports/products');
-        $absoluteFilePath = Storage::disk('local')->path($storedFilePath);
-        $chunkSize = 100;
-        $productsImport = app(ProductsImport::class);
-        $totalRows = $productsImport->countDataRows($absoluteFilePath);
-
-        if ($totalRows === 0) {
-            Storage::disk('local')->delete($storedFilePath);
-
-            return redirect()->back()->with('toast_error', 'File import kosong atau hanya berisi header.');
-        }
-
-        $productImport = ProductImport::create([
-            'original_file_name' => $file->getClientOriginalName(),
-            'stored_file_path' => $storedFilePath,
-            'status' => ProductImport::STATUS_QUEUED,
-            'total_rows' => $totalRows,
-            'chunk_size' => $chunkSize,
-            'total_chunks' => (int) ceil($totalRows / $chunkSize),
-            'requested_by' => auth()->id(),
-        ]);
-
-        $jobs = [];
-        for ($startRow = 2; $startRow < $totalRows + 2; $startRow += $chunkSize) {
-            $jobs[] = new ProcessProductImportChunk($productImport->id, $startRow, $chunkSize);
-        }
-
-        $productImportId = $productImport->id;
-
-        $batch = Bus::batch($jobs)
-            ->name('Product import #' . $productImportId)
-            ->onQueue('imports')
-            ->allowFailures()
-            ->finally(function (Batch $batch) use ($productImportId) {
-                $productImport = ProductImport::find($productImportId);
-
-                if (! $productImport) {
-                    return;
-                }
-
-                $status = match (true) {
-                    $batch->cancelled() => ProductImport::STATUS_CANCELLED,
-                    $batch->failedJobs > 0 || $productImport->failed_rows > 0 => ProductImport::STATUS_COMPLETED_WITH_ERRORS,
-                    default => ProductImport::STATUS_COMPLETED,
-                };
-
-                if ($batch->failedJobs > 0 && $productImport->processed_chunks === 0 && $productImport->successful_rows === 0) {
-                    $status = ProductImport::STATUS_FAILED;
-                }
-
-                $productImport->forceFill([
-                    'status' => $status,
-                    'finished_at' => now(),
-                    'error_message' => $batch->failedJobs > 0
-                        ? 'Sebagian chunk gagal diproses. Cek failed rows / queue failures.'
-                        : null,
-                ])->save();
-            })
-            ->dispatch();
-
-        $productImport->forceFill([
-            'batch_id' => $batch->id,
-        ])->save();
-
-        return redirect()->back()->with('toast_success', 'Import produk #' . $productImport->id . ' berhasil di-queue.');
-    }
-
     public function exportMinStock()
     {
         return Excel::download(new ProductsMinStockExport(), 'products_min_stock.xlsx');
@@ -464,48 +387,35 @@ class ProductController extends Controller
         return Excel::download(new ProductsMinStockExport(templateOnly: true), 'template_min_stock.xlsx');
     }
 
-    public function importMinStock(Request $request)
+    /**
+     * Input terlihat seperti barcode/serial: cukup panjang dan tanpa spasi.
+     */
+    private function looksLikeSerial(string $search, int $minLength): bool
     {
-        $request->validate(['file' => 'required|mimes:xlsx,xls,csv']);
-        Excel::import(new ProductsMinStockImport(), $request->file('file'));
-
-        return redirect()->back()->with('toast_success', 'Berhasil Import Min Stock!');
+        return mb_strlen($search) >= $minLength && ! preg_match('/\s/', $search);
     }
 
-    private function formatProductImport(ProductImport $productImport): array
+    /**
+     * Pencocokan eksak untuk scan barcode (code) atau serial number di stok outlet.
+     * Hanya dicoba bila input terlihat seperti barcode (>= 6 karakter, tanpa spasi).
+     * Hasil kosong = lanjut ke pencarian LIKE biasa.
+     */
+    private function exactScanMatches(string $search, $outletId, \Closure $outletStockScope)
     {
-        $batch = $productImport->batch();
+        if (! $this->looksLikeSerial($search, 6)) {
+            return collect();
+        }
 
-        return [
-            'id' => $productImport->id,
-            'original_file_name' => $productImport->original_file_name,
-            'status' => $productImport->status,
-            'status_label' => $this->productImportStatusLabel($productImport->status),
-            'progress' => $batch?->progress() ?? $productImport->progressPercentage(),
-            'processed_rows' => $productImport->processed_rows,
-            'total_rows' => $productImport->total_rows,
-            'successful_rows' => $productImport->successful_rows,
-            'failed_rows' => $productImport->failed_rows,
-            'processed_chunks' => $productImport->processed_chunks,
-            'total_chunks' => $productImport->total_chunks,
-            'failed_jobs' => $batch?->failedJobs ?? 0,
-            'created_at' => optional($productImport->created_at)->format('d M Y H:i'),
-            'started_at' => optional($productImport->started_at)->format('d M Y H:i'),
-            'finished_at' => optional($productImport->finished_at)->format('d M Y H:i'),
-            'error_message' => $productImport->error_message,
-        ];
-    }
-
-    private function productImportStatusLabel(string $status): string
-    {
-        return match ($status) {
-            ProductImport::STATUS_QUEUED => 'Queued',
-            ProductImport::STATUS_PROCESSING => 'Processing',
-            ProductImport::STATUS_COMPLETED => 'Completed',
-            ProductImport::STATUS_COMPLETED_WITH_ERRORS => 'Completed with errors',
-            ProductImport::STATUS_FAILED => 'Failed',
-            ProductImport::STATUS_CANCELLED => 'Cancelled',
-            default => ucfirst(str_replace('_', ' ', $status)),
-        };
+        return Product::query()
+            ->where(function ($query) use ($search, $outletStockScope) {
+                $query->where('code', $search)
+                    ->orWhereHas('ownerStocks', function ($stockQuery) use ($search, $outletStockScope) {
+                        $outletStockScope($stockQuery);
+                        $stockQuery->whereHas('stock', fn ($stock) => $stock->where('serial_number', $search));
+                    });
+            })
+            ->whereHas('ownerStocks', $outletStockScope)
+            ->limit(10)
+            ->pluck('products.id');
     }
 }

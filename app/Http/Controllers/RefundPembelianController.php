@@ -46,25 +46,32 @@ class RefundPembelianController extends Controller
      */
     public function getOutletProducts(Outlet $outlet)
     {
-        $stocks = OwnerStock::where('owner_id', $outlet->id)
+        $ownerStocks = OwnerStock::where('owner_id', $outlet->id)
             ->where('qty', '>', 0)
             ->with(['product', 'stock'])
-            ->get()
-            ->map(function ($ownerStock) use ($outlet) {
-                $doItem = \App\Models\DeliveryOrderItem::where('stock_id', $ownerStock->stock_id)
-                    ->whereHas('deliveryOrder', fn ($q) => $q->where('owner_id', $outlet->id)->where('status', 'delivered'))
-                    ->with('deliveryOrder:id,code')
-                    ->first();
+            ->get();
 
-                return [
-                    'stock_id'      => $ownerStock->stock_id,
-                    'product_id'    => $ownerStock->product_id,
-                    'product_name'  => $ownerStock->product->name,
-                    'sku'           => $ownerStock->stock->sku ?? '-',
-                    'do_code'       => $doItem?->deliveryOrder?->code ?? '-',
-                    'qty_available' => $ownerStock->qty,
-                ];
-            });
+        // Satu query untuk semua DO item terkait (bukan 1 query per ownerStock).
+        // Diurutkan id asc agar item pertama per stock_id sama dengan first() sebelumnya.
+        $doItemsByStock = \App\Models\DeliveryOrderItem::whereIn('stock_id', $ownerStocks->pluck('stock_id')->filter()->unique()->all())
+            ->whereHas('deliveryOrder', fn ($q) => $q->where('owner_id', $outlet->id)->where('status', 'delivered'))
+            ->with('deliveryOrder:id,code')
+            ->orderBy('id')
+            ->get()
+            ->groupBy('stock_id');
+
+        $stocks = $ownerStocks->map(function ($ownerStock) use ($doItemsByStock) {
+            $doItem = $doItemsByStock->get($ownerStock->stock_id)?->first();
+
+            return [
+                'stock_id'      => $ownerStock->stock_id,
+                'product_id'    => $ownerStock->product_id,
+                'product_name'  => $ownerStock->product->name,
+                'sku'           => $ownerStock->stock->sku ?? '-',
+                'do_code'       => $doItem?->deliveryOrder?->code ?? '-',
+                'qty_available' => $ownerStock->qty,
+            ];
+        });
 
         return response()->json($stocks->values());
     }
@@ -185,11 +192,25 @@ class RefundPembelianController extends Controller
                 'total'             => 0,
             ]);
 
+            // Muat semua stok sekali beserta relasi yang dipakai (bukan findOrFail + lazy load per baris).
+            $stocksById = Stock::with(['product', 'ownerStock'])
+                ->whereIn('id', collect($selectedProducts)->pluck('stock_id')->unique()->all())
+                ->get()
+                ->keyBy('id');
+            $seenStockIds = [];
+
             foreach ($selectedProducts as $product) {
+                // Padanan findOrFail(). Bila stok yang sama muncul lagi, baca ulang dari DB
+                // (qty_available adalah kolom generated, jadi harus segar seperti find() sebelumnya).
+                $stock = $stocksById[$product['stock_id']]
+                    ?? throw (new \Illuminate\Database\Eloquent\ModelNotFoundException)->setModel(Stock::class, [$product['stock_id']]);
+                if (isset($seenStockIds[$stock->id])) {
+                    $stock->refresh()->load(['product', 'ownerStock']);
+                }
+                $seenStockIds[$stock->id] = true;
 
                 if (! $isOutlet) {
                     // ── Gudang ke Supplier ──────────────────────────────────────
-                    $stock = Stock::findOrFail($product['stock_id']);
 
                     if ($stock->qty_available < $product['qty']) {
                         throw new \Exception("Stok gudang tidak mencukupi untuk: {$stock->product->name}");
@@ -225,7 +246,6 @@ class RefundPembelianController extends Controller
                     ]);
                 } else {
                     // ── Outlet ke Gudang ─────────────────────────────────────────
-                    $stock      = Stock::findOrFail($product['stock_id']);
                     $ownerStock = $stock->ownerStock;
 
                     if (! $ownerStock || $ownerStock->qty < $product['qty']) {
@@ -350,8 +370,13 @@ class RefundPembelianController extends Controller
         try {
             if ($refundPembelian->type === 'gudang_ke_supplier') {
                 // Reverse stock reduction (only for retur status)
-                foreach ($refundPembelian->refundPembelianItems as $item) {
-                    $stock = Stock::find($item->stock_id);
+                $items = $refundPembelian->refundPembelianItems;
+                $stocksById = Stock::whereIn('id', $items->pluck('stock_id')->filter()->unique()->all())
+                    ->get()
+                    ->keyBy('id');
+
+                foreach ($items as $item) {
+                    $stock = $stocksById[$item->stock_id] ?? null;
                     if ($stock) {
                         $stock->qty += $item->qty;
                         $stock->save();
@@ -407,14 +432,23 @@ class RefundPembelianController extends Controller
 
         DB::beginTransaction();
         try {
+            // Muat semua item dan stoknya sekali (bukan findOrFail/find per item).
+            $itemsById = RefundPembelianItem::whereIn('id', array_keys($request->items))
+                ->get()
+                ->keyBy('id');
+            $stocksById = Stock::whereIn('id', $itemsById->pluck('stock_id')->filter()->unique()->all())
+                ->get()
+                ->keyBy('id');
+
             foreach ($request->items as $itemId => $itemData) {
-                $item       = RefundPembelianItem::findOrFail($itemId);
+                $item       = $itemsById[$itemId]
+                    ?? throw (new \Illuminate\Database\Eloquent\ModelNotFoundException)->setModel(RefundPembelianItem::class, [$itemId]);
                 $resolution = $itemData['resolution'];
                 $item->update(['resolution' => $resolution]);
 
                 // if ($resolution === 'barang') {
                 // Restore warehouse stock
-                $stock = Stock::find($item->stock_id);
+                $stock = $stocksById[$item->stock_id] ?? null;
                 if ($stock) {
                     $stock->qty += $item->qty;
                     $stock->save();

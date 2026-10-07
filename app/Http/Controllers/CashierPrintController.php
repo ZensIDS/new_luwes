@@ -66,7 +66,7 @@ class CashierPrintController extends Controller
                 ->where('owner_id', $outletId)
                 ->where('qty', '>', 0)
                 ->where(function ($expiryQuery) {
-                    $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                    $expiryQuery->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
                 })
                 ->orderBy('created_at');
         }
@@ -126,7 +126,7 @@ class CashierPrintController extends Controller
                             $stockQuery->where('owner_id', $outletId)
                                 ->where('qty', '>', 0)
                                 ->where(function ($expiryQuery) {
-                                    $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                                    $expiryQuery->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
                                 })
                                 ->whereHas('stock', fn ($stock) => $stock->where('serial_number', 'LIKE', "%{$search}%"));
                         });
@@ -145,7 +145,7 @@ class CashierPrintController extends Controller
                 $stockQuery->where('owner_id', $outletId)
                     ->where('qty', '>', 0)
                     ->where(function ($expiryQuery) {
-                        $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                        $expiryQuery->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
                     });
             });
         }

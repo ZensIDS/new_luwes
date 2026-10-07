@@ -238,7 +238,7 @@ class CashierSaleService
             ->where('product_id', $product->id)
             ->where('qty', '>', 0)
             ->where(function ($query) {
-                $query->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                $query->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
             });
 
         return $query->orderBy('created_at')->orderBy('id')->lockForUpdate()->get();
@@ -271,13 +271,19 @@ class CashierSaleService
             throw new RuntimeException('Satu atau lebih kode voucher tidak ditemukan.');
         }
 
+        // Satu query untuk semua voucher (sebelumnya redemptions()->exists() per kode).
+        $redeemedVoucherIds = VoucherRedemption::whereIn('voucher_id', $vouchers->pluck('id')->all())
+            ->distinct()
+            ->pluck('voucher_id')
+            ->flip();
+
         $ordered = collect();
         foreach ($codes as $code) {
             $voucher = $vouchers->get($code);
             if (! $voucher->isActive()) {
                 throw new RuntimeException("Voucher {$code} sudah tidak aktif atau sudah digunakan.");
             }
-            if ($voucher->redemptions()->exists()) {
+            if ($redeemedVoucherIds->has($voucher->id)) {
                 throw new RuntimeException("Voucher {$code} sudah digunakan.");
             }
             $ordered->push($voucher);

@@ -167,7 +167,7 @@ const Cart = () => {
             productsRequestRef.current?.abort();
             const controller = new AbortController();
             productsRequestRef.current = controller;
-            const params = new URLSearchParams({ status_produk: "all", per_page: "25", compact: "1" });
+            const params = new URLSearchParams({ status_produk: "all", compact: "1" });
             const normalizedTerm = String(term || "").trim();
             if (normalizedTerm) params.set("search", normalizedTerm);
 
@@ -194,13 +194,24 @@ const Cart = () => {
         };
 
         window.clearTimeout(productSearchTimerRef.current);
+
+        // Pencarian 1 karakter hanya menghasilkan ratusan baris dan beban query besar,
+        // jadi tidak dikirim ke server (kosong = daftar default, >= 2 karakter = cari).
+        if (!immediate && String(term || "").trim().length === 1) {
+            productsRequestRef.current?.abort();
+            productsRequestRef.current = null;
+            setProductsLoading(false);
+            return;
+        }
+
         setProducts([]);
         setProductsLoading(true);
         if (immediate) {
             fetchProducts();
             return;
         }
-        productSearchTimerRef.current = window.setTimeout(fetchProducts, 250);
+        // Debounce 450 ms: tidak mengirim request di tiap ketikan.
+        productSearchTimerRef.current = window.setTimeout(fetchProducts, 450);
     };
 
     const loadCustomers = () => {
@@ -240,7 +251,7 @@ const Cart = () => {
         const localProduct = products.find((item) => item.barcode === code || item.code === code);
         const productRequest = localProduct
             ? Promise.resolve(localProduct)
-            : axios.get(`${outletProductsUrl}?` + new URLSearchParams({ search: code, status_produk: "all", per_page: "25", compact: "1" }), {
+            : axios.get(`${outletProductsUrl}?` + new URLSearchParams({ search: code, status_produk: "all", compact: "1" }), {
                 headers: { Accept: "application/json" },
             })
                 .then((response) => (response.data.data || []).find((item) => item.barcode === code || item.code === code));

@@ -2,8 +2,7 @@
 
 namespace App\Providers;
 
-use App\Models\Product;
-use App\Models\ProductMinimumAdjustment;
+use App\Services\LowStockService;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Blade;
@@ -43,43 +42,13 @@ class AppServiceProvider extends ServiceProvider
 
         View::composer('layouts.master', function ($view) use ($loadCompanyLogo) {
             $view->with('companyLogo', $loadCompanyLogo());
-            if (Auth::check()) {
-                $today = now()->toDateString();
-                $activeAdjs = ProductMinimumAdjustment::activeOn($today)
-                    ->orderByDesc('active_from')
-                    ->orderByDesc('id')
-                    ->get()
-                    ->keyBy('product_id');
+            // Notifikasi stok minimum hanya untuk admin-gudang (keputusan #1).
+            // Dihitung di SQL & realtime (tanpa cache), dan hanya saat render halaman penuh.
+            if (Auth::check() && Auth::user()->role === 'admin-gudang') {
+                $lowStock = app(LowStockService::class)->summary(20);
 
-                $lowStockCandidates = Product::query()
-                    ->select('id', 'name', 'min_stock')
-                    ->where(function ($query) use ($activeAdjs) {
-                        $query->where('min_stock', '>', 0);
-
-                        if ($activeAdjs->isNotEmpty()) {
-                            $query->orWhereIn('id', $activeAdjs->keys());
-                        }
-                    })
-                    ->withSum('stocks as stock_qty', 'qty') // stok fisik gudang = SUM(stocks.qty)
-                    ->get()
-                    ->map(function ($product) use ($activeAdjs) {
-                        $current = (int) ($product->stock_qty ?? 0);
-                        $adj = $activeAdjs->get($product->id);
-                        $product->effective_min_qty = $adj
-                            ? (int) ceil($product->min_stock * (1 + $adj->adjustment_percentage / 100))
-                            : (int) $product->min_stock;
-                        $product->stock_qty = $current;
-
-                        return $product;
-                    });
-
-                $lowStockProducts = $lowStockCandidates
-                    ->filter(fn ($product) => $product->stock_qty <= $product->effective_min_qty)
-                    ->sortBy('name')
-                    ->values();
-
-                $view->with('lowStockCount', $lowStockProducts->count());
-                $view->with('lowStockProducts', $lowStockProducts->take(20));
+                $view->with('lowStockCount', $lowStock['count']);
+                $view->with('lowStockProducts', $lowStock['products']);
             }
         });
     }

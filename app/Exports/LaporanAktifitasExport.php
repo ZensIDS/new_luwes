@@ -50,14 +50,19 @@ class LaporanAktifitasExport implements FromCollection, WithHeadings, WithTitle
         $selesai = $this->request->input('tanggal_selesai');
 
         // product.suppliers di-eager-load (sebelumnya lazy-load per baris)
-        $movements = ReportQuery::betweenDates(
+        $query = ReportQuery::betweenDates(
             StockMovement::with(['product.suppliers']),
             'created_at', $mulai, $selesai
-        )->orderBy('created_at')->get();
+        )->orderBy('created_at')->orderBy('id');
 
-        $refs = ReportQuery::resolveReferences($movements);
+        $rows = collect();
+        $no = 1;
 
-        $movements = $movements
+        // Dibaca per potongan; dokumen referensi di-resolve per potongan (1 query per tipe).
+        $query->chunk(2000, function ($chunk) use (&$rows, &$no) {
+        $refs = ReportQuery::resolveReferences($chunk);
+
+        $movements = $chunk
             ->map(function ($m) use ($refs) {
                 $docCode = ReportQuery::ref($refs, $m)?->code ?? '-';
                 $jenis = $m->qty_in > 0 ? 'Penerimaan' : 'Pengiriman';
@@ -73,9 +78,6 @@ class LaporanAktifitasExport implements FromCollection, WithHeadings, WithTitle
                     'notes'      => $m->notes,
                 ];
             });
-
-        $rows = collect();
-        $no = 1;
 
         foreach ($movements as $m) {
             $k = $m->product?->konversiDisplay($m->qty ?? 0);
@@ -94,6 +96,7 @@ class LaporanAktifitasExport implements FromCollection, WithHeadings, WithTitle
                 $m->notes ?? '',
             ]);
         }
+        });
 
         return $rows;
     }

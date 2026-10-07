@@ -10,10 +10,20 @@ use App\Models\Voucher;
 use App\Services\LatestHpp;
 use App\Services\PriceCalculator;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
 class PriceCheckerController extends Controller
 {
+    /**
+     * Hasil lookup (produk, harga, promo, voucher) disimpan sebentar per kombinasi
+     * (outlet, barcode). Keputusan #4: selisih di bawah 5 menit masih dapat diterima,
+     * jadi 60 detik dipilih agar perubahan harga/promo cepat terlihat.
+     * Barcode yang tidak ditemukan juga disimpan supaya bot yang menebak barcode
+     * tidak membuka query ke database berulang-ulang.
+     */
+    private const LOOKUP_CACHE_TTL = 60;
+
     public function index(Request $request)
     {
         $selectedOutlet = $this->resolveOutlet($request);
@@ -26,21 +36,44 @@ class PriceCheckerController extends Controller
 
     public function lookup(Request $request, PriceCalculator $calculator)
     {
+        // Validasi dibuat murah: tanpa aturan `exists` (itu 1 query ke DB), karena
+        // outlet dicocokkan ke daftar outlet yang sudah di-cache di resolveOutlet().
         $validated = $request->validate([
-            'barcode' => ['required', 'string', 'max:100'],
-            'outlet_id' => ['nullable', 'integer', 'exists:outlets,id'],
+            // Tolak karakter kontrol (hasil scanner rusak / input iseng), selain itu bebas
+            // karena kode produk bisa berisi huruf, angka, tanda hubung, dll.
+            'barcode' => ['required', 'string', 'max:100', 'regex:/^[^\x00-\x1F\x7F]+$/'],
+            'outlet_id' => ['nullable', 'integer', 'min:1'],
             'outlet' => ['nullable', 'string', 'max:100'],
         ]);
 
         $barcode = trim($validated['barcode']);
         $outlet = $this->resolveOutlet($request, false);
         $outletId = $outlet?->id;
+
+        $result = Cache::remember(
+            'price-checker:lookup:'.($outletId ?? 0).':'.md5($barcode),
+            self::LOOKUP_CACHE_TTL,
+            fn () => $this->buildLookup($barcode, $outletId, $calculator)
+        );
+
+        return response()->json($result['body'], $result['status']);
+    }
+
+    /**
+     * Menghitung hasil lookup. Dibungkus [status, body] agar hasil "tidak ditemukan"
+     * juga bisa di-cache (Cache::remember tidak menyimpan nilai null).
+     *
+     * @return array{status: int, body: array}
+     */
+    private function buildLookup(string $barcode, ?int $outletId, PriceCalculator $calculator): array
+    {
         $product = Product::query()->where('code', $barcode)->first();
 
         if (! $product) {
-            return response()->json([
-                'message' => 'Produk tidak ditemukan. Silakan scan barcode yang lain.',
-            ], 404);
+            return [
+                'status' => 404,
+                'body' => ['message' => 'Produk tidak ditemukan. Silakan scan barcode yang lain.'],
+            ];
         }
 
         $priceRule = $outletId
@@ -64,51 +97,80 @@ class PriceCheckerController extends Controller
             ->map(fn (Voucher $voucher) => $this->formatVoucher($voucher, (int) $price['price'], $calculator))
             ->values();
 
-        return response()->json([
-            'product' => [
-                'id' => $product->id,
-                'name' => $product->name ?: 'Produk tanpa nama',
-                'barcode' => $product->code,
-                'unit' => $product->satuan,
+        return [
+            'status' => 200,
+            'body' => [
+                'product' => [
+                    'id' => $product->id,
+                    'name' => $product->name ?: 'Produk tanpa nama',
+                    'barcode' => $product->code,
+                    'unit' => $product->satuan,
+                ],
+                // Sama seperti halaman master harga barang:
+                // Harga Coret = HPP setelah pajak + margin, Harga Jual POS = harga akhir.
+                'price_strike' => (int) $calculator->money(
+                    $price['hpp_setelah_pajak'] + $price['margin_amount']
+                ),
+                'price' => (int) $price['price'],
+                'promotions' => $promotions->concat($vouchers)->values()->all(),
             ],
-            // Sama seperti halaman master harga barang:
-            // Harga Coret = HPP setelah pajak + margin, Harga Jual POS = harga akhir.
-            'price_strike' => (int) $calculator->money(
-                $price['hpp_setelah_pajak'] + $price['margin_amount']
-            ),
-            'price' => (int) $price['price'],
-            'promotions' => $promotions->concat($vouchers)->values(),
-        ]);
+        ];
     }
 
-    private function resolveOutlet(Request $request, bool $fallbackToFirst = true): ?Outlet
+    /**
+     * Daftar outlet ringkas (id, name, slug) dari cache, supaya tiap lookup tidak
+     * memuat tabel outlet dan menghitung slug satu per satu. Cache dihapus otomatis
+     * saat outlet disimpan/dihapus (lihat Outlet::booted()).
+     *
+     * @return array<int, array{id: int, name: ?string, slug: string}>
+     */
+    private function outlets(): array
     {
+        return Cache::remember(Outlet::LIST_CACHE_KEY, Outlet::LIST_CACHE_TTL, function () {
+            return Outlet::query()
+                ->orderBy('name')
+                ->get(['id', 'name'])
+                ->map(fn (Outlet $outlet) => [
+                    'id' => (int) $outlet->id,
+                    'name' => $outlet->name,
+                    'slug' => Str::slug((string) $outlet->name),
+                ])
+                ->all();
+        });
+    }
+
+    private function resolveOutlet(Request $request, bool $fallbackToFirst = true): ?object
+    {
+        $outlets = collect($this->outlets());
+
         if ($request->filled('outlet_id')) {
-            return Outlet::query()->findOrFail($request->integer('outlet_id'));
+            $outlet = $outlets->firstWhere('id', $request->integer('outlet_id'));
+            abort_if(! $outlet, 404, 'Outlet tidak ditemukan.');
+
+            return (object) $outlet;
         }
 
         $identifier = trim((string) $request->input('outlet', ''));
         if ($identifier !== '') {
             $identifierSlug = Str::slug($identifier);
-            $outlet = Outlet::query()
-                ->orderBy('name')
-                ->get(['id', 'name'])
-                ->first(fn (Outlet $outlet) => Str::slug((string) $outlet->name) === $identifierSlug);
+            $outlet = $outlets->first(fn (array $outlet) => $outlet['slug'] === $identifierSlug);
 
             abort_if(! $outlet, 404, 'Outlet tidak ditemukan.');
 
-            return $outlet;
+            return (object) $outlet;
         }
 
-        return $fallbackToFirst
-            ? Outlet::query()->orderBy('name')->first()
-            : null;
+        $first = $fallbackToFirst ? $outlets->first() : null;
+
+        return $first ? (object) $first : null;
     }
 
     private function activePromotionsForProduct(Product $product, ?int $outletId)
     {
+        // `outlets` tidak di-eager-load: hanya dipakai di klausa whereHas, tidak di formatPromotion().
+        // `promotionProducts.product` hanya dibutuhkan promo bundle, dimuat setelah query (lihat bawah).
         $query = Promotion::query()
-            ->with(['promotionProducts.product', 'bonuses', 'outlets'])
+            ->with(['bonuses'])
             ->whereHas('promotionProducts', fn ($productQuery) => $productQuery->where('product_id', $product->id))
             ->where('is_active', true)
             ->where(function ($dateQuery) {
@@ -136,10 +198,17 @@ class PriceCheckerController extends Controller
             $query->whereNull('outlet_id')->whereDoesntHave('outlets');
         }
 
-        return $query
+        $promotions = $query
             ->orderBy('priority')
             ->orderBy('id')
             ->get();
+
+        // Daftar syarat paket ("2× produk A + 1× produk B") hanya ditampilkan untuk promo bundle.
+        $promotions
+            ->filter(fn (Promotion $promotion) => strtolower(trim((string) $promotion->type)) === 'bundle')
+            ->load('promotionProducts.product');
+
+        return $promotions;
     }
 
     private function activeVouchersForProduct(Product $product, ?int $outletId)

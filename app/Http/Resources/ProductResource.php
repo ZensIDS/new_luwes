@@ -18,6 +18,10 @@ class ProductResource extends JsonResource
         // The relation being loaded is the context signal. An outlet with zero
         // stock must return zero, not fall back to warehouse stock.
         $isOutletContext = $this->relationLoaded('ownerStocks');
+        // Konteks gudang: pakai stock_qty dari withSum() bila ada, agar tidak 1 query SUM per baris.
+        $warehouseStock = fn () => array_key_exists('stock_qty', $this->resource->getAttributes())
+            ? (int) $this->stock_qty
+            : $this->total_stock;
         $priceRule = $this->relationLoaded('outletPrices') ? $this->outletPrices->first() : null;
         $displayPrice = $this->harga_jual;
         if ($isOutletContext && $ownerStocks->first()) {
@@ -34,7 +38,7 @@ class ProductResource extends JsonResource
                 'harga_jual' => $displayPrice,
                 'image_url' => asset($this->pic),
                 'is_serialized' => $this->is_serialized,
-                'total_stock' => $isOutletContext ? $ownerStocks->sum('qty') : $this->total_stock,
+                'total_stock' => $isOutletContext ? $ownerStocks->sum('qty') : $warehouseStock(),
                 'outlet_stock' => $isOutletContext ? $ownerStocks->sum('qty') : null,
             ];
         }
@@ -51,7 +55,7 @@ class ProductResource extends JsonResource
             'harga_jual' => $displayPrice,
             'image_url' => asset($this->pic),
             'is_serialized' => $this->is_serialized,
-            'total_stock' => $isOutletContext ? $ownerStocks->sum('qty') : $this->total_stock,
+            'total_stock' => $isOutletContext ? $ownerStocks->sum('qty') : $warehouseStock(),
             'outlet_stock' => $isOutletContext ? $ownerStocks->sum('qty') : null,
             'price_rule' => $priceRule ? [
                 'disc_brand_type' => $priceRule->disc_brand_type,

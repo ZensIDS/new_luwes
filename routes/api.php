@@ -1,7 +1,7 @@
 <?php
 
-use App\Models\Product;
-use Illuminate\Http\Request;
+use App\Http\Controllers\Api\CurrentUserController;
+use App\Http\Controllers\Api\StockByProductController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -15,26 +15,6 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
-    return $request->user();
-});
+Route::middleware('auth:sanctum')->get('/user', CurrentUserController::class);
 
-Route::get('/stocks/by-product/{product}', function (Product $product) {
-    $stocks = $product->stocks()
-        ->select('id', 'sku', 'qty_available', 'expired_at', 'created_at')
-        ->where('qty_available', '>', 0)
-        ->where('status', 'available')
-        ->orderBy('expired_at', 'asc')
-        ->get()
-        ->map(function ($stock) {
-            return [
-                'id' => $stock->id,
-                'sku' => $stock->sku,
-                'qty_available' => $stock->qty_available,
-                'expired_at' => $stock->expired_at ? $stock->expired_at->format('d/M/Y') : null,
-                'created_at' => $stock->created_at->format('d/M/Y'),
-            ];
-        });
-
-    return response()->json($stocks);
-});
+Route::get('/stocks/by-product/{product}', StockByProductController::class);

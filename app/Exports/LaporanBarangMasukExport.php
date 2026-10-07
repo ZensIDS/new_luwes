@@ -30,16 +30,20 @@ class LaporanBarangMasukExport implements FromCollection, WithHeadings, WithTitl
     {
         $mulai = $this->request->input('tanggal_mulai');
         $selesai = $this->request->input('tanggal_selesai');
-        $movements = ReportQuery::betweenDates(
+        $query = ReportQuery::betweenDates(
             StockMovement::with(['product'])->where('qty_in', '>', 0),
             'created_at', $mulai, $selesai
-        )->orderBy('created_at')->get();
+        )->orderBy('created_at')->orderBy('id');
 
+        $rows = collect();
+        $no = 1;
+
+        // Dibaca per potongan: model & relasi dilepas tiap potongan, koneksi DB tidak menahan
+        // satu query raksasa. Dokumen referensi di-resolve per potongan (1 query per tipe).
+        $query->chunk(2000, function ($movements) use (&$rows, &$no) {
         $refs = ReportQuery::resolveReferences($movements, [
             \App\Models\Pembelian::class => ['supplier'],
         ]);
-        $rows = collect();
-        $no = 1;
         foreach ($movements as $m) {
             $docCode = '-';
             $supplier = '-';
@@ -61,6 +65,7 @@ class LaporanBarangMasukExport implements FromCollection, WithHeadings, WithTitl
                 $m->notes ?? ''
             ]);
         }
+        });
 
         return $rows;
     }

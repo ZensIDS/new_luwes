@@ -30,7 +30,7 @@ class LatestHpp
         return $base()
             ->where('qty', '>', 0)
             ->where(function ($query) {
-                $query->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                $query->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
             })
             ->first()
             ?? $base()->first();
@@ -65,7 +65,7 @@ class LatestHpp
                     ->whereIn('product_id', $ids->all())
                     ->where('qty', '>', 0)
                     ->where(function ($query) {
-                        $query->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                        $query->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
                     })
                     ->orderByDesc('created_at')->orderByDesc('id')
                     ->get(['id', 'product_id', 'hpp'])

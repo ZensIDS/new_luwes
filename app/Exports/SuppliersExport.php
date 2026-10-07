@@ -3,11 +3,11 @@
 namespace App\Exports;
 
 use App\Models\Supplier;
-use Maatwebsite\Excel\Concerns\FromCollection;
+use Maatwebsite\Excel\Concerns\FromQuery;
 use Maatwebsite\Excel\Concerns\WithHeadings;
 use Maatwebsite\Excel\Concerns\WithMapping;
 
-class SuppliersExport implements FromCollection, WithHeadings, WithMapping
+class SuppliersExport implements FromQuery, WithHeadings, WithMapping
 {
     private const DAY_MAP = [
         1 => 'senin',
@@ -21,9 +21,12 @@ class SuppliersExport implements FromCollection, WithHeadings, WithMapping
 
     public function __construct(private bool $templateOnly = false) {}
 
-    public function collection()
+    /** Dibaca per potongan (chunk), bukan Supplier::all(). */
+    public function query()
     {
-        return $this->templateOnly ? collect([]) : Supplier::all();
+        $query = Supplier::query()->orderBy('id');
+
+        return $this->templateOnly ? $query->whereRaw('1 = 0') : $query;
     }
 
     public function headings(): array

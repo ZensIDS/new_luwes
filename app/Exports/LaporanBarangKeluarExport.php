@@ -35,17 +35,19 @@ class LaporanBarangKeluarExport implements FromCollection, WithHeadings, WithTit
         $mulai   = $this->request->input('tanggal_mulai');
         $selesai = $this->request->input('tanggal_selesai');
 
-        $movements = ReportQuery::betweenDates(
+        $query = ReportQuery::betweenDates(
             StockMovement::with(['product'])->where('qty_out', '>', 0),
             'created_at', $mulai, $selesai
-        )->orderBy('created_at')->get();
-
-        $refs = ReportQuery::resolveReferences($movements, [
-            \App\Models\DeliveryOrder::class => ['owner', 'requestOrder.owner'],
-        ]);
+        )->orderBy('created_at')->orderBy('id');
 
         $rows = collect();
         $no = 1;
+
+        // Dibaca per potongan; dokumen referensi di-resolve per potongan (1 query per tipe).
+        $query->chunk(2000, function ($movements) use (&$rows, &$no) {
+        $refs = ReportQuery::resolveReferences($movements, [
+            \App\Models\DeliveryOrder::class => ['owner', 'requestOrder.owner'],
+        ]);
 
         foreach ($movements as $m) {
             $docCode = '-';
@@ -72,6 +74,7 @@ class LaporanBarangKeluarExport implements FromCollection, WithHeadings, WithTit
                 $m->notes ?? '',
             ]);
         }
+        });
 
         return $rows;
     }

@@ -417,9 +417,15 @@ class StockController extends Controller
 
         DB::beginTransaction();
         try {
+            // Muat stok sekali (bukan find() per item). Instance dipakai bersama bila stok yang sama muncul dua kali.
+            $stocksById = Stock::whereIn('id', collect($request->items)
+                    ->filter(fn ($i) => $i['selisih'] != 0)->pluck('stock_id')->unique()->all())
+                ->get()
+                ->keyBy('id');
+
             foreach ($request->items as $item) {
                 if ($item['selisih'] != 0) {
-                    $stock = Stock::find($item['stock_id']);
+                    $stock = $stocksById[$item['stock_id']];
 
                     // Create adjustment record
                     $savedAdj = StockAdjustment::create([
@@ -514,12 +520,23 @@ class StockController extends Controller
             $query->whereHas('pembelian', fn($q) => $q->where('supplier_id', $supplierId));
         }
 
-        // Konversi ke collection Stock-like agar kompatibel dengan StockOpnameTemplateExport
-        $stocks = $query->get()->map(function ($row) {
-            $stock = Stock::find($row->last_stock_id);
+        // Konversi ke collection Stock-like agar kompatibel dengan StockOpnameTemplateExport.
+        // Ambil semua Stock sekaligus (beserta product) agar tidak ada find() & lazy-load per baris.
+        $rows = $query->get();
+        $stocksById = Stock::with('product')
+            ->whereIn('id', $rows->pluck('last_stock_id')->filter()->all())
+            ->get()
+            ->keyBy('id');
+
+        $stocks = $rows->map(function ($row) use ($stocksById) {
+            $stock = $stocksById->get($row->last_stock_id);
+            if (! $stock) {
+                return null;
+            }
             $stock->qty = (int) ($row->total_qty ?? 0);
+
             return $stock;
-        });
+        })->filter()->values();
 
         $date = date('Y-m-d');
 

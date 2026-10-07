@@ -27,18 +27,13 @@ class CartController extends Controller
                 ->where('owner_id', $outletId)
                 ->where('qty', '>', 0)
                 ->where(function ($expiryQuery) {
-                    $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                    $expiryQuery->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
                 })
                 ->with('stock')
                 ->orderBy('created_at')
                 ->get();
-            $item->availableStock = $item->ownerStocks()
-                ->where('owner_id', $outletId)
-                ->where('qty', '>', 0)
-                ->where(function ($expiryQuery) {
-                    $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
-                })
-                ->sum('qty');
+            // Syarat sama persis dengan query $ownerStocks di atas -> cukup dijumlahkan dari hasilnya (hemat 1 query per item).
+            $item->availableStock = $ownerStocks->sum('qty');
 
             $rule = OutletPrice::with('outlet')->where('outlet_id', $outletId)
                 ->where('product_id', $item->id)
@@ -124,7 +119,7 @@ class CartController extends Controller
                 ->where('product_id', $product->id)
                 ->where('qty', '>', 0)
                 ->where(function ($expiryQuery) {
-                    $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                    $expiryQuery->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
                 })
                 ->sum('qty');
             $cart = $request->user()->cart()
@@ -171,7 +166,7 @@ class CartController extends Controller
                 ->where('product_id', $product->id)
                 ->where('qty', '>', 0)
                 ->where(function ($expiryQuery) {
-                    $expiryQuery->whereNull('expired_at')->orWhereDate('expired_at', '>=', today());
+                    $expiryQuery->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
                 })
                 ->sum('qty');
             if ($stockQty < $request->qty) {

@@ -54,6 +54,17 @@ class ReportQuery
     }
 
     /**
+     * Pengganti whereDate('col', $tanggal) untuk satu hari penuh, tanpa DATE() pada kolom.
+     */
+    public static function onDate($query, string $column, $tanggal)
+    {
+        $day = Carbon::parse($tanggal);
+
+        return $query->where($column, '>=', $day->copy()->startOfDay())
+            ->where($column, '<=', $day->copy()->endOfDay());
+    }
+
+    /**
      * Memuat semua dokumen referensi milik kumpulan StockMovement sekaligus.
      *
      * @param  Collection  $movements  koleksi StockMovement

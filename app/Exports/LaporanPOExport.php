@@ -31,8 +31,7 @@ class LaporanPOExport implements FromCollection, WithHeadings, WithTitle
         $mulai = $this->request->input('tanggal_mulai');
         $selesai = $this->request->input('tanggal_selesai');
         $pembelians = Pembelian::with(['supplier', 'pembelianProducts.product'])
-            ->when($mulai, fn ($q) => $q->whereDate('created_at', '>=', $mulai))
-            ->when($selesai, fn ($q) => $q->whereDate('created_at', '<=', $selesai))
+            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'created_at', $mulai, $selesai))
             ->orderBy('created_at')->get();
         $rows = collect();
         $no = 1;

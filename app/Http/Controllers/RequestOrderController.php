@@ -513,9 +513,15 @@ class RequestOrderController extends Controller
             'items.*.item_status.in' => 'Status item harus dipilih antara approved, partial, atau rejected.',
         ]);
 
+        // Ambil semua item sekali (bukan find() per item). Fase 6.
+        $itemsById = RequestOrderItem::with(['stock', 'product'])
+            ->whereIn('id', collect($request->items)->pluck('id')->unique()->all())
+            ->get()
+            ->keyBy('id');
+
         // Validate qty_approved against specific SKU stock
         foreach ($request->items as $itemData) {
-            $item = RequestOrderItem::find($itemData['id']);
+            $item = $itemsById[$itemData['id']];
             $stock = $item->stock;
 
             if (! $stock) {
@@ -534,10 +540,17 @@ class RequestOrderController extends Controller
 
         DB::beginTransaction();
         try {
+            // Muat semua stok terkait sekali, dengan lock (bukan find()/fresh() per item).
+            // Instance dipakai bersama bila beberapa item menunjuk stok yang sama.
+            $stocksById = Stock::whereIn('id', $itemsById->pluck('stock_id')->filter()->unique()->all())
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
             // FIRST: Unreserve all previous reservations
             foreach ($request->items as $itemData) {
-                $item = RequestOrderItem::find($itemData['id']);
-                $stock = $item->stock;
+                $item = $itemsById[$itemData['id']];
+                $stock = $stocksById[$item->stock_id] ?? null;
 
                 if ($item->qty_approved > 0 && $stock) {
                     $stock->unreserve($item->qty_approved);
@@ -545,9 +558,15 @@ class RequestOrderController extends Controller
             }
 
             // SECOND: Refresh stocks and validate new quantities
+            // Satu query untuk semua stok (sebelumnya fresh() per item). qty_available
+            // bisa dihitung di DB, jadi nilainya harus dibaca ulang setelah unreserve.
+            foreach ($stocksById as $stockModel) {
+                $stockModel->refresh();
+            }
+
             foreach ($request->items as $itemData) {
-                $item = RequestOrderItem::find($itemData['id']);
-                $stock = $item->stock->fresh(); // Refresh from DB after unreserve
+                $item = $itemsById[$itemData['id']];
+                $stock = $stocksById[$item->stock_id];
 
                 // Skip validation if rejected
                 if ($itemData['item_status'] === 'rejected') {
@@ -571,10 +590,11 @@ class RequestOrderController extends Controller
             $hasApproved = false;
             $hasPartial = false;
             $allRejected = true;
+            $reservedStockIds = [];
 
             foreach ($request->items as $itemData) {
-                $item = RequestOrderItem::find($itemData['id']);
-                $stock = $item->stock->fresh();
+                $item = $itemsById[$itemData['id']];
+                $stock = $stocksById[$item->stock_id];
 
                 // Handle rejected status
                 if ($itemData['item_status'] === 'rejected') {
@@ -595,7 +615,13 @@ class RequestOrderController extends Controller
 
                 // Reserve new quantity
                 if ($itemData['qty_approved'] > 0) {
+                    // Bila stok yang sama sudah di-reserve oleh item sebelumnya,
+                    // baca ulang agar qty_available akurat (perilaku sama dengan fresh() lama).
+                    if (isset($reservedStockIds[$stock->id])) {
+                        $stock->refresh();
+                    }
                     $stock->reserve($itemData['qty_approved']);
+                    $reservedStockIds[$stock->id] = true;
                 }
 
                 // Determine overall status
@@ -670,8 +696,18 @@ class RequestOrderController extends Controller
             $grouped = collect($request->stock_assignments)->groupBy('item_id');
             $hasPartial = false;
 
+            // Muat item & stok sekali (bukan find() per item/alokasi). stock_id sudah divalidasi distinct.
+            $itemsById = RequestOrderItem::with('product')
+                ->whereIn('id', $grouped->keys()->all())
+                ->get()
+                ->keyBy('id');
+            $stocksById = Stock::whereIn('id', collect($request->stock_assignments)->pluck('stock_id')->unique()->all())
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
             foreach ($grouped as $itemId => $assignments) {
-                $originalItem = RequestOrderItem::find($itemId);
+                $originalItem = $itemsById[$itemId];
                 $totalQty = $assignments->sum('qty');
 
                 if ($totalQty > $originalItem->qty_requested) {
@@ -683,7 +719,7 @@ class RequestOrderController extends Controller
 
                 // Create new items for each stock assignment
                 foreach ($assignments as $assignment) {
-                    $stock = Stock::find($assignment['stock_id']);
+                    $stock = $stocksById[$assignment['stock_id']];
 
                     if ($stock->qty_available < $assignment['qty']) {
                         throw new \Exception("Stock {$stock->sku}: Only {$stock->qty_available} available, cannot assign {$assignment['qty']}");
@@ -1220,12 +1256,20 @@ class RequestOrderController extends Controller
 
         DB::beginTransaction();
         try {
+            // Muat semua stok yang dipakai sekali (bukan find() per item). Instance dipakai bersama
+            // oleh allocate() dan unreserve() di bawah, jadi nilai qty/qty_reserved tetap konsisten.
+            $stocksById = Stock::whereIn('id', $pickingList->items->pluck('stock_id')
+                    ->merge(collect($ownReserved)->keys())->filter()->unique()->all())
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
             // 1. Proses SEMUA item picking list, tapi potong stok HANYA yang sudah di-pick
             foreach ($pickingList->items as $item) {
 
                 if ($item->is_picked == 1) {
                     // Item sudah discan → potong stok riil seperti biasa
-                    $stock = Stock::find($item->stock_id);
+                    $stock = $stocksById[$item->stock_id] ?? null;
                     if ($stock) {
                         $stock->allocate($item->qty_picked);
                     }
@@ -1259,7 +1303,7 @@ class RequestOrderController extends Controller
             foreach ($ownReserved as $stockId => $reservedQty) {
                 $leftover = (int) $reservedQty - (int) ($pickedByStock[$stockId] ?? 0);
                 if ($leftover > 0) {
-                    Stock::find($stockId)?->unreserve($leftover);
+                    ($stocksById[$stockId] ?? null)?->unreserve($leftover);
                 }
             }
 

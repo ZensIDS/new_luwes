@@ -237,6 +237,9 @@ class CampaignController extends Controller
         $outletIds = array_values($data['outlet_ids'] ?? []);
 
         DB::transaction(function () use ($data, $codes, $startAt, $endAt, $productIds, $outletIds) {
+            $productPivotRows = [];
+            $outletPivotRows = [];
+
             foreach ($codes as $code) {
                 $voucher = Voucher::create([
                     'name' => $data['name'],
@@ -254,8 +257,20 @@ class CampaignController extends Controller
                     'outlet_id' => count($outletIds) === 1 ? $outletIds[0] : null,
                 ]);
 
-                $voucher->products()->sync($productIds);
-                $voucher->outlets()->sync($outletIds);
+                // Voucher baru, jadi pivot cukup diisi (tanpa sync yang membaca dulu). Dimasukkan massal di bawah.
+                foreach (array_unique($productIds) as $productId) {
+                    $productPivotRows[] = ['voucher_id' => $voucher->id, 'product_id' => $productId];
+                }
+                foreach (array_unique($outletIds) as $outletId) {
+                    $outletPivotRows[] = ['voucher_id' => $voucher->id, 'outlet_id' => $outletId];
+                }
+            }
+
+            foreach (array_chunk($productPivotRows, 500) as $chunk) {
+                DB::table('voucher_products')->insert($chunk);
+            }
+            foreach (array_chunk($outletPivotRows, 500) as $chunk) {
+                DB::table('voucher_outlets')->insert($chunk);
             }
         });
     }

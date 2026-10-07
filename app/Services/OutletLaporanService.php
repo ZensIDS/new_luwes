@@ -426,8 +426,7 @@ class OutletLaporanService
         $outlets = Outlet::whereIn('id', $outletIds)->get()->keyBy('id');
         $poCounts = OutletPurchase::query()
             ->select('outlet_id', DB::raw('COUNT(*) as total'))
-            ->whereDate('purchase_date', '>=', $windowStart->toDateString())
-            ->whereDate('purchase_date', '<=', $windowEnd->toDateString())
+            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'purchase_date', $windowStart->toDateString(), $windowEnd->toDateString()))
             ->when($outletId, fn ($query) => $query->where('outlet_id', $outletId))
             ->groupBy('outlet_id')->pluck('total', 'outlet_id');
         $stockMap = $outletStocks->keyBy(fn ($stock) => $stock->owner_id.'-'.$stock->product_id);

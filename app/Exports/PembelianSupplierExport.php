@@ -32,7 +32,7 @@ class PembelianSupplierExport implements FromView
     public function view(): View
     {
         $pembelians = Pembelian::when($this->hari, function ($query, $hari) {
-            return $query->whereDate('created_at', $hari);
+            return \App\Support\ReportQuery::onDate($query, 'created_at', $hari);
         })->when($this->supplier_id, function ($query, $supplier_id) {
             return $query->where('supplier_id', $supplier_id);
         })->when($this->outlet_id, function ($query, $outlet_id) {

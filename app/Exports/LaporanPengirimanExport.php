@@ -49,8 +49,7 @@ class LaporanPengirimanExport implements FromCollection, WithHeadings, WithTitle
         $selesai = $this->request->input('tanggal_selesai');
 
         $deliveries = DeliveryOrder::with(['owner', 'requestOrder', 'items.product'])
-            ->when($mulai, fn ($q) => $q->whereDate('delivery_date', '>=', $mulai))
-            ->when($selesai, fn ($q) => $q->whereDate('delivery_date', '<=', $selesai))
+            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'delivery_date', $mulai, $selesai))
             ->orderBy('delivery_date')
             ->get();
 

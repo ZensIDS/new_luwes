@@ -31,8 +31,7 @@ class LaporanPRExport implements FromCollection, WithHeadings, WithTitle
         $mulai = $this->request->input('tanggal_mulai');
         $selesai = $this->request->input('tanggal_selesai');
         $orders = RequestOrder::with(['owner', 'items.product'])
-            ->when($mulai, fn ($q) => $q->whereDate('request_date', '>=', $mulai))
-            ->when($selesai, fn ($q) => $q->whereDate('request_date', '<=', $selesai))
+            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'request_date', $mulai, $selesai))
             ->orderBy('request_date')->get();
         $rows = collect();
         $no = 1;
