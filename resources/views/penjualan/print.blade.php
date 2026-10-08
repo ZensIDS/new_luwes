@@ -32,10 +32,13 @@
         // Lebar area cetak NYATA printer thermal: POS-58 = 384 dot (~48mm), POS-80 = 576 dot (~72mm).
         // Kertas 58mm tidak bisa dicetak penuh 58mm, makanya sebelumnya sisi kanan terpotong / tidak pas.
         $printable = $paper === '58' ? '48mm' : '72mm';
-        $baseFont = $paper === '58' ? '12px' : '14px';
-        $smallFont = $paper === '58' ? '11px' : '12px';
-        $titleFont = $paper === '58' ? '16px' : '20px';
-        $totalFont = $paper === '58' ? '15px' : '18px';
+        // Ukuran font dalam pt (58mm | 80mm).
+        $baseFont = $paper === '58' ? '7.5pt' : '9pt';
+        $smallFont = $paper === '58' ? '6.75pt' : '7.5pt';
+        $titleFont = $paper === '58' ? '10.5pt' : '13.5pt';
+        $tinyFont = $paper === '58' ? '6pt' : '6.75pt';
+        $itemNameFont = $paper === '58' ? '7pt' : '8pt';
+        $totalFont = $paper === '58' ? '9.5pt' : '11.5pt';
         $items = $penjualan->items;
         $itemCount = $items->sum(fn ($item) => (int) $item->qty);
         // Rincian per item dihitung dari satu sumber supaya semua angka di struk saling menjumlah:
@@ -76,9 +79,9 @@
             width: {{ $printable }};
             margin: 0 auto;
             padding: 2mm 0 8mm;
-            /* Sama dengan font test print Windows (Lucida Console): garis tegas, antar huruf lega */
-            font-family: 'Lucida Console', Consolas, 'Courier New', monospace;
-            letter-spacing: .2px;
+            /* Font formal (sans-serif tegas, tetap terbaca di printer thermal) */
+            font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif;
+            letter-spacing: 0;
             font-size: {{ $baseFont }};
             font-weight: normal;
             color: #000;
@@ -87,28 +90,36 @@
         .center { text-align: center; }
         .bold { font-weight: bold; }
         .store-logo { max-width: {{ $paper === '58' ? '28mm' : '40mm' }}; max-height: 18mm; margin-bottom: 1mm; filter: grayscale(1) contrast(1.6); }
-        .store-name { font-size: {{ $titleFont }}; font-weight: normal; letter-spacing: .5px; word-break: break-word; }
+        .store-name { font-size: {{ $titleFont }}; font-weight: bold; letter-spacing: .5px; word-break: break-word; }
         .small { font-size: {{ $smallFont }}; }
-        hr { border: none; border-top: 1px dashed #000; margin: 5px 0; }
-        table { width: 100%; border-collapse: collapse; table-layout: auto; }
-        td { vertical-align: top; }
-        .meta td { padding: 1px 0; }
-        .meta td:first-child { white-space: nowrap; padding-right: 3px; }
-        .meta td:last-child { text-align: right; word-break: break-word; }
-        .item-row td { padding: 1px 0; }
-        .item-name { word-break: break-word; overflow-wrap: anywhere; }
-        .qty-price { font-size: {{ $smallFont }}; }
-        .qty-price td:first-child { white-space: nowrap; }
-        .price-col { text-align: right; white-space: nowrap; padding-left: 3px; }
-        .disc-row { font-size: {{ $smallFont }}; }
-        .disc-value { text-align: right; white-space: nowrap; padding-left: 3px; }
-        .strike { text-decoration: line-through; }
-        .totals td { padding: 1px 0; }
-        .totals .label { text-align: left; }
-        .totals .value { text-align: right; white-space: nowrap; padding-left: 3px; }
-        .grand-total { font-size: {{ $totalFont }}; font-weight: normal; }
-        .footer-msg { margin-top: 6px; font-size: {{ $smallFont }}; word-break: break-word; }
+        .tiny { font-size: {{ $tinyFont }}; line-height: 1.25; word-break: break-word; }
+        .header-info { margin-top: 1mm; }
+        .meta { margin-top: 3mm; font-size: {{ $smallFont }}; }
+
+        /* Hanya 2 garis: batas info transaksi/barang (putus-putus) dan barang/total (tegas). Sisanya jarak. */
+        .rule-dash { border: none; border-top: 1px dashed #000; margin: 3mm 0; }
+        .rule-solid { border: none; border-top: 1px solid #000; margin: 0 0 2.5mm; }
+
+        .row { display: flex; justify-content: space-between; align-items: baseline; gap: 2mm; padding: .3px 0; }
+        .row .val { text-align: right; white-space: nowrap; }
+        .row .key { min-width: 0; word-break: break-word; }
+
+        .item { margin-bottom: 2.5mm; page-break-inside: avoid; }
+        .item-name { font-size: {{ $itemNameFont }}; font-weight: bold; overflow-wrap: anywhere; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-height: 2.6em; margin-bottom: 1mm; }
+        .item-calc { font-size: {{ $smallFont }}; }
+        .item-disc { padding-left: 3mm; font-size: {{ $smallFont }}; }
+
+                /* Ringkasan: label menempel di kiri nominal, seluruh blok rata kanan.
+           Lebar kolom mengikuti nominal terpanjang, jadi blok melebar ke kiri bila angka makin besar. */
+        .summary { display: grid; grid-template-columns: auto auto; justify-content: end; align-items: baseline; column-gap: 3mm; row-gap: .6px; }
+        .summary .lbl, .summary .num { text-align: right; }
+        .summary .num { white-space: nowrap; }
+        .summary .num.wrap-ok { white-space: normal; overflow-wrap: anywhere; }
+        .summary .grand { font-size: {{ $totalFont }}; font-weight: bold; padding: 1mm 0; }
+        .block { margin-top: 2.5mm; }
+        .footer-msg { margin-top: 0; font-size: {{ $smallFont }}; word-break: break-word; }
         .footer-msg img { max-width: 100%; }
+        .printed-at { margin-top: 2mm; font-size: {{ $tinyFont }}; }
 
         /* Tampilan layar saja (tombol & petunjuk) */
         .no-print { margin: 14px auto 0; width: 100%; max-width: 340px; font-family: Arial, sans-serif; font-weight: normal; font-size: 14px; }
@@ -132,69 +143,63 @@
             <img class="store-logo" src="{{ asset($penjualan->outlet->logo) }}" alt="{{ $penjualan->outlet->name }}">
         @endif
         <div class="store-name">{{ $penjualan->outlet?->name ?? 'LUWES' }}</div>
-        @if ($penjualan->outlet?->alamat)<div class="small">{{ $penjualan->outlet->alamat }}</div>@endif
-        @if ($penjualan->outlet?->desc)<div class="small">{{ $penjualan->outlet->desc }}</div>@endif
-        @if ($penjualan->outlet?->npwp)<div class="small">NPWP : {{ $penjualan->outlet->npwp }}</div>@endif
+        @if ($penjualan->outlet?->alamat)<div class="tiny header-info">{{ $penjualan->outlet->alamat }}</div>@endif
+        {{-- @if ($penjualan->outlet?->desc)<div class="tiny">{{ $penjualan->outlet->desc }}</div>@endif --}}
+        @if ($penjualan->outlet?->npwp)<div class="tiny">NPWP : {{ $penjualan->outlet->npwp }}</div>@endif
     </div>
 
-    <hr>
+    <div class="meta">
+        <div class="row"><span class="key">No</span><span class="val bold">{{ $penjualan->code }}</span></div>
+        <div class="row"><span class="key">Tgl</span><span class="val">{{ optional($penjualan->created_at)->format('d/m/Y H:i') }}</span></div>
+        <div class="row"><span class="key">Kasir</span><span class="val">{{ $penjualan->kasir?->name ?? '—' }} · {{ $penjualan->cashierShift?->name ?? 'Kasir' }}</span></div>
+        @if ($penjualan->customer?->name)<div class="row"><span class="key">Customer</span><span class="val">{{ $penjualan->customer->name }}</span></div>@endif
+    </div>
 
-    <table class="meta small">
-        <tr><td>No. Struk</td><td>{{ $penjualan->code }}</td></tr>
-        <tr><td>Tanggal</td><td>{{ optional($penjualan->created_at)->format('d/m/Y H:i') }}</td></tr>
-        <tr><td>Kassa</td><td>{{ $penjualan->kasir?->name ?? '—' }}</td></tr>
-        <tr><td>Kasir</td><td>{{ $penjualan->cashierShift?->name ?? 'Kasir' }}</td></tr>
-        <tr><td>Jam Cetak</td><td>{{ now()->format('H:i:s') }}</td></tr>
-        <tr><td>Tgl Cetak</td><td>{{ now()->format('d/m/Y') }}</td></tr>
-        @if ($penjualan->customer?->name)<tr><td>Customer</td><td>{{ $penjualan->customer->name }}</td></tr>@endif
-    </table>
+    <hr class="rule-dash">
 
-    <hr>
-
-    <table>
-        @foreach ($lines as $line)
-            <tr class="item-row"><td colspan="2" class="item-name">{{ \Illuminate\Support\Str::words($line['item']->product?->name ?? 'Produk', 9, '...') }}</td></tr>
-            <tr class="item-row qty-price">
-                <td>{{ $line['qty'] }} x {{ number_format($line['unit'], 0, ',', '.') }}</td>
-                <td class="price-col">{{ number_format($line['gross'], 0, ',', '.') }}</td>
-            </tr>
-            @if ($line['store'] > 0)
-                <tr class="disc-row"><td>&nbsp;Diskon Toko</td><td class="disc-value">-{{ number_format($line['store'], 0, ',', '.') }}</td></tr>
+    @foreach ($lines as $line)
+        @php $lineDiscount = $line['store'] + $line['promo']; @endphp
+        <div class="item">
+            <div class="item-name">{{ $line['item']->product?->name ?? 'Produk' }}</div>
+            <div class="row">
+                <span class="key item-calc">{{ $line['qty'] }} x {{ number_format($line['unit'], 0, ',', '.') }}</span>
+                <span class="val">{{ number_format($line['gross'], 0, ',', '.') }}</span>
+            </div>
+            @if ($lineDiscount > 0)
+                <div class="row item-disc"><span class="key">Disc.</span><span class="val">-{{ number_format($lineDiscount, 0, ',', '.') }}</span></div>
             @endif
-            @if ($line['promo'] > 0)
-                <tr class="disc-row"><td>&nbsp;Diskon Rafaksi</td><td class="disc-value">-{{ number_format($line['promo'], 0, ',', '.') }}</td></tr>
-            @endif
-        @endforeach
-    </table>
+        </div>
+    @endforeach
 
-    <hr>
+    <hr class="rule-solid">
 
-    <table class="totals">
-        <tr><td class="label">Jumlah Item</td><td class="value">{{ $itemCount }}</td></tr>
-        <tr><td class="label">Subtotal</td><td class="value">@currency($subtotalGross)</td></tr>
-        @if ($discountTotal > 0)<tr><td class="label">Total Diskon</td><td class="value">-@currency($discountTotal)</td></tr>@endif
-        @if ($voucherTotal > 0)<tr><td class="label">Voucher</td><td class="value">-@currency($voucherTotal)</td></tr>@endif
-        <tr class="grand-total"><td class="label">TOTAL</td><td class="value">@currency($grandTotal)</td></tr>
-    </table>
+    <div class="summary">
+        <span class="lbl small">Jumlah item</span><span class="num small">{{ $itemCount }}</span>
+        <span class="lbl">Subtotal</span><span class="num">{{ number_format($subtotalGross, 0, ',', '.') }}</span>
+        @if ($discountTotal > 0)<span class="lbl">Diskon</span><span class="num">-{{ number_format($discountTotal, 0, ',', '.') }}</span>@endif
+        @if ($voucherTotal > 0)<span class="lbl">Voucher</span><span class="num">-{{ number_format($voucherTotal, 0, ',', '.') }}</span>@endif
+        <span class="lbl grand">TOTAL</span><span class="num grand">Rp {{ number_format($grandTotal, 0, ',', '.') }}</span>
+    </div>
+
+    <hr class="rule-dash">
+
+    <div class="summary">
+        <span class="lbl">{{ $penjualan->paymentMethod?->name ?? $penjualan->payment_method_name ?? 'Tunai' }}</span><span class="num">{{ number_format($paidAmount, 0, ',', '.') }}</span>
+        <span class="lbl bold">Kembali</span><span class="num bold">{{ number_format($changeAmount, 0, ',', '.') }}</span>
+        @if ($penjualan->payment_reference)<span class="lbl small">Ref.</span><span class="num small wrap-ok">{{ $penjualan->payment_reference }}</span>@endif
+    </div>
     @if (($discountTotal + $voucherTotal) > 0)
-        <div class="center small" style="margin-top:3px;">Anda hemat @currency($discountTotal + $voucherTotal)</div>
+        <div class="center small block">Anda hemat Rp {{ number_format($discountTotal + $voucherTotal, 0, ',', '.') }}</div>
     @endif
 
-    <hr>
-
-    <table class="totals">
-        <tr><td class="label">{{ $penjualan->paymentMethod?->name ?? $penjualan->payment_method_name ?? 'Tunai' }}</td><td class="value">@currency($paidAmount)</td></tr>
-        <tr><td class="label">Kembali</td><td class="value">@currency($changeAmount)</td></tr>
-        @if ($penjualan->payment_reference)<tr class="small"><td class="label">Ref.</td><td class="value">{{ $penjualan->payment_reference }}</td></tr>@endif
-    </table>
-
-    <hr>
+    <hr class="rule-dash">
 
     @if ($penjualan->outlet?->footer)
         <div class="center footer-msg">{!! $penjualan->outlet->footer !!}</div>
     @else
-        <div class="center footer-msg"><div>Harga Barang Sudah termasuk PPN</div><div>Terima Kasih Atas Kunjungan Anda</div></div>
+        <div class="center footer-msg"><div>Harga sudah termasuk PPN</div><div class="bold">Terima kasih atas kunjungan Anda</div></div>
     @endif
+    <div class="center printed-at">Dicetak {{ now()->format('d/m/Y H:i:s') }}</div>
 
     <div class="no-print">
         <a href="{{ route('outlet.show', $penjualan->outlet_id) }}">Kembali</a>
