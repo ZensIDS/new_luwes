@@ -103,9 +103,7 @@ class StockController extends Controller
             ->whereNull('products.deleted_at')
             ->leftJoin('categories', 'categories.id', '=', 'products.category_id')
             ->join('stocks as s', 's.id', '=', 'g.last_stock_id')
-            ->leftJoinSub($ownerTotals, 'o', 'o.product_id', '=', 'g.product_id')
-            ->leftJoin('pembelians', 'pembelians.id', '=', 's.pembelian_id')
-            ->leftJoin('suppliers', 'suppliers.id', '=', 'pembelians.supplier_id');
+            ->leftJoinSub($ownerTotals, 'o', 'o.product_id', '=', 'g.product_id');
 
         if ($kategori) {
             $base->where('categories.name', $kategori);
@@ -128,8 +126,7 @@ class StockController extends Controller
                         $qw->where('products.name', 'like', "%{$word}%")
                             ->orWhere('products.code', 'like', "%{$word}%")
                             ->orWhere('s.sku', 'like', "%{$word}%")
-                            ->orWhere('s.serial_number', 'like', "%{$word}%")
-                            ->orWhere('suppliers.name', 'like', "%{$word}%");
+                            ->orWhere('s.serial_number', 'like', "%{$word}%");
                     });
                 }
             });
