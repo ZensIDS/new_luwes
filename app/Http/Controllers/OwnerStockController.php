@@ -61,12 +61,12 @@ class OwnerStockController extends Controller
             2 => 'product_code',
             3 => 'product_name',
             4 => 'category_name',
-            7 => 'hpp',
-            8 => 'qty_in_total',
-            9 => 'qty_out_total',
-            10 => 'adjustment_total',
-            11 => 'qty',
-            12 => 'expired_at',
+            6 => 'hpp',
+            7 => 'qty_in_total',
+            8 => 'qty_out_total',
+            9 => 'adjustment_total',
+            10 => 'qty',
+            11 => 'expired_at',
         ];
         $orderBy = $sortable[(int) $request->input('order.0.column', 3)] ?? 'product_name';
 
@@ -172,31 +172,10 @@ class OwnerStockController extends Controller
             ->limit($length)
             ->get();
 
-        // Nama supplier hanya dicari untuk produk di halaman ini (maks 100 produk).
-        $supplierMap = collect();
-        if ($rows->isNotEmpty()) {
-            $supplierMap = DB::table('owner_stocks as os')
-                ->whereNull('os.deleted_at')
-                ->where('os.owner_id', $outletId)
-                ->whereIn('os.product_id', $rows->pluck('product_id'))
-                ->leftJoin('stocks as st', 'st.id', '=', 'os.stock_id')
-                ->leftJoin('pembelians as pb', 'pb.id', '=', 'st.pembelian_id')
-                ->leftJoin('outlet_purchases as op', function ($join) {
-                    $join->on('op.id', '=', 'os.source_id')
-                        ->where('os.source_type', '=', OutletPurchase::class);
-                })
-                ->join('suppliers as su', 'su.id', '=', DB::raw('COALESCE(pb.supplier_id, op.supplier_id)'))
-                ->select('os.product_id', 'su.name as supplier_name')
-                ->distinct()
-                ->get()
-                ->groupBy('product_id')
-                ->map(fn ($items) => $items->pluck('supplier_name')->sort()->join(', '));
-        }
-
         $outletName = Outlet::whereKey($outletId)->value('name');
         $today = today()->toDateString();
 
-        $data = $rows->map(function ($row) use ($supplierMap, $outletName, $today) {
+        $data = $rows->map(function ($row) use ($outletName, $today) {
             $expiredAt = $row->expired_at ? substr((string) $row->expired_at, 0, 10) : null;
             $qty = (int) $row->qty;
             $single = (int) $row->source_count <= 1;
@@ -208,7 +187,6 @@ class OwnerStockController extends Controller
                 'code' => $row->product_code ?? '-',
                 'name' => $row->product_name ?? '-',
                 'category' => $row->category_name ?: '-',
-                'suppliers' => $supplierMap->get($row->product_id) ?: '-',
                 'source_type' => $single ? $row->source_type : 'multiple',
                 'source_id' => $single ? $row->source_id : null,
                 'batch_count' => (int) $row->batch_count,

@@ -96,16 +96,14 @@ class StockController extends Controller
 
         // Join ke products, categories, dan stocks (baris representatif) langsung di SQL
         // supaya search/filter/sort semuanya jalan di database.
-        // leftJoin ke pembelians + suppliers supaya search bisa menjangkau nama supplier,
-        // dan stock tanpa pembelian_id (mis. stok opname manual) tidak ikut hilang.
+        // Nama supplier TIDAK ikut di query ini (tidak dipakai search/sort); untuk kolom Supplier
+        // namanya diambil terpisah hanya untuk baris di halaman ini ($supplierMap di bawah).
         $base = DB::query()->fromSub($grouped, 'g')
             ->join('products', 'products.id', '=', 'g.product_id')
             ->whereNull('products.deleted_at')
             ->leftJoin('categories', 'categories.id', '=', 'products.category_id')
             ->join('stocks as s', 's.id', '=', 'g.last_stock_id')
-            ->leftJoinSub($ownerTotals, 'o', 'o.product_id', '=', 'g.product_id')
-            ->leftJoin('pembelians', 'pembelians.id', '=', 's.pembelian_id')
-            ->leftJoin('suppliers', 'suppliers.id', '=', 'pembelians.supplier_id');
+            ->leftJoinSub($ownerTotals, 'o', 'o.product_id', '=', 'g.product_id');
 
         if ($kategori) {
             $base->where('categories.name', $kategori);
@@ -118,6 +116,7 @@ class StockController extends Controller
         // ==== SEARCH: meniru "smart search" DataTables, tapi tetap ringan ====
         // Input dipecah per kata; SEMUA kata harus ketemu (AND) di salah satu kolom (OR),
         // jadi "wing surya" tetap match "Wings Surya".
+        // Kolom yang dicari: nama produk, kode produk, SKU, serial number (bukan nama supplier).
         if ($searchValue !== '') {
             $searchWords = preg_split('/\s+/', $searchValue, -1, PREG_SPLIT_NO_EMPTY);
             $searchWords = array_slice($searchWords, 0, 5); // batasi biar tidak disalahgunakan
@@ -128,8 +127,7 @@ class StockController extends Controller
                         $qw->where('products.name', 'like', "%{$word}%")
                             ->orWhere('products.code', 'like', "%{$word}%")
                             ->orWhere('s.sku', 'like', "%{$word}%")
-                            ->orWhere('s.serial_number', 'like', "%{$word}%")
-                            ->orWhere('suppliers.name', 'like', "%{$word}%");
+                            ->orWhere('s.serial_number', 'like', "%{$word}%");
                     });
                 }
             });

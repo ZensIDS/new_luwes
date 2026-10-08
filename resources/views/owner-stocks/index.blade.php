@@ -120,7 +120,6 @@
                                     <th>Code</th>
                                     <th>Product</th>
                                     <th>Kategori</th>
-                                    <th>Supplier</th>
                                     <th>Sumber</th>
                                     <th>HPP</th>
                                     <th>Masuk</th>
@@ -134,7 +133,7 @@
                             </thead>
                             <tbody>
                                 @if (!$selectedOwner)
-                                    <tr><td colspan="15" class="text-center text-muted">Pilih outlet terlebih dahulu.</td></tr>
+                                    <tr><td colspan="14" class="text-center text-muted">Pilih outlet terlebih dahulu.</td></tr>
                                 @endif
                             </tbody>
                         </table>
@@ -254,9 +253,9 @@
                     }
                 },
                 columnDefs: [
-                    { targets: [0, 1, 5, 6, 13, 14], orderable: false },
-                    { targets: [0, 14], searchable: false },
-                    { targets: [7, 8, 9, 10, 11], className: 'text-right' }
+                    { targets: [0, 1, 5, 12, 13], orderable: false },
+                    { targets: [0, 13], searchable: false },
+                    { targets: [6, 7, 8, 9, 10], className: 'text-right' }
                 ],
                 columns: [
                     { data: null, render: function (data, type, row, meta) { return meta.settings._iDisplayStart + meta.row + 1; } },
@@ -264,7 +263,6 @@
                     { data: 'code', render: function (v) { return escapeHtml(v); } },
                     { data: 'name', render: function (v) { return escapeHtml(v); } },
                     { data: 'category', render: function (v) { return escapeHtml(v); } },
-                    { data: 'suppliers', render: function (v) { return escapeHtml(v); } },
                     { data: null, render: function (data, type, row) { return sourceCell(row); } },
                     { data: 'hpp', render: function (v, type, row) {
                         return '<button type="button" class="btn btn-xs btn-info btn-price-history" data-toggle="modal" data-target="#priceHistoryModal" data-id="' + row.product_id + '">' + formatRupiah(v) + '</button>';
