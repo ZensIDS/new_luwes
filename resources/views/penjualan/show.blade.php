@@ -84,6 +84,11 @@
                                 <tr>
                                     <th colspan="4" class="text-sm text-right">Voucher : -@currency($penjualan->voucher_total ?? 0)</th>
                                 </tr>
+                                @if (($penjualan->rounding_amount ?? 0) > 0)
+                                    <tr>
+                                        <th colspan="4" class="text-sm text-right">Pembulatan : +@currency($penjualan->rounding_amount)</th>
+                                    </tr>
+                                @endif
                                 @if ($penjualan->promotionApplications->isNotEmpty())
                                     <tr>
                                         <th colspan="4" class="text-sm text-right">Promo: {{ $penjualan->promotionApplications->map(fn ($application) => $application->name)->join(', ') }}</th>

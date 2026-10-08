@@ -144,7 +144,13 @@ const Cart = () => {
 
     const voucherBreakdown = getVoucherBreakdown();
     const voucherTotal = voucherBreakdown.reduce((sum, voucher) => sum + voucher.amount, 0);
-    const grandTotal = Math.max(0, getSubtotal() - voucherTotal);
+    const totalBeforeRounding = Math.max(0, getSubtotal() - voucherTotal);
+    // Harus sama dengan PriceCalculator::roundingAmount di backend: dibulatkan ke ATAS kelipatan 100.
+    const TOTAL_ROUNDING_STEP = 100;
+    const roundingAmount = totalBeforeRounding > 0
+        ? Math.ceil(Math.round(totalBeforeRounding) / TOTAL_ROUNDING_STEP) * TOTAL_ROUNDING_STEP - Math.round(totalBeforeRounding)
+        : 0;
+    const grandTotal = Math.round(totalBeforeRounding) + roundingAmount;
 
     const loadCart = (promotionCodes = appliedPromotions.map((promotion) => promotion.code)) => {
         const params = new URLSearchParams({ outlet_id: outlet.id });
@@ -558,6 +564,7 @@ const Cart = () => {
                         promotionTotal={getPromotionTotal()}
                         voucherBreakdown={voucherBreakdown}
                         voucherTotal={voucherTotal}
+                        roundingAmount={roundingAmount}
                         grandTotal={grandTotal}
                         customers={customers}
                         customerId={customerId}

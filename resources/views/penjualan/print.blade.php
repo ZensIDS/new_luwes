@@ -66,8 +66,9 @@
         $promotionTotal = (float) $lines->sum('promo');
         $discountTotal = $storeDiscountTotal + $promotionTotal;
         $voucherTotal = (float) ($penjualan->voucher_total ?? 0);
+        $roundingAmount = (float) ($penjualan->rounding_amount ?? 0);
         $grandTotal = (float) ($penjualan->grand_total
-            ?? max(0, $subtotalGross - $discountTotal - $voucherTotal));
+            ?? max(0, $subtotalGross - $discountTotal - $voucherTotal + $roundingAmount));
         $paidAmount = (float) ($penjualan->paid_amount ?? $penjualan->total ?? 0);
         $changeAmount = (float) ($penjualan->change_amount ?? max(0, $paidAmount - $grandTotal));
     @endphp
@@ -144,7 +145,7 @@
         @endif
         <div class="store-name">{{ $penjualan->outlet?->name ?? 'LUWES' }}</div>
         @if ($penjualan->outlet?->alamat)<div class="tiny header-info">{{ $penjualan->outlet->alamat }}</div>@endif
-        {{-- @if ($penjualan->outlet?->desc)<div class="tiny">{{ $penjualan->outlet->desc }}</div>@endif --}}
+        @if ($penjualan->outlet?->desc)<div class="tiny">{{ $penjualan->outlet->desc }}</div>@endif
         @if ($penjualan->outlet?->npwp)<div class="tiny">NPWP : {{ $penjualan->outlet->npwp }}</div>@endif
     </div>
 
@@ -178,6 +179,7 @@
         <span class="lbl">Subtotal</span><span class="num">{{ number_format($subtotalGross, 0, ',', '.') }}</span>
         @if ($discountTotal > 0)<span class="lbl">Diskon</span><span class="num">-{{ number_format($discountTotal, 0, ',', '.') }}</span>@endif
         @if ($voucherTotal > 0)<span class="lbl">Voucher</span><span class="num">-{{ number_format($voucherTotal, 0, ',', '.') }}</span>@endif
+        @if ($roundingAmount > 0)<span class="lbl">Pembulatan</span><span class="num">+{{ number_format($roundingAmount, 0, ',', '.') }}</span>@endif
         <span class="lbl grand">TOTAL</span><span class="num grand">Rp {{ number_format($grandTotal, 0, ',', '.') }}</span>
     </div>
 

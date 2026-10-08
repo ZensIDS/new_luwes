@@ -145,6 +145,22 @@ class PriceCalculator
         return strtolower(trim((string) $type)) === 'percentage';
     }
 
+    /** Total transaksi selalu dibulatkan ke ATAS kelipatan ini (mis. 19.835 -> 19.900). */
+    public const TOTAL_ROUNDING_STEP = 100;
+
+    /** Selisih pembulatan yang ditambahkan ke total (0 bila total sudah kelipatan step). */
+    public function roundingAmount(float|int|null $total): float
+    {
+        $total = $this->money($total);
+        if ($total <= 0) {
+            return 0.0;
+        }
+
+        $step = self::TOTAL_ROUNDING_STEP;
+
+        return (float) ((int) (ceil($total / $step) * $step) - (int) $total);
+    }
+
     public function money(float|int|null $value): float
     {
         return (float) round((float) ($value ?? 0), 0, PHP_ROUND_HALF_UP);

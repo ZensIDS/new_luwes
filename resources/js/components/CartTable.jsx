@@ -11,6 +11,7 @@ const CartTable = ({
     promotionTotal,
     voucherBreakdown,
     voucherTotal,
+    roundingAmount = 0,
     grandTotal,
     customers,
     customerId,
@@ -93,6 +94,7 @@ const CartTable = ({
                             Voucher{voucherBreakdown.length ? ` (${voucherBreakdown.map((voucher) => voucher.code).join(", ")})` : ""}: <b>-{formatRupiah(voucherTotal)}</b>
                         </span>
                     )}
+                    {roundingAmount > 0 && <span>Pembulatan: <b>+{formatRupiah(roundingAmount)}</b></span>}
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                     <span style={{ fontSize: 15, fontWeight: 700 }}>Grand Total</span>

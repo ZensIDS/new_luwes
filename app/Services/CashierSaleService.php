@@ -128,7 +128,10 @@ class CashierSaleService
             }
 
             $voucherTotal = array_sum($voucherAmounts);
-            $grandTotal = max(0, $subtotal - $voucherTotal);
+            $totalBeforeRounding = max(0, $subtotal - $voucherTotal);
+            // Pembulatan ke atas kelipatan 100; aturan tetap, berlaku untuk semua outlet.
+            $roundingAmount = $this->calculator->roundingAmount($totalBeforeRounding);
+            $grandTotal = $totalBeforeRounding + $roundingAmount;
             $paidAmount = (float) ($data['paid_amount'] ?? 0);
             if ($paidAmount < $grandTotal) {
                 throw new RuntimeException('Uang Diterima (F9) kurang dari Grand Total.');
@@ -156,6 +159,7 @@ class CashierSaleService
                 'discount_total' => $discountTotal,
                 'promotion_total' => $promotionTotal,
                 'voucher_total' => $voucherTotal,
+                'rounding_amount' => $roundingAmount,
                 'grand_total' => $grandTotal,
                 'paid_amount' => $paidAmount,
                 'change_amount' => $paidAmount - $grandTotal,
