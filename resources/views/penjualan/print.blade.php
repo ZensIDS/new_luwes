@@ -102,11 +102,12 @@
         .rule-solid { border: none; border-top: 1px solid #000; margin: 0 0 2.5mm; }
 
         .row { display: flex; justify-content: space-between; align-items: baseline; gap: 2mm; padding: .3px 0; }
+        .item .row { padding: 0; }
         .row .val { text-align: right; white-space: nowrap; }
         .row .key { min-width: 0; word-break: break-word; }
 
-        .item { margin-bottom: 2.5mm; page-break-inside: avoid; }
-        .item-name { font-size: {{ $itemNameFont }}; font-weight: bold; overflow-wrap: anywhere; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-height: 2.6em; margin-bottom: 1mm; }
+        .item { margin-bottom: 1.2mm; page-break-inside: avoid; line-height: 1.2; }
+        .item-name { font-size: {{ $itemNameFont }}; font-weight: bold; overflow-wrap: anywhere; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; max-height: 2.4em; margin-bottom: .2mm; }
         .item-calc { font-size: {{ $smallFont }}; }
         .item-disc { padding-left: 3mm; font-size: {{ $smallFont }}; }
 
