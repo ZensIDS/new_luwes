@@ -243,7 +243,9 @@ class OwnerStockController extends Controller
 
         $purchaseItems = OutletPurchaseItem::with(['purchase.creator'])
             ->where('product_id', $request->product_id)
-            ->whereHas('purchase', fn ($query) => $query->where('outlet_id', $outletId))
+            // Hanya pembelian yang penerimaannya sudah selesai; yang masih pending belum menambah stok.
+            ->whereHas('purchase', fn ($query) => $query->where('outlet_id', $outletId)->where('status', 'received'))
+            ->where(fn ($query) => $query->whereNull('qty_received')->orWhere('qty_received', '>', 0))
             ->get();
         $purchaseIds = $purchaseItems->pluck('outlet_purchase_id')->unique()->values();
 
@@ -281,7 +283,7 @@ class OwnerStockController extends Controller
                     'reference_type' => OutletPurchase::class,
                     'reference_id' => $purchase?->id,
                     'owner_stock_id' => $item->owner_stock_id,
-                    'qty_in' => (int) $item->qty,
+                    'qty_in' => (int) ($item->qty_received ?? $item->qty),
                     'qty_out' => 0,
                     'balance' => null,
                     'notes' => 'Pembelian langsung outlet ' . ($purchase?->code ?? ''),
@@ -587,6 +589,7 @@ class OwnerStockController extends Controller
                 ->pluck('pb.supplier_id');
 
             $direct = DB::table('outlet_purchases')
+                ->where('status', 'received')
                 ->whereIn('outlet_id', $outletIds)
                 ->distinct()
                 ->pluck('supplier_id');

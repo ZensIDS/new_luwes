@@ -9,6 +9,12 @@ class OutletPurchase extends Model
 {
     use SoftDeletes;
 
+    /** Sudah disimpan, barang belum diterima (stok toko belum bertambah, masih bisa diedit). */
+    public const STATUS_PENDING = 'pending';
+
+    /** Penerimaan barang selesai (completed): stok toko sudah bertambah, tidak bisa diedit. */
+    public const STATUS_RECEIVED = 'received';
+
     protected $fillable = [
         'code',
         'outlet_id',
@@ -20,6 +26,8 @@ class OutletPurchase extends Model
         'paid_amount',
         'payment_method',
         'status',
+        'received_by',
+        'received_at',
         'notes',
     ];
 
@@ -27,7 +35,13 @@ class OutletPurchase extends Model
         'purchase_date' => 'date',
         'subtotal' => 'float',
         'paid_amount' => 'float',
+        'received_at' => 'datetime',
     ];
+
+    public function isPending(): bool
+    {
+        return $this->status === self::STATUS_PENDING;
+    }
 
     public function outlet()
     {
@@ -42,6 +56,11 @@ class OutletPurchase extends Model
     public function creator()
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function receiver()
+    {
+        return $this->belongsTo(User::class, 'received_by');
     }
 
     public function items()

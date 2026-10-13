@@ -9,8 +9,8 @@ Revisi Luwes
     [x] Check print label
     [x] Auto isi disc toko sesuai harga yang di inginkan
     [x] Bisa tambah barang sekalian, bisa edit barang sekalian, setting harga sekalian tanpa bolak balik
-[ ] Belanja Langsung Toko
-    [ ] tidak langsung masuk stock toko
+[x] Belanja Langsung Toko
+    [x] tidak langsung masuk stock toko
 [ ] Voucher
     [ ] Check Desain voucher
     [ ] opsi rafaksi tanpa batas kuota
@@ -18,7 +18,7 @@ Revisi Luwes
     [ ] barcode tidak menunggu save sudah alert jika duplicate
     [ ] harga beli agar 0 di depan tidak ikut dan parsing rupiah
     [ ] nama barang uppercase
-    [ ] dibagi harga satuan besar (khusus untuk daftar product di halaman master harga
+    [ ] dibagi harga satuan besar (khusus untuk daftar product di halaman master harga)
 
 [ ] Pendapatan lainnya
     [ ] listing -> product baru -> nominal (setting)

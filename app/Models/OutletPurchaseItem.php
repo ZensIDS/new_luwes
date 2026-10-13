@@ -11,6 +11,7 @@ class OutletPurchaseItem extends Model
         'product_id',
         'owner_stock_id',
         'qty',
+        'qty_received',
         'harga_beli',
         'subtotal',
         'batch_number',
