@@ -14,7 +14,8 @@
     $defaultDiscountValue = $campaign
         ? ($campaignType === 'bundle' ? $campaign->bundle_price : ($campaignType === 'voucher' ? $campaign->value : $campaign->discount_value))
         : '';
-    $defaultQuota = $campaignType === 'voucher' ? 1 : $campaign?->quota_qty;
+    // Voucher: default 1 kode. Rafaksi/Bundle: kosong = tanpa batas kuota.
+    $defaultQuota = $campaignType === 'voucher' ? ($selectedType === 'voucher' ? 1 : null) : $campaign?->quota_qty;
     $defaultActive = $campaign?->is_active ?? true;
 @endphp
 
@@ -97,7 +98,7 @@
                     </div>
                     <div class="col-md-3 form-group campaign-quota">
                         <label for="quota-qty">Jumlah / kuota promo</label>
-                        <input type="number" name="quota_qty" id="quota-qty" class="form-control" min="1" value="{{ old('quota_qty', $defaultQuota) }}" {{ $isEdit && $routeType === 'voucher' ? 'disabled' : '' }}>
+                        <input type="number" name="quota_qty" id="quota-qty" class="form-control" min="1" value="{{ old('quota_qty', $defaultQuota) }}" placeholder="Kosong = tanpa batas" {{ $isEdit && $routeType === 'voucher' ? 'disabled' : '' }}>
                         <small class="help-block" id="quota-help"></small>
                     </div>
                     <div class="col-md-3 form-group campaign-max-qty">
@@ -265,13 +266,30 @@ $(function () {
         const data = event.params.data;
         productCache[String(data.id)] = { id: data.id, code: data.code, name: data.name };
     });
-    $('#daterange').daterangepicker({
+    // Versi daterangepicker bawaan AdminLTE (v1.x) membaca opsi `format` di level atas,
+    // bukan `locale.format`. Tanpa itu nilai awal "2026-10-13 10:00" dibaca sebagai MM/DD/YYYY
+    // sehingga tahun menjadi 0000 saat edit. Kirim keduanya + startDate/endDate dari nilai input.
+    const DATE_FORMAT = 'YYYY-MM-DD HH:mm';
+    const pickerOptions = {
         timePicker: true,
         timePickerIncrement: 30,
+        timePicker12Hour: false,
+        timePicker24Hour: true,
+        format: DATE_FORMAT,
         autoUpdateInput: false,
-        locale: { format: 'YYYY-MM-DD HH:mm', cancelLabel: 'Clear' }
-    }).on('apply.daterangepicker', function (event, picker) {
-        $(this).val(picker.startDate.format('YYYY-MM-DD HH:mm') + ' - ' + picker.endDate.format('YYYY-MM-DD HH:mm'));
+        locale: { format: DATE_FORMAT, cancelLabel: 'Clear' }
+    };
+    const existingRange = String($('#daterange').val() || '').split(' - ');
+    if (existingRange.length === 2) {
+        const existingStart = moment(existingRange[0].trim(), DATE_FORMAT, true);
+        const existingEnd = moment(existingRange[1].trim(), DATE_FORMAT, true);
+        if (existingStart.isValid() && existingEnd.isValid()) {
+            pickerOptions.startDate = existingStart;
+            pickerOptions.endDate = existingEnd;
+        }
+    }
+    $('#daterange').daterangepicker(pickerOptions).on('apply.daterangepicker', function (event, picker) {
+        $(this).val(picker.startDate.format(DATE_FORMAT) + ' - ' + picker.endDate.format(DATE_FORMAT));
     }).on('cancel.daterangepicker', function () {
         $(this).val('');
     });
@@ -341,6 +359,9 @@ $(function () {
         }
     }
 
+    let quotaTouched = {{ old('quota_qty') !== null ? 'true' : 'false' }};
+    $('#quota-qty').on('input', function () { quotaTouched = true; });
+
     function updateTypeFields() {
         const type = $('#campaign-type').val();
         const isVoucher = type === 'voucher';
@@ -361,7 +382,16 @@ $(function () {
         $('#discount-help').text(isBundle ? 'Bundle selalu menggunakan nominal rupiah.' : 'Gunakan persentase atau nominal rupiah.');
         $('#quota-help').text(isVoucher
             ? 'Jumlah kode voucher yang dibuat. Maksimal 500 kode.'
-            : (isBundle ? 'Jumlah bundle yang boleh digunakan.' : 'Jumlah unit yang boleh mendapat promo.'));
+            : (isBundle ? 'Jumlah bundle yang boleh digunakan.' : 'Jumlah unit yang boleh mendapat promo.') + ' Kosongkan jika tanpa batas kuota.');
+        // Saat membuat baru (belum diubah manual): rafaksi default kosong (tanpa batas), voucher default 1 kode.
+        if (!{{ $isEdit ? 'true' : 'false' }} && !quotaTouched) {
+            const $quota = $('#quota-qty');
+            if (type === 'flash_sale') {
+                $quota.val('');
+            } else if (isVoucher && $quota.val() === '') {
+                $quota.val(1);
+            }
+        }
         $('#product-help').text(isVoucher
             ? 'Kosongkan pilihan agar voucher berlaku untuk semua produk. Pilih beberapa produk jika ingin membatasi voucher.'
             : 'Pilih produk yang menjadi syarat promo. Qty adalah unit untuk 1 promo atau isi 1 bundle.');

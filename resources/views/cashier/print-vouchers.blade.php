@@ -4,6 +4,11 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cetak Label Voucher</title>
+    @php
+        $paper = request('paper') === '58' ? 58 : 80;
+        $labelName = strtoupper($outlets->firstWhere('id', (int) $outletId)?->name ?? 'LUWES');
+        $labelStrip = str_repeat($labelName . ' • VOUCHER • ', 5);
+    @endphp
     <style>
         * { box-sizing:border-box; }
         body { margin:0; padding:20px; font:14px Arial,sans-serif; color:#222; background:#f4f6f9; }
@@ -16,20 +21,29 @@
         table { width:100%; border-collapse:collapse; margin-top:14px; }
         th, td { padding:7px; border:1px solid #ddd; text-align:left; }
         th { background:#f5f5f5; }
-        .label-grid { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:4mm; width:100%; max-width:194mm; margin:0 auto; }
-        .voucher-label { min-height:39mm; padding:3.5mm; border:1px dashed #777; background:#fff; text-align:center; overflow:hidden; break-inside:avoid; }
-        .voucher-name { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; height:9mm; font-size:13px; font-weight:700; line-height:4.5mm; }
-        .voucher-barcode { height:13mm; margin:2mm 0 1mm; overflow:hidden; display:flex; justify-content:center; align-items:flex-start; }
-        .voucher-barcode svg { display:block; width:auto; max-width:100%; height:13mm; shape-rendering:crispEdges; }
-        .voucher-discount { min-height:6mm; margin:2mm 0; font-size:14px; font-weight:700; }
-        .code { width:100%; margin-top:1mm; font-size:9px; letter-spacing:1px; text-align:center; }
-        @page { size:A4 portrait; margin:8mm; }
+        /* Desain voucher ringkas (pipih) mengikuti label harga: strip outlet di atas dan kiri-kanan */
+        .label-grid { width:{{ $paper }}mm; margin:0 auto; }
+        .label-outer { width:{{ $paper }}mm; padding:1.2mm {{ $paper === 58 ? '1.5mm' : '2.5mm' }}; break-inside:avoid; page-break-inside:avoid; background:#fff; border-bottom:1px dashed #777; }
+        .frame { display:grid; grid-template-columns:2.6mm 1fr 2.6mm; grid-template-rows:2.6mm 1fr; border:1px solid #000; background:#fff; }
+        .strip { background:#fff; color:#000; overflow:hidden; white-space:nowrap; font-size:5px; font-weight:800; letter-spacing:.5px; }
+        .strip-top { grid-column:1 / 4; display:flex; align-items:center; border-bottom:1px solid #000; }
+        .strip-left, .strip-right { display:flex; align-items:center; justify-content:center; border-right:1px solid #000; }
+        .strip-right { border-right:none; border-left:1px solid #000; }
+        .strip-left span, .strip-right span { writing-mode:vertical-rl; transform:rotate(180deg); white-space:nowrap; }
+        .label-content { padding:1mm {{ $paper === 58 ? '1.5mm' : '3mm' }} 1.2mm; text-align:center; }
+        .value-label { font-size:7.5px; font-weight:900; letter-spacing:2.5px; line-height:1.2; }
+        .value-main { font-size:{{ $paper === 58 ? '20px' : '24px' }}; font-weight:900; line-height:1.05; letter-spacing:.2px; }
+        .value-main .rp { font-size:11px; font-weight:700; vertical-align:3px; margin-right:1px; }
+        .value-main .pct { font-size:14px; font-weight:800; margin-left:1px; }
+        .value-sub { font-size:8px; font-weight:700; line-height:1.25; }
+        .voucher-barcode { height:9mm; margin:1mm 0 .6mm; padding:0 1.5mm; overflow:hidden; }
+        .voucher-barcode svg { display:block; width:100%; height:9mm; shape-rendering:crispEdges; }
+        .code { font-family:'Courier New', monospace; font-size:{{ $paper === 58 ? '9px' : '10px' }}; font-weight:700; letter-spacing:1.2px; text-align:center; line-height:1.2; }
+        @page { size:{{ $paper }}mm auto; margin:0; }
         @media print {
-            body { padding:0; background:#fff; }
+            body { width:{{ $paper }}mm; margin:0 auto; padding:0; background:#fff; }
             .toolbar { display:none !important; }
-            .label-grid { max-width:none; }
         }
-        @media (max-width:700px) { .label-grid { grid-template-columns:repeat(2, 1fr); } }
     </style>
 </head>
 <body>
@@ -52,6 +66,12 @@
                 <form method="GET" action="{{ route('cashier.print.vouchers') }}" target="_blank" style="display:block;">
                     @if ($outletId)<input type="hidden" name="outlet_id" value="{{ $outletId }}">@endif
                     <input type="hidden" name="print" value="1">
+                    <label>Ukuran kertas thermal
+                        <select name="paper">
+                            <option value="80" {{ $paper === 80 ? 'selected' : '' }}>80 mm</option>
+                            <option value="58" {{ $paper === 58 ? 'selected' : '' }}>58 mm</option>
+                        </select>
+                    </label>
                     <table>
                         <thead><tr><th><input type="checkbox" onclick="document.querySelectorAll('.voucher-check:not(:disabled)').forEach((el) => el.checked = this.checked)"></th><th>Kode</th><th>Nama voucher / promo</th><th>Potongan</th><th>Qty label</th></tr></thead>
                         <tbody>
@@ -65,7 +85,7 @@
                             </tr>
                         @endforeach
                         @foreach ($promotions as $promotion)
-                            @php($isRafaksi = $promotion->type === 'flash_sale')
+                            @php $isRafaksi = $promotion->type === 'flash_sale'; @endphp
                             <tr>
                                 <td><input class="voucher-check" type="checkbox" name="promotion_ids[]" value="{{ $promotion->id }}" @if ($isRafaksi) disabled title="Promo Rafaksi tidak dapat dicetak sebagai voucher" @endif></td>
                                 <td>{{ $promotion->code }}</td>
@@ -85,21 +105,74 @@
     @else
         <div class="label-grid">
             @foreach ($printItems as $voucher)
+                @php
+                    $isVoucherModel = $voucher->print_type === 'voucher';
+                    $isBundle = ! $isVoucherModel && $voucher->type === 'bundle';
+                    $discType = $isVoucherModel ? $voucher->type : $voucher->discount_type;
+                    $discValue = (float) ($isVoucherModel ? $voucher->value : $voucher->discount_value);
+                    $money = fn ($number) => number_format((float) $number, 0, ',', '.');
+                    $percentText = rtrim(rtrim(number_format($discValue, 2, ',', '.'), '0'), ',');
+
+                    // Nominal potongan yang paling jelas untuk pelanggan
+                    $mainPrefix = '';
+                    $mainValue = 'PROMO';
+                    $mainSuffix = '';
+                    $subText = null;
+                    if ($isBundle) {
+                        $mainValue = 'BUNDLING';
+                        $subText = 'Beli paket, dapat harga / bonus spesial';
+                    } elseif ($voucher->print_discount_amount !== null) {
+                        $mainPrefix = 'Rp';
+                        $mainValue = $money($voucher->print_discount_amount);
+                        $subText = $discType === 'percentage' ? 'Diskon ' . $percentText . '%' : null;
+                    } elseif ($discType === 'percentage' && $discValue > 0) {
+                        $mainValue = $percentText;
+                        $mainSuffix = '%';
+                        $subText = ($voucher->max_discount_amount ?? null) ? 'Maksimal potongan Rp ' . $money($voucher->max_discount_amount) : null;
+                    } elseif ($discValue > 0) {
+                        $mainPrefix = 'Rp';
+                        $mainValue = $money($discValue);
+                    }
+
+                    // Info tambahan digabung jadi satu baris kecil (subText) supaya label tetap pipih
+                    $extra = [];
+                    if ($voucher->print_product_name) {
+                        $extra[] = $voucher->print_product_name;
+                    }
+                    if (($voucher->min_purchase ?? 0) > 0) {
+                        $extra[] = 'Min. belanja Rp ' . $money($voucher->min_purchase);
+                    }
+                    $subLine = trim(implode(' • ', array_filter([$subText, ...$extra])));
+
+                    // Barcode (Code 128, pengaturan generate tidak diubah). Pastikan SVG punya viewBox dan
+                    // diregangkan pas selebar area cetak, supaya selalu rata tengah dan tidak terpotong.
+                    $barcodeSvg = DNS1D::getBarcodeSVG((string) $voucher->code, 'C128', 1, 30, 'black', false, false);
+                    if (! str_contains($barcodeSvg, 'viewBox')
+                        && preg_match('/<svg\b[^>]*\swidth="([\d.]+)(?:px)?"/', $barcodeSvg, $svgW)
+                        && preg_match('/<svg\b[^>]*\sheight="([\d.]+)(?:px)?"/', $barcodeSvg, $svgH)) {
+                        $barcodeSvg = preg_replace('/<svg\b/', '<svg viewBox="0 0 ' . $svgW[1] . ' ' . $svgH[1] . '"', $barcodeSvg, 1);
+                    }
+                    if (! str_contains($barcodeSvg, 'preserveAspectRatio')) {
+                        $barcodeSvg = preg_replace('/<svg\b/', '<svg preserveAspectRatio="none"', $barcodeSvg, 1);
+                    }
+                @endphp
                 @for ($index = 0; $index < $voucher->print_qty; $index++)
-                    <div class="voucher-label">
-                        <div class="voucher-name" title="{{ $voucher->name }}">{{ $voucher->name }}</div>
-                        <div class="voucher-barcode">
-                            {!! DNS1D::getBarcodeSVG((string) $voucher->code, 'C128', 1, 30, 'black', false, false) !!}
-                        </div>
-                        <div class="code">{{ $voucher->code }}</div>
-                        <div class="voucher-discount">
-                            @if ($voucher->print_discount_amount !== null)
-                                Potongan Rp {{ number_format($voucher->print_discount_amount, 0, ',', '.') }}
-                            @elseif ($voucher->print_type === 'promotion' && $voucher->type === 'bundle')
-                                Promo bundling
-                            @else
-                                Promo
-                            @endif
+                    <div class="label-outer">
+                        <div class="frame">
+                            <div class="strip strip-top"><span>{{ $labelStrip }}</span></div>
+                            <div class="strip strip-left"><span>{{ $labelName }} • VOUCHER • </span></div>
+                            <div class="label-content">
+                                <div class="value-label">VOUCHER POTONGAN</div>
+                                <div class="value-main">
+                                    @if ($mainPrefix !== '')<span class="rp">{{ $mainPrefix }}</span>@endif{{ $mainValue }}@if ($mainSuffix !== '')<span class="pct">{{ $mainSuffix }}</span>@endif
+                                </div>
+                                @if ($subLine !== '')<div class="value-sub">{{ $subLine }}</div>@endif
+                                <div class="voucher-barcode">
+                                    {!! $barcodeSvg !!}
+                                </div>
+                                <div class="code">{{ $voucher->code }}</div>
+                            </div>
+                            <div class="strip strip-right"><span>{{ $labelName }} • VOUCHER • </span></div>
                         </div>
                     </div>
                 @endfor
