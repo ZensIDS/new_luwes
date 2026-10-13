@@ -112,16 +112,15 @@ class OwnerStockController extends Controller
             $base->where('p.lokasi', $request->lokasi);
         }
 
+        // Nama produk dicari dari AWAL nama ("jet" menemukan "JET SWEET", "sweet" tidak);
+        // kode produk dan nomor batch tetap dicari di mana saja.
         if ($searchValue !== '') {
-            $words = array_slice(preg_split('/\s+/', $searchValue, -1, PREG_SPLIT_NO_EMPTY), 0, 5);
-            $base->where(function ($query) use ($words) {
-                foreach ($words as $word) {
-                    $query->where(function ($wordQuery) use ($word) {
-                        $wordQuery->where('p.name', 'like', "%{$word}%")
-                            ->orWhere('p.code', 'like', "%{$word}%")
-                            ->orWhere('os.batch_number', 'like', "%{$word}%");
-                    });
-                }
+            $like = addcslashes($searchValue, '\\%_');
+
+            $base->where(function ($query) use ($like) {
+                $query->where('p.name', 'like', "{$like}%")
+                    ->orWhere('p.code', 'like', "%{$like}%")
+                    ->orWhere('os.batch_number', 'like', "%{$like}%");
             });
         }
 
@@ -372,8 +371,9 @@ class OwnerStockController extends Controller
 
         if ($search !== '') {
             $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('code', 'like', "{$search}%");
+                // Nama dicari dari awal nama, bukan dari tengah kata
+                $q->where('name', 'like', addcslashes($search, '\\%_') . '%')
+                    ->orWhere('code', 'like', addcslashes($search, '\\%_') . '%');
             });
         }
 

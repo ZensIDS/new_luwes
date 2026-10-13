@@ -34,18 +34,9 @@ class OutletPriceController extends Controller
     {
         $this->ensureManagementAccess();
         $outletId = OutletAccess::id($request, false);
+        $search = trim((string) $request->input('search', ''));
         $prices = $outletId
-            ? OutletPrice::with([
-                'outlet',
-                'product',
-            ])
-                ->where('outlet_id', $outletId)
-                ->when($request->filled('search'), fn ($query) => $query->whereHas('product', fn ($productQuery) => $productQuery
-                    ->where('name', 'like', '%' . $request->search . '%')
-                    ->orWhere('code', 'like', '%' . $request->search . '%')))
-                ->latest('updated_at')
-                ->paginate(25)
-                ->withQueryString()
+            ? $this->pricePage($outletId, $search)
             : new LengthAwarePaginator([], 0, 25);
 
         if ($outletId) {
@@ -86,6 +77,44 @@ class OutletPriceController extends Controller
     }
 
     /**
+     * Satu halaman master harga (25 baris) untuk satu outlet, tanpa perlu index tambahan.
+     *
+     * "Deferred join": query pengurutan HANYA mengambil kolom id (sort kecil, tidak membebani memori
+     * walau satu outlet punya puluhan ribu aturan harga); baris lengkap + relasi baru dimuat untuk
+     * 25 id di halaman ini. Search berbasis AWALAN (LIKE 'kata%') lewat subquery IN.
+     */
+    private function pricePage(int $outletId, string $search): LengthAwarePaginator
+    {
+        $prefix = $search !== '' ? addcslashes($search, '\\%_') . '%' : null;
+
+        $page = OutletPrice::query()
+            ->select('outlet_prices.id')
+            ->where('outlet_prices.outlet_id', $outletId)
+            ->when($prefix !== null, fn ($query) => $query->whereIn('outlet_prices.product_id', Product::query()
+                ->select('id')
+                ->where(fn ($productQuery) => $productQuery
+                    ->where('name', 'like', $prefix)
+                    ->orWhere('code', 'like', $prefix))))
+            ->orderByDesc('outlet_prices.updated_at')
+            ->orderByDesc('outlet_prices.id')
+            ->paginate(25)
+            ->withQueryString();
+
+        $ids = $page->getCollection()->pluck('id');
+        $order = $ids->flip();
+
+        $page->setCollection(
+            OutletPrice::with(['outlet', 'product'])
+                ->whereIn('id', $ids)
+                ->get()
+                ->sortBy(fn (OutletPrice $price) => $order[$price->id])
+                ->values()
+        );
+
+        return $page;
+    }
+
+    /**
      * Riwayat perubahan HPP produk di outlet ini (dari activity log batch stok outlet),
      * untuk modal di kolom HPP pada index.
      */
@@ -104,6 +133,9 @@ class OutletPriceController extends Controller
             ? collect()
             : Activity::where('subject_type', (new OwnerStock)->getMorphClass())
                 ->whereIn('subject_id', $stocks->keys())
+                ->whereNotNull('properties->attributes->hpp')
+                ->latest()
+                ->limit(200)
                 ->with('causer')
                 ->get()
                 ->filter(fn ($activity) => isset($activity->properties['attributes']['hpp']))
@@ -127,6 +159,9 @@ class OutletPriceController extends Controller
         $productRows = ! $product
             ? collect()
             : Activity::forSubject($product)
+                ->whereNotNull('properties->attributes->harga_beli')
+                ->latest()
+                ->limit(200)
                 ->with('causer')
                 ->get()
                 ->filter(fn ($activity) => isset($activity->properties['attributes']['harga_beli']))
@@ -147,6 +182,8 @@ class OutletPriceController extends Controller
         $masterRows = Activity::where('log_name', self::HPP_LOG_NAME)
             ->where('subject_type', $outletPrice->getMorphClass())
             ->where('subject_id', $outletPrice->id)
+            ->latest()
+            ->limit(200)
             ->with('causer')
             ->get()
             ->map(function ($activity) {

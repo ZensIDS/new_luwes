@@ -33,16 +33,269 @@ class VoucherController extends Controller
             return response()->json($vouchers);
         }
 
-        $campaigns = $this->groupVouchers($query->get())
-            ->each(fn (Voucher $voucher) => $voucher->setAttribute('campaign_kind', 'voucher'));
-        $campaigns = $campaigns->concat(
-            Promotion::with(['outlet', 'outlets', 'products', 'bonuses'])
-                ->latest()
-                ->get()
-                ->each(fn (Promotion $promotion) => $promotion->setAttribute('campaign_kind', 'promotion'))
-        )->sortByDesc('created_at')->values();
+        // Halaman hanya render shell tabel; data diambil server-side lewat getIndexData().
+        return view('vouchers.index');
+    }
 
-        return view('vouchers.index', ['campaigns' => $campaigns]);
+    /**
+     * Server-side DataTables untuk daftar Voucher & Rafaksi (tab "voucher") dan Bundling (tab "bundle").
+     *
+     * Voucher dikelompokkan per kampanye (kode dasar tanpa suffix -001, nama, jenis, nilai, masa berlaku, dst)
+     * LANGSUNG di SQL, lalu digabung (UNION) dengan promo rafaksi. Hanya satu halaman (maks 100 baris)
+     * yang dimuat relasinya, jadi puluhan ribu kode voucher tetap ringan.
+     *
+     * Search berbasis AWALAN (LIKE 'kata%'): nama, kode, serta nama/kode produk.
+     */
+    public function getIndexData(Request $request)
+    {
+        $this->ensureManagementAccess();
+
+        $tab = $request->input('tab') === 'bundle' ? 'bundle' : 'voucher';
+        $draw = (int) $request->input('draw');
+        $start = max((int) $request->input('start', 0), 0);
+        $length = (int) $request->input('length', 25);
+        $length = $length > 0 ? min($length, 100) : 25;
+        $searchValue = trim((string) $request->input('search.value', ''));
+        $prefix = $searchValue !== '' ? addcslashes($searchValue, '\\%_') . '%' : null;
+
+        $hasOrder = $request->has('order.0.column');
+        $orderDir = strtolower((string) $request->input('order.0.dir', 'desc')) === 'asc' ? 'asc' : 'desc';
+        $sortable = [2 => 'c.name', 7 => 'c.start_at'];
+        $orderBy = $hasOrder ? ($sortable[(int) $request->input('order.0.column')] ?? 'c.created_at') : 'c.created_at';
+        if (! $hasOrder) {
+            $orderDir = 'desc';
+        }
+
+        // Daftar ID per kelompok bisa panjang (ribuan kode voucher).
+        DB::statement('SET SESSION group_concat_max_len = 1048576');
+
+        $recordsTotal = DB::query()->fromSub($this->campaignUnion($tab, null), 'c')->count();
+        $recordsFiltered = $prefix === null
+            ? $recordsTotal
+            : DB::query()->fromSub($this->campaignUnion($tab, $prefix), 'c')->count();
+
+        $rows = DB::query()->fromSub($this->campaignUnion($tab, $prefix), 'c')
+            ->orderBy($orderBy, $orderDir)
+            // Tie-breaker unik agar urutan stabil antar halaman.
+            ->orderBy('c.kind')
+            ->orderBy('c.ids')
+            ->offset($start)
+            ->limit($length)
+            ->get();
+
+        $voucherIds = [];
+        $promotionIds = [];
+        foreach ($rows as $row) {
+            $first = (int) explode(',', $row->ids)[0];
+            if ($row->kind === 'voucher') {
+                $voucherIds[] = $first;
+            } else {
+                $promotionIds[] = $first;
+            }
+        }
+
+        $vouchers = $voucherIds
+            ? Voucher::with(['product', 'products', 'outlet', 'outlets'])->whereIn('id', $voucherIds)->get()->keyBy('id')
+            : collect();
+        $promotions = $promotionIds
+            ? Promotion::with(['outlet', 'outlets', 'products', 'bonuses'])->whereIn('id', $promotionIds)->get()->keyBy('id')
+            : collect();
+
+        $data = [];
+        foreach ($rows as $row) {
+            $ids = explode(',', $row->ids);
+            $first = (int) $ids[0];
+            $cells = $row->kind === 'voucher'
+                ? $this->voucherRow($row, $ids, $vouchers->get($first))
+                : $this->promotionRow($promotions->get($first));
+
+            if ($cells) {
+                $data[] = $cells;
+            }
+        }
+
+        return response()->json([
+            'draw' => $draw,
+            'recordsTotal' => $recordsTotal,
+            'recordsFiltered' => $recordsFiltered,
+            'data' => $data,
+        ]);
+    }
+
+    /**
+     * Gabungan kelompok voucher (di-GROUP BY di SQL) + promo, dengan kolom seragam:
+     * kind, ids, created_at, name, base_code, start_at, voucher_count, redeemed_count.
+     * Tab "bundle" hanya berisi promo bundle.
+     */
+    private function campaignUnion(string $tab, ?string $prefix)
+    {
+        $productMatch = function ($sub) use ($prefix) {
+            $sub->where('p.name', 'like', $prefix)->orWhere('p.code', 'like', $prefix);
+        };
+
+        $promotions = DB::table('promotions as pr')
+            ->whereNull('pr.deleted_at')
+            ->where('pr.type', $tab === 'bundle' ? 'bundle' : 'flash_sale')
+            ->when($prefix !== null, fn ($query) => $query->where(function ($w) use ($prefix, $productMatch) {
+                $w->where('pr.name', 'like', $prefix)
+                    ->orWhere('pr.code', 'like', $prefix)
+                    ->orWhereIn('pr.id', function ($sub) use ($productMatch) {
+                        $sub->select('pp.promotion_id')
+                            ->from('promotion_products as pp')
+                            ->join('products as p', 'p.id', '=', 'pp.product_id')
+                            ->whereNull('p.deleted_at')
+                            ->where($productMatch);
+                    });
+            }))
+            ->selectRaw("'promotion' as kind, CAST(pr.id AS CHAR) as ids, pr.created_at as created_at, pr.name as name, pr.code as base_code, pr.start_at as start_at, NULL as voucher_count, NULL as redeemed_count");
+
+        if ($tab === 'bundle') {
+            return $promotions;
+        }
+
+        $baseCode = 'CASE WHEN v.code REGEXP \'-[0-9]{3}$\' THEN LEFT(v.code, CHAR_LENGTH(v.code) - 4) ELSE v.code END';
+
+        $vouchers = DB::table('vouchers as v')
+            ->leftJoin('voucher_redemptions as vr', 'vr.voucher_id', '=', 'v.id')
+            ->whereNull('v.deleted_at')
+            ->when($prefix !== null, fn ($query) => $query->where(function ($w) use ($prefix, $productMatch) {
+                $w->where('v.name', 'like', $prefix)
+                    ->orWhere('v.code', 'like', $prefix)
+                    ->orWhereIn('v.product_id', function ($sub) use ($productMatch) {
+                        $sub->select('p.id')->from('products as p')->whereNull('p.deleted_at')->where($productMatch);
+                    })
+                    ->orWhereIn('v.id', function ($sub) use ($productMatch) {
+                        $sub->select('vp.voucher_id')
+                            ->from('voucher_products as vp')
+                            ->join('products as p', 'p.id', '=', 'vp.product_id')
+                            ->whereNull('p.deleted_at')
+                            ->where($productMatch);
+                    });
+            }))
+            ->selectRaw("'voucher' as kind, GROUP_CONCAT(v.id ORDER BY v.code SEPARATOR ',') as ids, MAX(v.created_at) as created_at, v.name as name, {$baseCode} as base_code, v.start_at as start_at, COUNT(DISTINCT v.id) as voucher_count, COUNT(vr.id) as redeemed_count")
+            ->groupByRaw("{$baseCode}, v.name, v.type, v.value, v.min_purchase, v.max_discount_amount, v.start_at, v.end_at, v.outlet_id, v.product_id");
+
+        return $vouchers->unionAll($promotions);
+    }
+
+    private function money($value): string
+    {
+        return 'Rp. ' . number_format((float) $value, 0, ',', '.');
+    }
+
+    private function voucherRow(object $row, array $ids, ?Voucher $voucher): ?array
+    {
+        if (! $voucher) {
+            return null;
+        }
+
+        $count = (int) $row->voucher_count;
+        $redeemed = (int) $row->redeemed_count;
+        $productNames = $voucher->products->isNotEmpty()
+            ? $voucher->products->pluck('name')->join(', ')
+            : ($voucher->product?->name ?? 'Semua produk');
+        $outletNames = $voucher->outlets->isNotEmpty()
+            ? $voucher->outlets->pluck('name')->join(', ')
+            : ($voucher->outlet?->name ?? 'Semua outlet');
+        $status = $redeemed ? 'Sudah dipakai' : ($voucher->isActive() ? 'Aktif' : 'Tidak aktif');
+        $baseCode = $row->base_code;
+
+        $checkbox = filled($baseCode)
+            ? '<input type="checkbox" class="voucher-print-checkbox" data-campaign-type="voucher"'
+                . ' data-voucher-ids="' . e(implode(',', $ids)) . '" form="voucher-label-print-form"'
+                . ' aria-label="Pilih voucher ' . e($voucher->name) . '">'
+            : '';
+
+        $nameHtml = '<strong>' . e($voucher->name) . '</strong>';
+        if (filled($baseCode)) {
+            $nameHtml .= '<br><small>' . e($baseCode) . '</small>';
+        }
+        if ($count > 1) {
+            $nameHtml .= '<br><small class="text-muted">' . $count . ' kode voucher</small>';
+        }
+
+        $discount = $voucher->type === 'percentage' ? e($voucher->value) . '%' : $this->money($voucher->value);
+
+        $aksi = '<a class="btn btn-warning btn-sm" href="' . e(route('campaign.edit', ['type' => 'voucher', 'id' => $voucher->id])) . '">Edit</a> '
+            . '<a class="btn btn-info btn-sm" href="' . e(route('voucher.show', $voucher)) . '">Lihat</a> '
+            . '<form action="' . e(route('voucher.destroy', $voucher)) . '" method="POST" style="display:inline">'
+            . csrf_field() . method_field('DELETE')
+            . '<button class="btn btn-danger btn-sm" onclick="return confirm(\'Hapus voucher ini?\')">Hapus</button></form>';
+
+        return [
+            $checkbox,
+            '',
+            $nameHtml,
+            'Voucher',
+            e($productNames),
+            $discount,
+            $redeemed . '/' . $count . ' pemakaian',
+            $this->periodHtml($voucher),
+            e($outletNames),
+            $status,
+            $aksi,
+        ];
+    }
+
+    private function promotionRow(?Promotion $promotion): ?array
+    {
+        if (! $promotion) {
+            return null;
+        }
+
+        $isRafaksi = $promotion->type === 'flash_sale';
+        $productNames = $promotion->products->isNotEmpty() ? $promotion->products->pluck('name')->join(', ') : '—';
+        $outletNames = $promotion->outlets->isNotEmpty()
+            ? $promotion->outlets->pluck('name')->join(', ')
+            : ($promotion->outlet?->name ?? 'Semua outlet');
+        $status = $promotion->isActive() ? 'Aktif' : ($promotion->is_active ? 'Tidak aktif' : 'Nonaktif');
+
+        $checkbox = filled($promotion->code)
+            ? '<input type="checkbox" class="voucher-print-checkbox" data-campaign-type="promotion"'
+                . ' data-voucher-ids="' . $promotion->id . '" form="voucher-label-print-form"'
+                . ' aria-label="Pilih promo ' . e($promotion->name) . '"'
+                . ($isRafaksi ? ' disabled title="Promo Rafaksi tidak dapat dicetak sebagai voucher"' : '') . '>'
+            : '';
+
+        $nameHtml = '<strong>' . e($promotion->name) . '</strong>';
+        if ($promotion->code) {
+            $nameHtml .= '<br><small>' . e(preg_replace('/-\d{3}$/', '', $promotion->code)) . '</small>';
+        }
+
+        if ($isRafaksi) {
+            $discount = $promotion->discount_type === 'percentage'
+                ? e($promotion->discount_value) . '%'
+                : $this->money($promotion->discount_value);
+        } else {
+            $discount = $promotion->bundle_price > 0 ? 'Hemat ' . $this->money($promotion->bundle_price) : 'Bonus saja';
+            if ($promotion->bonuses->isNotEmpty()) {
+                $discount .= '<br><small>Bonus: ' . e($promotion->bonuses->pluck('name')->join(', ')) . '</small>';
+            }
+        }
+
+        $aksi = '<a class="btn btn-warning btn-sm" href="' . e(route('campaign.edit', ['type' => 'promotion', 'id' => $promotion->id])) . '">Edit</a> '
+            . '<form action="' . e(route('promotion.destroy', $promotion)) . '" method="POST" style="display:inline">'
+            . csrf_field() . method_field('DELETE')
+            . '<button class="btn btn-danger btn-sm" onclick="return confirm(\'Hapus promo ini?\')">Hapus</button></form>';
+
+        return [
+            $checkbox,
+            '',
+            $nameHtml,
+            $isRafaksi ? 'Rafaksi' : 'Bundle + Bonus',
+            e($productNames),
+            $discount,
+            e($promotion->used_qty . ($promotion->quota_qty ? '/' . $promotion->quota_qty : '')) . ' pemakaian',
+            $this->periodHtml($promotion),
+            e($outletNames),
+            $status,
+            $aksi,
+        ];
+    }
+
+    private function periodHtml($model): string
+    {
+        return ($model->start_at?->format('d/m/Y H:i') ?? '—') . '<br>' . ($model->end_at?->format('d/m/Y H:i') ?? '—');
     }
 
     public function lookup(Request $request)

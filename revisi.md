@@ -1,9 +1,9 @@
 Revisi Luwes
 
-[ ] Note
+[x] Note
     [x] Error saat penerimaan barang (before delivery completed)
-    [ ] Check all search with front key
-    [ ] Check all pagination page & datatable query method
+    [x] Check all search with front key
+    [x] Check all pagination page & datatable query method
 [x] Master Harga
     [x] Tambah data terakhir di check
     [x] Tambah note di master

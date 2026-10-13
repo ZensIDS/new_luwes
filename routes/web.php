@@ -60,6 +60,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/get-customer/{penjualan_id}', [CustomerController::class, 'getCustomer']);
     Route::get('/get-penjualan/{outlet_id}', [PenjualanController::class, 'getPenjualan']);
     Route::get('/penjualan-detail/{penjualan_id}/items', [PenjualanController::class, 'getItems']);
+    Route::get('/penjualan/data', [PenjualanController::class, 'getIndexData'])->name('penjualan.index.data');
     Route::resource('/penjualan', PenjualanController::class)->only(['index', 'create', 'store', 'show', 'destroy']);
     Route::get('/penjualan/{penjualan}/print', [PenjualanController::class, 'print'])->name('penjualan.print');
     Route::get('/refundPenjualan/invoices', [RefundPenjualanController::class, 'invoices'])->name('refundPenjualan.invoices');
@@ -119,6 +120,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/outlet-prices/preview-hpp', [App\Http\Controllers\OutletPriceController::class, 'previewHpp'])->name('outlet-prices.preview-hpp');
     Route::get('/outlet-prices/{outletPrice}/hpp-history', [App\Http\Controllers\OutletPriceController::class, 'hppHistory'])->name('outlet-prices.hpp-history');
     Route::post('/outlet-prices/{outletPrice}/touch', [App\Http\Controllers\OutletPriceController::class, 'touch'])->name('outlet-prices.touch');
+    Route::get('/outlet-purchases/data', [App\Http\Controllers\OutletPurchaseController::class, 'getIndexData'])->name('outlet-purchases.index.data');
     Route::post('/outlet-purchases/{outletPurchase}/receive', [App\Http\Controllers\OutletPurchaseController::class, 'receive'])->name('outlet-purchases.receive');
     Route::resource('/outlet-purchases', App\Http\Controllers\OutletPurchaseController::class)->only(['index', 'create', 'store', 'show', 'edit', 'update']);
     Route::get('/owner-stock-kartu', [App\Http\Controllers\OwnerStockController::class, 'kartu'])->name('owner-stocks.kartu');
@@ -139,6 +141,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::put('/campaign/{type}/{id}', [CampaignController::class, 'update'])
         ->whereIn('type', ['voucher', 'promotion'])
         ->name('campaign.update');
+    Route::get('/voucher/data', [VoucherController::class, 'getIndexData'])->name('voucher.index.data');
     Route::resource('/voucher', VoucherController::class);
     Route::resource('/promotion', PromotionController::class)->except(['show']);
     Route::resource('/slider', SliderController::class);

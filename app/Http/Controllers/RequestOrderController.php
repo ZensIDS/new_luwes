@@ -59,49 +59,33 @@ class RequestOrderController extends Controller
 
         $recordsTotal = (clone $base)->count('request_orders.id');
 
-        // ==== SEARCH: meniru "smart search" DataTables, tapi tetap ringan ====
-        // DataTables (client-side) memecah input jadi kata per kata dan mencari baris
-        // yang mengandung SEMUA kata itu di kolom manapun, tidak peduli urutan/kerapatan.
-        // Contoh: "wing surya" tetap match "Wings Surya" karena "wing" dan "surya"
-        // masing-masing ketemu sebagai substring, walau tidak nempel persis.
-        //
-        // LIKE '%wing surya%' (satu string utuh) TIDAK match "Wings Surya" karena
-        // butuh substring persis "wing surya" -> data terasa "hilang" di versi lama.
-        //
-        // Fix: pecah $searchValue jadi per kata, AND-kan syarat antar kata (tiap kata
-        // wajib match di salah satu kolom), OR-kan antar kolom untuk kata yang sama.
-        //
-        // Kolom yang di-cover juga diperluas: kode dasarnya cuma cek code request &
-        // nama outlet -- padahal Blade lama menampilkan "requested_by" (nama user)
-        // dan detail produk per item, yang kemungkinan besar dulu ikut ke-search
-        // lewat DataTables client-side. Ditambahkan di sini supaya tidak "hilang" lagi.
-        //
-        // Supaya tetap ringan untuk ratusan ribu baris:
-        //  - Query dasar tetap hanya join outlets, tidak eager-load items/produk di sini.
-        //  - Pencarian ke requestedBy & produk pakai whereHas (EXISTS subquery),
-        //    bukan JOIN penuh, supaya tidak menggandakan baris request order.
-        //  - Jumlah kata dibatasi (maks 5) supaya query tidak bisa dibuat sangat berat.
-        //  - Pastikan ada index di request_orders.code, outlets.name, users.name,
-        //    products.name, products.code, serta foreign key request_order_items
-        //    (request_order_id / product_id).
+        // SEARCH berbasis AWALAN (LIKE 'kata%'), seperti halaman Outlet Purchases:
+        // "jet sw" / "jet sweet" menemukan "JET SWEET", tetapi "sweet" tidak.
+        // Berlaku untuk kode request, nama outlet, nama peminta, serta nama/kode produk.
+        // Peminta & produk dicari lewat subquery IN supaya tidak menggandakan baris.
         if ($searchValue !== '') {
-            $searchWords = preg_split('/\s+/', $searchValue, -1, PREG_SPLIT_NO_EMPTY);
-            $searchWords = array_slice($searchWords, 0, 5); // batasi biar tidak disalahgunakan
+            $prefix = addcslashes($searchValue, '\\%_') . '%';
 
-            $base->where(function ($q) use ($searchWords) {
-                foreach ($searchWords as $word) {
-                    $q->where(function ($qw) use ($word) {
-                        $qw->where('request_orders.code', 'like', "%{$word}%")
-                            ->orWhere('outlets.name', 'like', "%{$word}%")
-                            ->orWhereHas('requestedBy', function ($qu) use ($word) {
-                                $qu->where('name', 'like', "%{$word}%");
-                            })
-                            ->orWhereHas('items.product', function ($qp) use ($word) {
-                                $qp->where('name', 'like', "%{$word}%")
-                                    ->orWhere('code', 'like', "%{$word}%");
+            $base->where(function ($q) use ($prefix) {
+                $q->where('request_orders.code', 'like', $prefix)
+                    ->orWhere('outlets.name', 'like', $prefix)
+                    ->orWhereIn('request_orders.requested_by', function ($sub) use ($prefix) {
+                        $sub->select('u.id')
+                            ->from('users as u')
+                            ->whereNull('u.deleted_at')
+                            ->where('u.name', 'like', $prefix);
+                    })
+                    ->orWhereIn('request_orders.id', function ($sub) use ($prefix) {
+                        $sub->select('roi.request_order_id')
+                            ->from('request_order_items as roi')
+                            ->join('products as p', 'p.id', '=', 'roi.product_id')
+                            ->whereNull('roi.deleted_at')
+                            ->whereNull('p.deleted_at')
+                            ->where(function ($qp) use ($prefix) {
+                                $qp->where('p.name', 'like', $prefix)
+                                    ->orWhere('p.code', 'like', $prefix);
                             });
                     });
-                }
             });
         }
 

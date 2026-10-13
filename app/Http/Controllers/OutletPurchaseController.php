@@ -18,15 +18,154 @@ class OutletPurchaseController extends Controller
     public function index(Request $request)
     {
         $this->ensurePurchaseAccess();
-        $outletId = OutletAccess::id($request, false);
-        $purchases = OutletPurchase::with(['outlet', 'supplier', 'items'])
-            ->when($outletId, fn ($query) => $query->where('outlet_id', $outletId))
-            ->latest('purchase_date')
-            ->latest('id')
-            ->paginate(25)
-            ->withQueryString();
 
-        return view('outlet-purchases.index', compact('purchases'));
+        $outlets = OutletAccess::outlets();
+        $selectedOutletId = OutletAccess::id($request, false);
+
+        // Default filter: outlet pada pembelian terbaru (hanya dari outlet yang boleh diakses user).
+        if (! $selectedOutletId && ! $request->has('outlet_id')) {
+            $selectedOutletId = OutletPurchase::whereIn('outlet_id', $outlets->pluck('id'))
+                ->orderByDesc('purchase_date')
+                ->orderByDesc('id')
+                ->value('outlet_id');
+        }
+
+        // Halaman hanya render shell tabel; data diambil server-side lewat getIndexData().
+        return view('outlet-purchases.index', compact('outlets', 'selectedOutletId'));
+    }
+
+    public function getIndexData(Request $request)
+    {
+        $this->ensurePurchaseAccess();
+
+        $draw = (int) $request->input('draw');
+        $outletId = OutletAccess::id($request, false);
+        $start = max((int) $request->input('start', 0), 0);
+        $length = (int) $request->input('length', 25);
+        $length = $length > 0 ? min($length, 100) : 25;
+        $searchValue = trim((string) $request->input('search.value', ''));
+        $orderDir = strtolower((string) $request->input('order.0.dir', 'desc')) === 'asc' ? 'asc' : 'desc';
+
+        // Index kolom DataTables (urutan kolom di outlet-purchases/index.blade.php).
+        $sortable = [
+            1 => 'outlet_purchases.code',
+            2 => 'outlet_purchases.purchase_date',
+            3 => 'outlets.name',
+            4 => 'suppliers.name',
+            6 => 'outlet_purchases.subtotal',
+            7 => 'outlet_purchases.status',
+        ];
+        $orderBy = $sortable[(int) $request->input('order.0.column', 2)] ?? 'outlet_purchases.purchase_date';
+
+        // Query dasar hanya join tabel 1:1 (supplier, outlet) untuk search/sort.
+        // Item produk TIDAK di-join di sini supaya baris tidak berlipat ganda dan count tetap ringan.
+        $base = OutletPurchase::query()
+            ->leftJoin('suppliers', 'suppliers.id', '=', 'outlet_purchases.supplier_id')
+            ->leftJoin('outlets', 'outlets.id', '=', 'outlet_purchases.outlet_id')
+            ->when($outletId, fn ($query) => $query->where('outlet_purchases.outlet_id', $outletId));
+
+        $recordsTotal = (clone $base)->count('outlet_purchases.id');
+
+        // SEARCH berbasis AWALAN (LIKE 'kata%') agar index bisa dipakai di puluhan ribu data:
+        // "jet sw" / "jet sweet" menemukan "JET SWEET", tetapi "sweet" tidak.
+        // Berlaku untuk nama produk, kode produk, kode POUT, no. invoice, dan nama supplier.
+        // Pencarian produk memakai subquery IN (bukan JOIN) agar 1 POUT dengan banyak
+        // produk tidak menggandakan baris.
+        if ($searchValue !== '') {
+            $prefix = addcslashes($searchValue, '\\%_') . '%';
+
+            $base->where(function ($query) use ($prefix) {
+                $query->where('outlet_purchases.code', 'like', $prefix)
+                    ->orWhere('outlet_purchases.invoice_number', 'like', $prefix)
+                    ->orWhere('suppliers.name', 'like', $prefix)
+                    ->orWhereIn('outlet_purchases.id', function ($sub) use ($prefix) {
+                        $sub->select('opi.outlet_purchase_id')
+                            ->from('outlet_purchase_items as opi')
+                            ->join('products as p', 'p.id', '=', 'opi.product_id')
+                            ->whereNull('p.deleted_at')
+                            ->where(function ($q) use ($prefix) {
+                                $q->where('p.name', 'like', $prefix)
+                                    ->orWhere('p.code', 'like', $prefix);
+                            });
+                    });
+            });
+        }
+
+        $recordsFiltered = (clone $base)->count('outlet_purchases.id');
+
+        // Ambil ID halaman ini saja. Tie-breaker id unik supaya urutan stabil antar halaman.
+        $pageIds = $base
+            ->orderBy($orderBy, $orderDir)
+            ->orderBy('outlet_purchases.id', $orderDir)
+            ->offset($start)
+            ->limit($length)
+            ->pluck('outlet_purchases.id');
+
+        // Relasi dimuat hanya untuk baris di halaman ini (maks 100), kolom produk dibatasi.
+        $order = $pageIds->flip();
+        $purchases = OutletPurchase::with([
+            'outlet:id,name',
+            'supplier:id,name',
+            'items:id,outlet_purchase_id,product_id,qty',
+            'items.product' => fn ($query) => $query->withTrashed()
+                ->select('id', 'code', 'name', 'konversi_qty', 'satuan_besar', 'satuan'),
+        ])
+            ->whereIn('id', $pageIds)
+            ->get()
+            ->sortBy(fn ($purchase) => $order[$purchase->id])
+            ->values();
+
+        $data = $purchases->map(function ($purchase) {
+            $items = $purchase->items;
+            $totalItems = $items->count();
+            $itemsHtml = '<ul class="list-unstyled" style="margin:0">';
+            foreach ($items as $index => $item) {
+                $hidden = $index >= 3;
+                $konversi = $item->product?->konversiDisplay($item->qty);
+                $konversiLabel = ($konversi && $konversi !== '-')
+                    ? ' <span class="label label-info">' . e($konversi) . '</span>'
+                    : '';
+
+                $itemsHtml .= '<li class="' . ($hidden ? 'extra-item-' . $purchase->id : '') . '"'
+                    . ($hidden ? ' style="display:none"' : '') . '>'
+                    . '<small>' . e($item->product?->code) . ' | ' . e($item->product?->name)
+                    . ' × ' . e($item->qty) . $konversiLabel . '</small></li>';
+            }
+            $itemsHtml .= '</ul>';
+
+            if ($totalItems > 3) {
+                $itemsHtml .= '<a href="javascript:void(0)" class="btn-toggle-items" data-target="' . $purchase->id . '" data-state="closed" style="display:inline-block;margin-top:4px;">'
+                    . '<span class="label label-default">Selengkapnya (' . ($totalItems - 3) . ')</span></a>';
+            }
+
+            $statusHtml = $purchase->isPending()
+                ? '<span class="label label-warning">Menunggu Penerimaan</span>'
+                : '<span class="label label-success">Completed</span>';
+
+            $aksiHtml = '<a href="' . route('outlet-purchases.show', $purchase) . '" class="btn btn-xs btn-info">Lihat</a>';
+            if ($purchase->isPending()) {
+                $aksiHtml .= ' <a href="' . route('outlet-purchases.edit', $purchase) . '" class="btn btn-xs btn-warning">Edit</a>';
+            }
+
+            return [
+                'id' => $purchase->id,
+                'code' => $purchase->code,
+                'tanggal' => optional($purchase->purchase_date)->format('Y-m-d'),
+                'outlet' => $purchase->outlet?->name ?? '-',
+                'supplier' => $purchase->supplier?->name ?? '-',
+                'items_html' => $itemsHtml,
+                'subtotal' => 'Rp. ' . number_format($purchase->subtotal, 0, ',', '.'),
+                'status_html' => $statusHtml,
+                'aksi_html' => $aksiHtml,
+            ];
+        });
+
+        return response()->json([
+            'draw' => $draw,
+            'recordsTotal' => $recordsTotal,
+            'recordsFiltered' => $recordsFiltered,
+            'data' => $data->values(),
+        ]);
     }
 
     public function create(Request $request)

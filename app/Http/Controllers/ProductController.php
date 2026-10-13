@@ -66,8 +66,14 @@ class ProductController extends Controller
             if ($exactIds->isNotEmpty()) {
                 $products = $products->whereIn('products.id', $exactIds);
             } else {
-                $products = $products->where(function ($query) use ($search, $outletId, $outletStockScope) {
-                    $query->where('name', 'LIKE', "%{$search}%")
+                // Halaman product (non-kasir): nama dicari dari AWAL nama ("jet" menemukan "JET SWEET",
+                // "sweet" tidak). Pencarian kasir (compact) tetap mencari di mana saja.
+                $nameLike = $request->boolean('compact')
+                    ? "%{$search}%"
+                    : addcslashes($search, '\\%_') . '%';
+
+                $products = $products->where(function ($query) use ($search, $nameLike, $outletId, $outletStockScope) {
+                    $query->where('name', 'LIKE', $nameLike)
                         ->orWhere('code', 'LIKE', "%{$search}%")
                         ->orWhere('brand', 'LIKE', "%{$search}%")
                         ->orWhere('model', 'LIKE', "%{$search}%");

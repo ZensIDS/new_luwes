@@ -56,7 +56,7 @@
                         @endforeach
                     </select>
                     <input class="form-control input-sm" name="search" value="{{ request('search') }}"
-                        placeholder="Cari produk">
+                        placeholder="Awalan nama/kode produk">
                     <button class="btn btn-primary btn-sm">Filter</button>
                 </form>
             </div>
@@ -261,6 +261,7 @@
                 // The query is already ordered by updated_at DESC. Keep that
                 // order instead of letting DataTables sort by outlet name.
                 $('#example1').DataTable({
+                    dom: 'lrtip', // search bawaan (cocokkan di tengah kata, hanya 25 baris) dimatikan; pakai search server di atas
                     ordering: false,
                     pageLength: 25,
                     language: { emptyTable: 'Belum ada master harga untuk outlet ini.' }

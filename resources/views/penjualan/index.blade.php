@@ -17,11 +17,11 @@
                         <a href="{{ route('refundPenjualan.create') }}" class="btn btn-warning"><i class="fa fa-exchange"></i> Retur / Ganti Barang</a>
                     </div>
                     <div class="box-body" style="padding-bottom:0">
-                        <form method="GET" action="{{ route('penjualan.index') }}" class="form-inline">
-                            <div class="form-group" style="min-width:320px">
+                        <div class="form-inline">
+                            <div class="form-group" style="margin-right:15px">
                                 <label for="kasir_id" style="margin-right:8px">Akun Kasir</label>
                                 <select name="kasir_id" id="kasir_id" class="form-control" style="min-width:260px"
-                                    {{ $isCashier ? 'disabled' : '' }} onchange="this.form.submit()">
+                                    {{ $isCashier ? 'disabled' : '' }}>
                                     @unless ($isCashier)
                                         <option value="">-- Pilih akun kasir --</option>
                                     @endunless
@@ -32,26 +32,20 @@
                                     @endforeach
                                 </select>
                             </div>
-                            @unless ($isCashier)
-                                <button type="submit" class="btn btn-default"><i class="fa fa-filter"></i> Tampilkan</button>
-                            @endunless
-                        </form>
-                    </div>
-                    @if (! $selectedCashierId)
-                        <div class="box-body">
-                            <div class="alert alert-info text-center" style="margin-bottom:0">
-                                Pilih akun kasir terlebih dahulu untuk menampilkan data penjualan.
+                            <div class="form-group">
+                                <label for="daterange" style="margin-right:8px">Tanggal</label>
+                                <input type="text" id="daterange" class="form-control" style="min-width:230px" readonly>
                             </div>
                         </div>
-                    @else
+                        <p class="help-block" style="margin:8px 0 0">Default menampilkan penjualan hari ini. Ubah rentang tanggal untuk melihat data sebelumnya.</p>
+                    </div>
                     <div class="box-body table-responsive text-nowrap">
-                        <table id="example1" class="table table-bordered table-striped">
+                        <table id="penjualan-table" class="table table-bordered table-striped" style="width:100%">
                             <thead>
                                 <tr>
                                     <th>No</th>
+                                    <th>Tanggal</th>
                                     <th>Kode Invoice</th>
-                                    {{-- <td>Customer</td> --}}
-                                    {{-- <td>Kas/Metode Pembayaran</td> --}}
                                     <th>Outlet</th>
                                     <th>Kassa (akun)</th>
                                     <th>Nama kasir shift</th>
@@ -59,84 +53,83 @@
                                     <th>Aksi</th>
                                 </tr>
                             </thead>
-                            <tbody>
-                            @foreach ($penjualan as $value)
-                                <tr>
-                                    <td>{{ $loop->iteration }}</td>
-                                    <td>{{ $value->code }}</td>
-                                    {{-- <td>{{ $value->customer->name }}</td> --}}
-                                    {{-- <td>{{ $value->kas?->name ?? $value->transaction?->payment?->name }}</td> --}}
-                                    <td>{{ $value->outlet->name ?? '___customer' }}</td>
-                                    <td>{{ $value->kasir->name ?? '___customer' }}</td>
-                                    <td>{{ $value->cashierShift?->name ?? '—' }}</td>
-                                    <td>
-                                        <div class="table-responsive text-nowrap">
-                                            <table class="table table-sm table-bordered">
-                                                <tr>
-                                                    <th>Product</th>
-                                                    <th>Banyak</th>
-                                                    <th>Harga Jual</th>
-                                                    <th>Sub total</th>
-                                                </tr>
-                                                @php $totalCost = 0; @endphp
-                                                @foreach ($value->items as $item)
-                                                    <tr>
-                                                        <td>{{ $item->serial_number ? $item->serial_number : $item->product?->code }} - {{ $item->product?->name ?? '(produk dihapus)' }}</td>
-                                                        <td>{{ $item->qty }}</td>
-                                                        <td>@currency($item->price)</td>
-                                                        <td>@currency($item->subtotal ?? ($item->qty * $item->price))</td>
-                                                    </tr>
-                                                @php $totalCost += $item->subtotal ?? ($item->qty * $item->price); @endphp
-                                                @endforeach
-                                                <tr>
-                                                    <th>Disc Toko : @currency($value->discount_total ?? $value->discount)</th>
-                                                    <th>Promo : @currency($value->promotion_total ?? 0)</th>
-                                                    <th>Voucher : @currency($value->voucher_total ?? 0)</th>
-                                                    <th class="text-right">Subtotal : @currency($value->subtotal ?? $totalCost)</th>
-                                                </tr>
-                                                <tr>
-                                                    <th colspan="4" class="text-right">Grand Total : @currency($value->grand_total ?? ($totalCost - $value->discount - $value->voucher?->value))</th>
-                                                </tr>
-                                                <tr>
-                                                    <th colspan="3" class="text-right">Dibayar</th>
-                                                    <th class="text-right">@currency($value->paid_amount ?? $value->total ?? 0)</th>
-                                                </tr>
-                                                <tr>
-                                                    <th colspan="3" class="text-right">Kembalian</th>
-                                                    <th class="text-right">@currency($value->change_amount ?? 0)</th>
-                                                </tr>
-                                            </table>
-                                        </div>
-                                    </td>
-                                    <td>
-                                        <a class="btn btn-info" href="{{ route('penjualan.show', $value->id) }}">Show</a>
-                                        <a class="btn btn-warning" href="{{ route('penjualan.print', $value->id) }}">Re-Print</a>
-                                        @if ($canManageSales)
-                                        <form action="{{ route('penjualan.destroy', $value->id) }}" method="post"
-                                            style="display: inline;">
-                                            @method('delete')
-                                            @csrf
-                                            <button class="border-0 btn btn-danger"
-                                                onclick="return confirm('Are you sure?')">Hapus</button>
-                                        </form>
-                                        @endif
-                                    </td>
-                                </tr>
-                            @endforeach
-                            </tbody>
+                            <tbody></tbody>
                         </table>
-                        @if ($penjualan->isEmpty())
-                            <div class="alert alert-info text-center" style="margin-top:15px;margin-bottom:0">
-                                Belum ada penjualan untuk akun kasir ini.
-                                @if ($canManageSales)
-                                    <a href="{{ route('penjualan.create') }}">Buka Kasir POS untuk membuat transaksi.</a>
-                                @endif
-                            </div>
-                        @endif
                     </div><!-- /.box-body -->
-                    @endif
                 </div><!-- /.box -->
             </div><!-- /.col -->
         </div><!-- /.row -->
     </section><!-- /.content -->
+@endsection
+
+@section('page-script')
+<script>
+$(function () {
+    var dateFrom = moment().format('YYYY-MM-DD');
+    var dateTo = dateFrom;
+    var table;
+
+    function setRange(start, end) {
+        dateFrom = start.format('YYYY-MM-DD');
+        dateTo = end.format('YYYY-MM-DD');
+        $('#daterange').val(start.format('DD/MM/YYYY') + ' - ' + end.format('DD/MM/YYYY'));
+    }
+
+    // daterangepicker bawaan AdminLTE (v1.x) membaca `format` di level atas, v2+ di `locale.format`: kirim keduanya.
+    $('#daterange').daterangepicker({
+        format: 'DD/MM/YYYY',
+        separator: ' - ',
+        startDate: moment(),
+        endDate: moment(),
+        maxDate: moment(),
+        locale: { format: 'DD/MM/YYYY', separator: ' - ', applyLabel: 'Terapkan', cancelLabel: 'Batal' },
+        ranges: {
+            'Hari ini': [moment(), moment()],
+            'Kemarin': [moment().subtract(1, 'days'), moment().subtract(1, 'days')],
+            '7 hari terakhir': [moment().subtract(6, 'days'), moment()],
+            'Bulan ini': [moment().startOf('month'), moment()],
+            'Bulan lalu': [moment().subtract(1, 'month').startOf('month'), moment().subtract(1, 'month').endOf('month')]
+        }
+    }, function (start, end) {
+        setRange(start, end);
+        table.ajax.reload();
+    });
+    setRange(moment(), moment());
+
+    // Server-side: hanya satu halaman yang dikirim ke browser (aman untuk ratusan ribu penjualan).
+    // Search berbasis awalan kode invoice / kode-nama produk / serial number, diproses di server.
+    table = $('#penjualan-table').DataTable({
+        processing: true,
+        serverSide: true,
+        ajax: {
+            url: '{{ route('penjualan.index.data') }}',
+            data: function (d) {
+                d.kasir_id = $('#kasir_id').val() || '';
+                d.date_from = dateFrom;
+                d.date_to = dateTo;
+            }
+        },
+        order: [[1, 'desc']], // tanggal terbaru dulu
+        pageLength: 25,
+        searchDelay: 400,
+        columns: [
+            { orderable: false, searchable: false,
+              render: function (d, t, row, meta) { return meta.row + meta.settings._iDisplayStart + 1; } },
+            null,
+            null,
+            { orderable: false },
+            { orderable: false },
+            { orderable: false },
+            { orderable: false, searchable: false },
+            { orderable: false, searchable: false }
+        ],
+        language: {
+            emptyTable: 'Tidak ada penjualan. Pilih akun kasir dan rentang tanggal untuk menampilkan data.',
+            searchPlaceholder: 'Awalan invoice / produk'
+        }
+    });
+
+    $('#kasir_id').on('change', function () { table.ajax.reload(); });
+});
+</script>
 @endsection

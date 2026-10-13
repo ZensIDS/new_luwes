@@ -113,44 +113,28 @@ class PembelianController extends Controller
 
         $recordsTotal = (clone $base)->count('pembelians.id');
 
-        // ==== SEARCH: meniru "smart search" DataTables, tapi tetap ringan ====
-        // DataTables (client-side) memecah input jadi kata per kata dan mencari baris
-        // yang mengandung SEMUA kata itu di kolom manapun, tidak peduli urutan/kerapatan.
-        // Contoh: "wing surya" tetap match "Wings Surya" karena "wing" dan "surya"
-        // masing-masing ketemu sebagai substring, walau tidak nempel persis.
-        //
-        // Query LIKE '%wing surya%' (satu string utuh) TIDAK match "Wings Surya"
-        // karena butuh substring persis "wing surya" (ada huruf 's' nyempil di
-        // "Wings" sebelum spasi) -> makanya data "hilang" versi lama.
-        //
-        // Solusinya: pecah $searchValue jadi per kata, lalu AND-kan syarat antar kata
-        // (tiap kata WAJIB match di salah satu kolom), OR-kan antar kolom untuk kata
-        // yang sama. Supaya tetap ringan untuk ratusan ribu baris:
-        //  - Query dasar TETAP hanya join suppliers (tidak eager-load produk di sini).
-        //  - Pencarian ke produk pakai whereHas (EXISTS subquery), bukan JOIN penuh,
-        //    supaya tidak menggandakan baris pembelian saat 1 PO punya banyak produk.
-        //  - Filter kata dibatasi (misal maks 5 kata) supaya user tidak bisa bikin
-        //    query jadi sangat berat dengan mengetik puluhan kata sekaligus.
-        //  - Pastikan ada index di pembelians.code, suppliers.name, products.name,
-        //    products.code (dan foreign key pembelian_products.product_id /
-        //    pembelian_id) supaya tiap LIKE + EXISTS tetap cepat di data besar.
-        //    Kalau volume sudah jutaan baris & LIKE mulai lambat, pertimbangkan
-        //    MySQL FULLTEXT index sebagai upgrade berikutnya.
+        // SEARCH berbasis AWALAN (LIKE 'kata%'), seperti halaman Outlet Purchases:
+        // "jet sw" / "jet sweet" menemukan "JET SWEET", tetapi "sweet" tidak.
+        // Berlaku untuk kode PO, nama supplier, serta nama/kode produk di dalam PO.
+        // Produk dicari lewat subquery IN (bukan JOIN/whereHas) supaya satu PO dengan
+        // banyak produk tidak menggandakan baris dan index bisa dipakai.
         if ($searchValue !== '') {
-            $searchWords = preg_split('/\s+/', $searchValue, -1, PREG_SPLIT_NO_EMPTY);
-            $searchWords = array_slice($searchWords, 0, 5); // batasi biar tidak disalahgunakan
+            $prefix = addcslashes($searchValue, '\\%_') . '%';
 
-            $base->where(function ($q) use ($searchWords) {
-                foreach ($searchWords as $word) {
-                    $q->where(function ($qw) use ($word) {
-                        $qw->where('pembelians.code', 'like', "%{$word}%")
-                            ->orWhere('suppliers.name', 'like', "%{$word}%")
-                            ->orWhereHas('pembelianProducts.product', function ($qp) use ($word) {
-                                $qp->where('name', 'like', "%{$word}%")
-                                    ->orWhere('code', 'like', "%{$word}%");
+            $base->where(function ($q) use ($prefix) {
+                $q->where('pembelians.code', 'like', $prefix)
+                    ->orWhere('suppliers.name', 'like', $prefix)
+                    ->orWhereIn('pembelians.id', function ($sub) use ($prefix) {
+                        $sub->select('pp.pembelian_id')
+                            ->from('pembelian_products as pp')
+                            ->join('products as p', 'p.id', '=', 'pp.product_id')
+                            ->whereNull('pp.deleted_at')
+                            ->whereNull('p.deleted_at')
+                            ->where(function ($qp) use ($prefix) {
+                                $qp->where('p.name', 'like', $prefix)
+                                    ->orWhere('p.code', 'like', $prefix);
                             });
                     });
-                }
             });
         }
 
@@ -638,42 +622,29 @@ class PembelianController extends Controller
 
         $recordsTotal = (clone $base)->count('pembelians.id');
 
-        // ==== SEARCH: meniru "smart search" DataTables, tapi tetap ringan ====
-        // DataTables (client-side) memecah input jadi kata per kata dan mencari baris
-        // yang mengandung SEMUA kata itu di kolom manapun, tidak peduli urutan/kerapatan.
-        // Contoh: "wing surya" tetap match "Wings Surya" karena "wing" dan "surya"
-        // masing-masing ketemu sebagai substring, walau tidak nempel persis.
-        //
-        // LIKE '%wing surya%' (satu string utuh) TIDAK match "Wings Surya" karena
-        // butuh substring persis "wing surya" -> data terasa "hilang" di versi lama.
-        //
-        // Fix: pecah $searchValue jadi per kata, AND-kan syarat antar kata (tiap kata
-        // wajib match di salah satu kolom), OR-kan antar kolom untuk kata yang sama.
-        // Supaya tetap ringan untuk ratusan ribu baris:
-        //  - Query dasar tetap hanya join suppliers, tidak eager-load produk di sini.
-        //  - Pencarian ke produk pakai whereHas (EXISTS subquery), bukan JOIN penuh,
-        //    supaya tidak menggandakan baris pembelian saat 1 PO punya banyak produk.
-        //  - Jumlah kata dibatasi (maks 5) supaya query tidak bisa dibuat sangat berat.
-        //  - Pastikan ada index di pembelians.code, pembelians.code_gr, suppliers.name,
-        //    pembelians.receipt_pic, products.name, products.code, serta foreign key
-        //    pembelian_products.pembelian_id / product_id.
+        // SEARCH berbasis AWALAN (LIKE 'kata%'), seperti halaman Outlet Purchases:
+        // "jet sw" / "jet sweet" menemukan "JET SWEET", tetapi "sweet" tidak.
+        // Berlaku untuk kode PO, kode GR, nama supplier, PIC penerima, serta nama/kode produk.
+        // Produk dicari lewat subquery IN supaya tidak menggandakan baris.
         if ($searchValue !== '') {
-            $searchWords = preg_split('/\s+/', $searchValue, -1, PREG_SPLIT_NO_EMPTY);
-            $searchWords = array_slice($searchWords, 0, 5); // batasi biar tidak disalahgunakan
+            $prefix = addcslashes($searchValue, '\\%_') . '%';
 
-            $base->where(function ($q) use ($searchWords) {
-                foreach ($searchWords as $word) {
-                    $q->where(function ($qw) use ($word) {
-                        $qw->where('pembelians.code', 'like', "%{$word}%")
-                            ->orWhere('pembelians.code_gr', 'like', "%{$word}%")
-                            ->orWhere('suppliers.name', 'like', "%{$word}%")
-                            ->orWhere('pembelians.receipt_pic', 'like', "%{$word}%")
-                            ->orWhereHas('pembelianProducts.product', function ($qp) use ($word) {
-                                $qp->where('name', 'like', "%{$word}%")
-                                    ->orWhere('code', 'like', "%{$word}%");
+            $base->where(function ($q) use ($prefix) {
+                $q->where('pembelians.code', 'like', $prefix)
+                    ->orWhere('pembelians.code_gr', 'like', $prefix)
+                    ->orWhere('suppliers.name', 'like', $prefix)
+                    ->orWhere('pembelians.receipt_pic', 'like', $prefix)
+                    ->orWhereIn('pembelians.id', function ($sub) use ($prefix) {
+                        $sub->select('pp.pembelian_id')
+                            ->from('pembelian_products as pp')
+                            ->join('products as p', 'p.id', '=', 'pp.product_id')
+                            ->whereNull('pp.deleted_at')
+                            ->whereNull('p.deleted_at')
+                            ->where(function ($qp) use ($prefix) {
+                                $qp->where('p.name', 'like', $prefix)
+                                    ->orWhere('p.code', 'like', $prefix);
                             });
                     });
-                }
             });
         }
 

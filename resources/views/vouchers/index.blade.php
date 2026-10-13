@@ -1,10 +1,5 @@
 @extends('layouts.master')
 
-@php
-    $voucherRafaksi = $campaigns->filter(fn ($campaign) => $campaign->campaign_kind === 'voucher' || $campaign->type === 'flash_sale')->values();
-    $bundles = $campaigns->filter(fn ($campaign) => $campaign->campaign_kind === 'promotion' && $campaign->type === 'bundle')->values();
-@endphp
-
 @section('title', 'Voucher')
 
 @section('container')
@@ -33,13 +28,13 @@
                 <li role="presentation" class="active">
                     <a href="#voucher-rafaksi" aria-controls="voucher-rafaksi" role="tab" data-toggle="tab">
                         <i class="fa fa-ticket"></i> Voucher &amp; Rafaksi
-                        <span class="badge">{{ $voucherRafaksi->count() }}</span>
+                        <span class="badge" id="badge-voucher">…</span>
                     </a>
                 </li>
                 <li role="presentation">
                     <a href="#bundling" aria-controls="bundling" role="tab" data-toggle="tab">
                         <i class="fa fa-gift"></i> Bundling
-                        <span class="badge">{{ $bundles->count() }}</span>
+                        <span class="badge" id="badge-bundle">…</span>
                     </a>
                 </li>
             </ul>
@@ -47,7 +42,7 @@
             <div class="tab-content">
                 <div role="tabpanel" class="tab-pane active" id="voucher-rafaksi">
                     @include('vouchers._campaign-table', [
-                        'campaigns' => $voucherRafaksi,
+                        'tab' => 'voucher',
                         'tableId' => 'voucher-rafaksi-table',
                         'emptyMessage' => 'Belum ada voucher atau rafaksi.',
                         'allowPrintSelection' => true,
@@ -55,7 +50,7 @@
                 </div>
                 <div role="tabpanel" class="tab-pane" id="bundling">
                     @include('vouchers._campaign-table', [
-                        'campaigns' => $bundles,
+                        'tab' => 'bundle',
                         'tableId' => 'bundling-table',
                         'emptyMessage' => 'Belum ada bundling.',
                         'allowPrintSelection' => true,
@@ -70,20 +65,56 @@
 @section('page-script')
 <script>
 $(function () {
+    var dataUrl = '{{ route('voucher.index.data') }}';
+    var tables = {};
+
     $('#voucher-rafaksi-table, #bundling-table').each(function () {
-        // Baris kosong TIDAK dirender di <tbody>: satu <td colspan> membuat DataTables error.
-        // Pesan kosong ditangani DataTables lewat language.emptyTable.
-        $(this).DataTable({
+        var $table = $(this);
+        var tab = $table.data('tab');
+
+        // Server-side: hanya satu halaman yang dikirim ke browser (aman untuk ribuan voucher).
+        // Search berbasis awalan nama/kode/produk, diproses di server.
+        tables[tab] = $table.DataTable({
+            processing: true,
+            serverSide: true,
+            ajax: {
+                url: dataUrl,
+                data: function (d) { d.tab = tab; },
+                dataSrc: function (json) {
+                    $('#badge-' + tab).text(json.recordsTotal);
+                    return json.data;
+                }
+            },
+            searchDelay: 400,
             pageLength: 25,
-            order: [[1, 'asc']],
-            columnDefs: [{ targets: [0, 10], orderable: false, searchable: false }],
-            language: { emptyTable: $(this).data('empty-message') || 'Belum ada data.' }
+            order: [],
+            columns: [
+                { orderable: false, searchable: false, className: 'text-center' },
+                { orderable: false, searchable: false,
+                  render: function (d, t, row, meta) { return meta.row + meta.settings._iDisplayStart + 1; } },
+                null, // nama / kode (bisa diurutkan)
+                { orderable: false },
+                { orderable: false },
+                { orderable: false },
+                { orderable: false },
+                null, // masa berlaku (bisa diurutkan)
+                { orderable: false },
+                { orderable: false },
+                { orderable: false, className: 'text-nowrap' }
+            ],
+            language: {
+                emptyTable: $table.data('empty-message') || 'Belum ada data.',
+                searchPlaceholder: 'Awalan nama/kode/produk'
+            },
+            drawCallback: function () {
+                $table.find('.voucher-select-all').prop('checked', false).prop('indeterminate', false);
+                if (typeof updateSelectedVouchers === 'function') { updateSelectedVouchers(); }
+            }
         });
     });
 
     $('a[data-toggle="tab"]').on('shown.bs.tab', function (event) {
-        const table = $($(event.target).attr('href')).find('table').DataTable();
-        table.columns.adjust();
+        $($(event.target).attr('href')).find('table').DataTable().columns.adjust();
     });
 
     function selectedVoucherGroups() {

@@ -71,32 +71,162 @@ class PenjualanController extends Controller
             $selectedCashierId = null;
         }
 
-        $penjualan = collect();
-        if ($selectedCashierId) {
-            // Tidak memakai doesntHave('transaction'): penjualan POS yang memilih metode
-            // bayar ikut membuat record Transaction, sehingga akan ikut tersaring keluar.
-            // Penjualan marketplace tidak punya kasir_id, jadi tidak masuk filter ini.
-            $penjualan = Penjualan::query()
-                ->where('kasir_id', (string) $selectedCashierId)
-                ->when($isStaffOutlet, fn ($q) => $q->where('outlet_id', $user->outlet_id))
-                ->with([
-                    'outlet',
-                    'kasir',
-                    'cashierShift',
-                    // withTrashed: produk yang sudah di-soft-delete tetap tampil di riwayat penjualan
-                    'items.product' => fn ($q) => $q->withTrashed(),
-                ])
-                ->orderBy('created_at', 'desc')
-                ->get();
-        }
-
         return view('penjualan.index', [
-            'penjualan' => $penjualan,
             'cashiers' => $cashiers,
             'selectedCashierId' => $selectedCashierId ? (int) $selectedCashierId : null,
             'isCashier' => $isCashier,
             'canManageSales' => ! $isStaffOutlet,
         ]);
+    }
+
+    /**
+     * Server-side DataTables untuk riwayat penjualan per akun kasir.
+     * Default rentang tanggal = hari ini; hanya satu halaman (maks 100 baris) yang dikirim,
+     * relasi hanya dimuat untuk baris di halaman itu. Search berbasis AWALAN (LIKE 'kata%'):
+     * kode invoice, serta kode/nama produk dan serial number pada item.
+     */
+    public function getIndexData(Request $request)
+    {
+        $user = $request->user();
+        $isCashier = $user->role === 'kasir';
+        $isStaffOutlet = $user->role === 'staff-outlet';
+        $canManageSales = ! $isStaffOutlet;
+
+        $draw = (int) $request->input('draw');
+        $empty = fn () => response()->json([
+            'draw' => $draw, 'recordsTotal' => 0, 'recordsFiltered' => 0, 'data' => [],
+        ]);
+
+        $kasirId = $isCashier ? (int) $user->id : (int) $request->input('kasir_id');
+        if (! $kasirId) {
+            return $empty();
+        }
+
+        // Akun yang boleh dilihat sama seperti dropdown di index().
+        $allowed = User::query()
+            ->whereKey($kasirId)
+            ->where('role', 'kasir')
+            ->when($isStaffOutlet, fn ($q) => $q->where('outlet_id', $user->outlet_id))
+            ->exists();
+        if (! $allowed) {
+            return $empty();
+        }
+
+        [$from, $to] = $this->resolveDateRange($request->input('date_from'), $request->input('date_to'));
+
+        $start = max((int) $request->input('start', 0), 0);
+        $length = (int) $request->input('length', 25);
+        $length = $length > 0 ? min($length, 100) : 25;
+        $searchValue = trim((string) $request->input('search.value', ''));
+        $prefix = $searchValue !== '' ? addcslashes($searchValue, '\\%_') . '%' : null;
+
+        $hasOrder = $request->has('order.0.column');
+        $orderDir = $hasOrder && strtolower((string) $request->input('order.0.dir')) === 'asc' ? 'asc' : 'desc';
+        $sortable = [1 => 'penjualans.created_at', 2 => 'penjualans.code'];
+        $orderBy = $hasOrder ? ($sortable[(int) $request->input('order.0.column')] ?? 'penjualans.created_at') : 'penjualans.created_at';
+
+        // Tidak memakai doesntHave('transaction'): penjualan POS yang memilih metode bayar ikut membuat
+        // record Transaction. Penjualan marketplace tidak punya kasir_id, jadi tidak masuk filter ini.
+        $base = Penjualan::query()
+            ->where('penjualans.kasir_id', (string) $kasirId)
+            ->whereBetween('penjualans.created_at', [$from, $to])
+            ->when($isStaffOutlet, fn ($q) => $q->where('penjualans.outlet_id', $user->outlet_id));
+
+        $recordsTotal = (clone $base)->count('penjualans.id');
+
+        if ($prefix !== null) {
+            // EXISTS berkorelasi: dicek hanya untuk penjualan pada rentang tanggal (kecil), bukan
+            // mengumpulkan seluruh riwayat penjualan produk tsb. Tidak menggandakan baris.
+            $base->where(function ($q) use ($prefix) {
+                $q->where('penjualans.code', 'like', $prefix)
+                    ->orWhereExists(function ($sub) use ($prefix) {
+                        $sub->select(DB::raw(1))
+                            ->from('penjualan_items as pi')
+                            ->join('products as p', 'p.id', '=', 'pi.product_id')
+                            ->whereColumn('pi.penjualan_id', 'penjualans.id')
+                            ->whereNull('pi.deleted_at')
+                            ->where(function ($w) use ($prefix) {
+                                $w->where('p.name', 'like', $prefix)
+                                    ->orWhere('p.code', 'like', $prefix)
+                                    ->orWhere('pi.serial_number', 'like', $prefix);
+                            });
+                    });
+            });
+        }
+
+        $recordsFiltered = $prefix === null ? $recordsTotal : (clone $base)->count('penjualans.id');
+
+        // Deferred join: urutkan/paginate hanya kolom id, baru muat baris lengkap untuk halaman ini.
+        $pageIds = $base
+            ->orderBy($orderBy, $orderDir)
+            ->orderBy('penjualans.id', $orderDir)
+            ->offset($start)
+            ->limit($length)
+            ->pluck('penjualans.id');
+
+        $order = $pageIds->flip();
+        $penjualans = Penjualan::with([
+            'outlet:id,name',
+            'kasir:id,name',
+            'cashierShift',
+            'voucher',
+            // withTrashed: produk yang sudah di-soft-delete tetap tampil di riwayat penjualan
+            'items.product' => fn ($q) => $q->withTrashed()->select('id', 'code', 'name'),
+        ])
+            ->whereIn('id', $pageIds)
+            ->get()
+            ->sortBy(fn ($penjualan) => $order[$penjualan->id])
+            ->values();
+
+        $data = $penjualans->map(function ($value) use ($canManageSales) {
+            $aksi = '<a class="btn btn-info" href="' . e(route('penjualan.show', $value->id)) . '">Show</a> '
+                . '<a class="btn btn-warning" href="' . e(route('penjualan.print', $value->id)) . '">Re-Print</a>';
+            if ($canManageSales) {
+                $aksi .= ' <form action="' . e(route('penjualan.destroy', $value->id)) . '" method="post" style="display:inline;">'
+                    . method_field('delete') . csrf_field()
+                    . '<button class="border-0 btn btn-danger" onclick="return confirm(\'Are you sure?\')">Hapus</button></form>';
+            }
+
+            return [
+                '',
+                e($value->created_at?->format('d/m/Y H:i')),
+                e($value->code),
+                e($value->outlet->name ?? '___customer'),
+                e($value->kasir->name ?? '___customer'),
+                e($value->cashierShift?->name ?? '—'),
+                view('penjualan._detail', ['value' => $value])->render(),
+                $aksi,
+            ];
+        });
+
+        return response()->json([
+            'draw' => $draw,
+            'recordsTotal' => $recordsTotal,
+            'recordsFiltered' => $recordsFiltered,
+            'data' => $data->values(),
+        ]);
+    }
+
+    /**
+     * date_from / date_to (Y-m-d). Default hari ini; tanggal tidak valid diabaikan; urutan dibalik bila terbalik.
+     */
+    private function resolveDateRange($from, $to): array
+    {
+        $parse = function ($value) {
+            try {
+                return $value ? Carbon::createFromFormat('Y-m-d', (string) $value) : null;
+            } catch (\Throwable $e) {
+                return null;
+            }
+        };
+
+        $start = $parse($from) ?? ($parse($to) ?? now());
+        $end = $parse($to) ?? $start;
+        if ($start->gt($end)) {
+            [$start, $end] = [$end, $start];
+        }
+
+        return [$start->copy()->startOfDay(), $end->copy()->endOfDay()];
     }
 
     /**

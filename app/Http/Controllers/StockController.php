@@ -113,23 +113,18 @@ class StockController extends Controller
             $base->where('products.lokasi', $lokasi);
         }
 
-        // ==== SEARCH: meniru "smart search" DataTables, tapi tetap ringan ====
-        // Input dipecah per kata; SEMUA kata harus ketemu (AND) di salah satu kolom (OR),
-        // jadi "wing surya" tetap match "Wings Surya".
-        // Kolom yang dicari: nama produk, kode produk, SKU, serial number (bukan nama supplier).
+        // ==== SEARCH ====
+        // Nama produk dicari dari AWAL nama ("jet" menemukan "JET SWEET", "sweet" tidak; "jet sweet"
+        // lengkap tetap ketemu). Kode produk, SKU, dan serial number tetap dicari di mana saja
+        // supaya scan / ketik sebagian kode tetap jalan.
         if ($searchValue !== '') {
-            $searchWords = preg_split('/\s+/', $searchValue, -1, PREG_SPLIT_NO_EMPTY);
-            $searchWords = array_slice($searchWords, 0, 5); // batasi biar tidak disalahgunakan
+            $like = addcslashes($searchValue, '\\%_');
 
-            $base->where(function ($q) use ($searchWords) {
-                foreach ($searchWords as $word) {
-                    $q->where(function ($qw) use ($word) {
-                        $qw->where('products.name', 'like', "%{$word}%")
-                            ->orWhere('products.code', 'like', "%{$word}%")
-                            ->orWhere('s.sku', 'like', "%{$word}%")
-                            ->orWhere('s.serial_number', 'like', "%{$word}%");
-                    });
-                }
+            $base->where(function ($q) use ($like) {
+                $q->where('products.name', 'like', "{$like}%")
+                    ->orWhere('products.code', 'like', "%{$like}%")
+                    ->orWhere('s.sku', 'like', "%{$like}%")
+                    ->orWhere('s.serial_number', 'like', "%{$like}%");
             });
         }
 
@@ -288,8 +283,9 @@ class StockController extends Controller
 
         if ($search !== '') {
             $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('code', 'like', "{$search}%");
+                // Nama dicari dari awal nama, bukan dari tengah kata
+                $q->where('name', 'like', addcslashes($search, '\\%_') . '%')
+                    ->orWhere('code', 'like', addcslashes($search, '\\%_') . '%');
             });
         }
 
