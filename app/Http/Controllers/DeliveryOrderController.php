@@ -342,7 +342,7 @@ class DeliveryOrderController extends Controller
 
                 // Catat penerimaan ke ledger stok toko (OwnerStock + movement 'in' + HPP + batch + sumber DO).
                 // Sebelumnya OwnerStock::updateOrCreate: tidak mencatat movement masuk & harga_beli tidak tersimpan.
-                $batchNumber = $stock->batch_number ?: 'DO-' . $deliveryOrder->id . '-' . $item->id;
+                $batchNumber = $stock->batch_number ?: ($stock->sku ?: 'DO-' . $deliveryOrder->id . '-' . $item->id);
                 $stockService->receive(
                     $deliveryOrder->owner_id,
                     $item->product_id,

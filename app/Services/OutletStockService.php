@@ -27,11 +27,17 @@ class OutletStockService
 
         return DB::transaction(function () use ($outletId, $productId, $qty, $hpp, $attributes, $referenceType, $referenceId, $user) {
             $batchNumber = $attributes['batch_number'] ?? null;
-            $ownerStock = OwnerStock::where('owner_id', $outletId)
+            // withTrashed(): unique index ikut menghitung baris yang sudah di-soft-delete
+            $ownerStock = OwnerStock::withTrashed()
+                ->where('owner_id', $outletId)
                 ->where('product_id', $productId)
                 ->where('batch_number', $batchNumber)
                 ->lockForUpdate()
                 ->first();
+
+            if ($ownerStock && $ownerStock->trashed()) {
+                $ownerStock->restore();
+            }
 
             if (! $ownerStock) {
                 $ownerStock = OwnerStock::create([
