@@ -104,6 +104,10 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
         ->name('product.minimum-adjustment.products');
     Route::post('/product/minimum-adjustment', [ProductMinimumAdjustmentController::class, 'store'])
         ->name('product.minimum-adjustment.store');
+    // Cek barcode langsung dari form (harus sebelum resource agar tidak ketangkap /product/{product})
+    Route::get('/product/check-barcode', [ProductController::class, 'checkBarcode'])
+        ->middleware('throttle:120,1')
+        ->name('product.check-barcode');
     Route::resource('/product', ProductController::class);
 
     // Stok Gudang: staff-outlet hanya boleh melihat (index), tidak boleh aksi lain (show/destroy/dll)

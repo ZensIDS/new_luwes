@@ -39,7 +39,7 @@
                             </div>
                             <div class="col-md-6 form-group">
                                 <label for="">Barcode</label>
-                                <input type="text" class="form-control" name="code"
+                                <input type="text" class="form-control" id="product-code-input" autocomplete="off" name="code"
                                     value="{{ old('code', $product->code) }}" placeholder="Masukkan Barcode">
                                 @error('code')
                                     <div class="invalid-feedback text-danger">
@@ -106,19 +106,7 @@
                                     <div class="invalid-feedback text-danger">{{ $message }}</div>
                                 @enderror
                             </div>
-                            <div class="col-md-6 form-group">
-                                <label for="">Harga Beli</label>
-                                <div class="input-group">
-                                    <span class="input-group-addon">Rp</span>
-                                    <input type="text" inputmode="numeric" data-currency-input data-currency-decimals="0" class="form-control" name="harga_beli"
-                                        value="{{ old('harga_beli', $product->harga_beli) }}" placeholder="Masukkan Harga Beli">
-                                </div>
-                                @error('harga_beli')
-                                    <div class="invalid-feedback text-danger">
-                                        {{ $message }}
-                                    </div>
-                                @enderror
-                            </div>
+                            @include('products._harga-beli-field', ['value' => old('harga_beli', rtrim(rtrim(number_format((float) $product->harga_beli, 2, ',', '.'), '0'), ','))])
 
                             {{-- <div class="col-md-6 form-group"> --}}
                                 {{-- <label for="">Harga Jual</label> --}}
@@ -326,4 +314,6 @@
             toggleStatusNote(false);
         });
     </script>
+    @include('products._harga-beli-script')
+    @include('products._barcode-check', ['input' => '#product-code-input', 'url' => route('product.check-barcode'), 'ignoreId' => $product->id])
 @endsection

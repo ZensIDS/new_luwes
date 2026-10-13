@@ -38,7 +38,7 @@
                             </div>
                             <div class="col-md-6 form-group">
                                 <label for="">Barcode</label>
-                                <input type="text" class="form-control" name="code" value="{{ old('code') }}"
+                                <input type="text" class="form-control" id="product-code-input" autocomplete="off" name="code" value="{{ old('code') }}"
                                     placeholder="Masukkan Barcode">
                                 @error('code')
                                     <div class="invalid-feedback text-danger">
@@ -105,19 +105,7 @@
                                     <div class="invalid-feedback text-danger">{{ $message }}</div>
                                 @enderror
                             </div>
-                            <div class="col-md-6 form-group">
-                                <label for="">Harga Beli</label>
-                                <div class="input-group">
-                                    <span class="input-group-addon">Rp</span>
-                                    <input type="text" inputmode="numeric" data-currency-input data-currency-decimals="0" class="form-control" name="harga_beli" value="{{ old('harga_beli', 0) }}"
-                                        placeholder="Masukkan Harga Beli">
-                                </div>
-                                @error('harga_beli')
-                                    <div class="invalid-feedback text-danger">
-                                        {{ $message }}
-                                    </div>
-                                @enderror
-                            </div>
+                            @include('products._harga-beli-field', ['value' => old('harga_beli', 0)])
                             <div class="col-md-6 form-group">
                                 <label>Category</label>
                                 <select class="form-control select2" name="category_id" data-placeholder="Pilih Category"
@@ -324,4 +312,6 @@
         });
     </script>
     
+    @include('products._harga-beli-script')
+    @include('products._barcode-check', ['input' => '#product-code-input', 'url' => route('product.check-barcode'), 'ignoreId' => null])
 @endsection

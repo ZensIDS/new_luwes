@@ -230,7 +230,7 @@ class ProductController extends Controller
 
     public function store(ProductRequest $request)
     {
-        $data = $request->validated();
+        $data = $request->productData();
         if (($data['status_produk'] ?? 'sudah') !== 'tambahan_diskon') {
             $data['status_produk_note'] = null;
         }
@@ -290,7 +290,7 @@ class ProductController extends Controller
 
     public function update(ProductRequest $request, Product $product)
     {
-        $data = $request->validated();
+        $data = $request->productData();
         if (($data['status_produk'] ?? 'sudah') !== 'tambahan_diskon') {
             $data['status_produk_note'] = null;
         }
@@ -339,6 +339,36 @@ class ProductController extends Controller
         return redirect(route('product.index'))->with('toast_success', 'Berhasil Menghapus Data!');
     }
 
+    /**
+     * Cek barcode langsung dari form (tanpa menunggu simpan).
+     * Produk yang sudah dihapus (soft delete) tetap dihitung karena validasi unik juga menghitungnya.
+     */
+    public function checkBarcode(Request $request)
+    {
+        $code = trim((string) $request->query('code', ''));
+
+        if ($code === '') {
+            return response()->json(['exists' => false, 'product' => null]);
+        }
+
+        $ignoreId = (int) $request->query('ignore_id');
+
+        $product = Product::withTrashed()
+            ->where('code', $code)
+            ->when($ignoreId > 0, fn ($query) => $query->where('id', '!=', $ignoreId))
+            ->first(['id', 'code', 'name', 'deleted_at']);
+
+        return response()->json([
+            'exists' => (bool) $product,
+            'product' => $product ? [
+                'id' => $product->id,
+                'code' => $product->code,
+                'name' => $product->name,
+                'trashed' => $product->trashed(),
+            ] : null,
+        ]);
+    }
+
     public function priceHistory(Product $product)
     {
         $activities = Activity::forSubject($product)
@@ -356,8 +386,8 @@ class ProductController extends Controller
                 return [
                     'date'  => $activity->created_at->format('d M Y H:i'),
                     'user'  => $activity->causer?->name ?? 'System',
-                    'old'   => (int) $old,
-                    'new'   => (int) $new,
+                    'old'   => (float) $old,
+                    'new'   => (float) $new,
                     'event' => $activity->event,
                 ];
             })->values();

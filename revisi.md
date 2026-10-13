@@ -14,11 +14,11 @@ Revisi Luwes
 [ ] Voucher
     [ ] Check Desain voucher
     [ ] opsi rafaksi tanpa batas kuota
-[ ]Product
-    [ ] barcode tidak menunggu save sudah alert jika duplicate
-    [ ] harga beli agar 0 di depan tidak ikut dan parsing rupiah
-    [ ] nama barang uppercase
-    [ ] dibagi harga satuan besar (khusus untuk daftar product di halaman master harga)
+[x]Product
+    [x] barcode tidak menunggu save sudah alert jika duplicate
+    [x] harga beli agar 0 di depan tidak ikut dan parsing rupiah
+    [x] nama barang uppercase
+    [x] dibagi harga satuan besar (khusus untuk daftar product di halaman master harga)
 
 [ ] Pendapatan lainnya
     [ ] listing -> product baru -> nominal (setting)

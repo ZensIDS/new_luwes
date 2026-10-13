@@ -11,6 +11,12 @@ class ProductRequest extends FormRequest
     protected function prepareForValidation()
     {
         $this->merge([
+            // Barcode hasil scan kadang membawa spasi/enter di ujung; buang supaya cek unik akurat.
+            'code' => $this->filled('code') ? trim((string) $this->input('code')) : $this->input('code'),
+            // Nama selalu disimpan HURUF BESAR (juga dijaga di model Product::setNameAttribute).
+            'name' => $this->filled('name') ? mb_strtoupper(trim((string) $this->input('name')), 'UTF-8') : $this->input('name'),
+            // Harga beli boleh diinput per satuan kecil (pcs) atau per satuan besar (karton/box).
+            'harga_beli_per' => $this->input('harga_beli_per') === 'besar' ? 'besar' : 'kecil',
             'status_produk' => $this->input('status_produk', 'sudah'),
             'status_produk_note' => $this->filled('status_produk_note')
                 ? trim((string) $this->input('status_produk_note'))
@@ -47,13 +53,14 @@ class ProductRequest extends FormRequest
             'brand' => 'nullable|string',
             'model' => 'nullable',
             'is_serialized' => 'nullable',
-            'harga_beli' => 'required',
+            'harga_beli' => 'required|numeric|min:0',
+            'harga_beli_per' => 'required|in:besar,kecil',
             'harga_jual' => 'nullable',
             'diskon' => 'nullable',
             'berat' => 'nullable',
             'satuan' => 'nullable|string',
-            'satuan_besar' => 'nullable|string|max:255',
-            'konversi_qty' => 'nullable|numeric|min:1',
+            'satuan_besar' => ['nullable', 'string', 'max:255', 'required_if:harga_beli_per,besar'],
+            'konversi_qty' => ['nullable', 'numeric', 'min:1', 'required_if:harga_beli_per,besar'],
             'min_stock' => 'required|integer|min:0',
             'lokasi' => 'nullable|string',
             'status_produk' => 'required|in:free_produk,tambahan_diskon,free_tester,listing,lunas,belum_lunas,sudah',
@@ -61,6 +68,25 @@ class ProductRequest extends FormRequest
             'supplier_ids' => 'nullable|array',
             'supplier_ids.*' => 'exists:suppliers,id',
         ];
+    }
+
+    /**
+     * Data siap simpan ke tabel products.
+     * Bila harga beli dimasukkan per satuan besar, HPP otomatis dibagi isi konversi
+     * sehingga products.harga_beli selalu per satuan kecil (pcs).
+     */
+    public function productData(): array
+    {
+        $data = $this->validated();
+
+        $per = $data['harga_beli_per'] ?? 'kecil';
+        unset($data['harga_beli_per']);
+
+        if ($per === 'besar') {
+            $data['harga_beli'] = round(((float) $data['harga_beli']) / (float) $data['konversi_qty'], 2);
+        }
+
+        return $data;
     }
 
     /**
@@ -74,6 +100,12 @@ class ProductRequest extends FormRequest
             'name.required' => 'Nama produk wajib diisi.',
             'category_id.required' => 'Kategori produk wajib dipilih.',
             'harga_beli.required' => 'Harga beli wajib diisi.',
+            'harga_beli.numeric' => 'Harga beli harus berupa angka.',
+            'harga_beli.min' => 'Harga beli tidak boleh kurang dari 0.',
+            'harga_beli_per.in' => 'Pilihan harga beli per satuan tidak valid.',
+            'satuan_besar.required_if' => 'Satuan besar wajib diisi jika harga beli dimasukkan per satuan besar.',
+            'konversi_qty.required_if' => 'Isi konversi wajib diisi jika harga beli dimasukkan per satuan besar.',
+            'konversi_qty.min' => 'Isi konversi minimal 1.',
             'harga_jual.required' => 'Harga jual wajib diisi.',
             'satuan.string' => 'Satuan harus berupa teks.',
             'min_stock.required' => 'Minimal stok wajib diisi.',

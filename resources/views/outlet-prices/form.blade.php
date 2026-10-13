@@ -80,7 +80,7 @@
                         </div>
                         <div class="col-md-6 form-group {{ $errors->newProduct->has('code') ? 'has-error' : '' }}">
                             <label>Barcode <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" name="code" value="{{ old('code') }}" placeholder="Scan / masukkan barcode">
+                            <input type="text" class="form-control" id="product-code-input" autocomplete="off" name="code" value="{{ old('code') }}" placeholder="Scan / masukkan barcode">
                             @error('code', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
                         </div>
                     </div>
@@ -123,7 +123,7 @@
                             <label>Harga Beli <span class="text-danger">*</span></label>
                             <div class="input-group">
                                 <span class="input-group-addon">Rp</span>
-                                <input type="text" inputmode="numeric" data-currency-input data-currency-decimals="0"
+                                <input type="text" inputmode="numeric" data-currency-input data-currency-decimals="2"
                                     class="form-control" id="np-harga-beli" name="harga_beli"
                                     value="{{ old('harga_beli', 0) }}" placeholder="Harga sesuai nota supplier">
                             </div>
@@ -519,6 +519,8 @@
 
 @section('page-script')
     @if (! $price->exists && isset($categories))
+    {{-- Dipasang sebelum script panel supaya submit duplikat ditahan lebih dulu --}}
+    @include('products._barcode-check', ['input' => '#new-product-form #product-code-input', 'url' => route('product.check-barcode'), 'ignoreId' => null])
     <script>
         $(function () {
             var $panel = $('#new-product-panel');
@@ -568,9 +570,18 @@
             });
 
             // ---- Harga beli per satuan besar -> HPP per satuan kecil (konversi otomatis) ----
-            function parseId(v) {
-                v = String(v || '').replace(/\./g, '').replace(',', '.');
-                var n = Number(v);
+            // Parser angka format Indonesia (sama dengan IndonesianNumber::parse di server)
+            function parseId(value) {
+                var text = String(value == null ? '' : value).trim().replace(/[^\d,.]/g, '');
+                if (!text) { return 0; }
+                if (text.indexOf(',') !== -1) {
+                    text = text.replace(/\./g, '').replace(',', '.');
+                } else if (text.indexOf('.') !== -1) {
+                    var parts = text.split('.');
+                    var last = parts[parts.length - 1];
+                    text = last.length <= 2 ? parts.slice(0, -1).join('') + '.' + last : parts.join('');
+                }
+                var n = Number(text);
                 return isFinite(n) ? n : 0;
             }
             function fmt(n) {

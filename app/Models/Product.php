@@ -51,7 +51,18 @@ class Product extends Model
 
     protected $casts = [
         'is_serialized' => 'boolean',
+        'harga_beli' => 'float',
     ];
+
+    /**
+     * Nama produk selalu disimpan HURUF BESAR, apa pun cara input / import-nya.
+     */
+    public function setNameAttribute($value): void
+    {
+        $this->attributes['name'] = $value === null
+            ? null
+            : mb_strtoupper(trim((string) $value), 'UTF-8');
+    }
 
     public function category()
     {
