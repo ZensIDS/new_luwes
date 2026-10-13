@@ -12,9 +12,12 @@ class ProductResource extends JsonResource
         $sortedStocks = $this->relationLoaded('stocks')
             ? $this->stocks->sortBy('status')->sortBy('serial_number')
             : collect();
-        $ownerStocks = $this->relationLoaded('ownerStocks')
-            ? $this->ownerStocks->where('qty', '>', 0)->values()
-            : collect();
+        $loadedOwnerStocks = $this->relationLoaded('ownerStocks') ? $this->ownerStocks : collect();
+        $ownerStocks = $loadedOwnerStocks->where('qty', '>', 0)->values();
+        // Saldo batch MINUS (negatif, hanya dimuat untuk daftar kasir). Dijumlahkan ke stok sistem
+        // supaya produk yang sedang minus tampil negatif; HPP dan daftar batch tetap hanya batch positif.
+        $deficitQty = (int) $loadedOwnerStocks->where('qty', '<', 0)->sum('qty');
+        $systemStock = (int) $ownerStocks->sum('qty') + $deficitQty;
         // The relation being loaded is the context signal. An outlet with zero
         // stock must return zero, not fall back to warehouse stock.
         $isOutletContext = $this->relationLoaded('ownerStocks');
@@ -27,6 +30,10 @@ class ProductResource extends JsonResource
         if ($isOutletContext && $ownerStocks->first()) {
             $displayPrice = app(\App\Services\PriceCalculator::class)
                 ->calculateItem(app(\App\Services\LatestHpp::class)->fromLoaded($ownerStocks, $this->harga_beli), $priceRule, $this->resource)['price'];
+        } elseif ($isOutletContext && $request->filled('outlet_id')) {
+            // Produk stok 0 di outlet (boleh dijual jadi stok minus): harga dihitung sama seperti di keranjang.
+            $displayPrice = app(\App\Services\PriceCalculator::class)
+                ->calculateItem(app(\App\Services\LatestHpp::class)->forProduct((int) $request->input('outlet_id'), (int) $this->id), $priceRule, $this->resource)['price'];
         }
 
         if ($request->boolean('compact')) {
@@ -36,10 +43,9 @@ class ProductResource extends JsonResource
                 'barcode' => $this->code,
                 'code' => $this->code,
                 'harga_jual' => $displayPrice,
-                'image_url' => asset($this->pic),
                 'is_serialized' => $this->is_serialized,
-                'total_stock' => $isOutletContext ? $ownerStocks->sum('qty') : $warehouseStock(),
-                'outlet_stock' => $isOutletContext ? $ownerStocks->sum('qty') : null,
+                'total_stock' => $isOutletContext ? $systemStock : $warehouseStock(),
+                'outlet_stock' => $isOutletContext ? $systemStock : null,
             ];
         }
 
@@ -55,8 +61,8 @@ class ProductResource extends JsonResource
             'harga_jual' => $displayPrice,
             'image_url' => asset($this->pic),
             'is_serialized' => $this->is_serialized,
-            'total_stock' => $isOutletContext ? $ownerStocks->sum('qty') : $warehouseStock(),
-            'outlet_stock' => $isOutletContext ? $ownerStocks->sum('qty') : null,
+            'total_stock' => $isOutletContext ? $systemStock : $warehouseStock(),
+            'outlet_stock' => $isOutletContext ? $systemStock : null,
             'price_rule' => $priceRule ? [
                 'disc_brand_type' => $priceRule->disc_brand_type,
                 'disc_brand_value' => $priceRule->disc_brand_value,

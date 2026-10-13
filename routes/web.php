@@ -10,6 +10,8 @@ use App\Http\Controllers\CashierSessionController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DeficitStockController;
+use App\Http\Controllers\ExpiredStockController;
 use App\Http\Controllers\KasController;
 use App\Http\Controllers\LaporanController;
 use App\Http\Controllers\MarketplaceController;
@@ -129,6 +131,16 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/owner-stock-opname', [App\Http\Controllers\OwnerStockController::class, 'opname'])->name('owner-stock-opname');
     Route::get('/owner-stock-opname/data', [App\Http\Controllers\OwnerStockController::class, 'getOpnameData'])->name('owner-stock-opname.data');
     Route::post('/owner-stock-opname/save', [App\Http\Controllers\OwnerStockController::class, 'saveOpname'])->name('owner-stock-opname.save');
+
+    // Stok Minus (penjualan melebihi stok sistem): hanya admin outlet / owner / superadmin.
+    Route::middleware('role:superadmin|owner|staff-outlet')->group(function () {
+        Route::get('/stok-minus', [DeficitStockController::class, 'index'])->name('deficit-stocks.index');
+        Route::get('/stok-minus/penjualan', [DeficitStockController::class, 'oversold'])->name('deficit-stocks.oversold');
+        Route::post('/stok-minus/{ownerStock}/tutup', [DeficitStockController::class, 'close'])->name('deficit-stocks.close');
+        // Stok Expired: batch expired / akan expired + musnahkan (write-off).
+        Route::get('/stok-expired', [ExpiredStockController::class, 'index'])->name('expired-stocks.index');
+        Route::post('/stok-expired/{ownerStock}/musnahkan', [ExpiredStockController::class, 'writeOff'])->name('expired-stocks.write-off');
+    });
     Route::get('/voucher/lookup', [VoucherController::class, 'lookup'])->name('voucher.lookup');
     Route::get('/voucher/options', [VoucherController::class, 'options'])->name('voucher.options');
     Route::get('/campaign/create', [CampaignController::class, 'create'])->name('campaign.create');

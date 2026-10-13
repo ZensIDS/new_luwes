@@ -122,7 +122,9 @@ class OutletPriceController extends Controller
     {
         $this->ensureManagementAccess();
 
+        // Batch MINUS tidak pernah menjadi sumber HPP (HPP-nya hanya perkiraan), jadi tidak ikut riwayat.
         $stocks = OwnerStock::withTrashed()
+            ->notDeficit()
             ->where('owner_id', $outletPrice->outlet_id)
             ->where('product_id', $outletPrice->product_id)
             ->get(['id', 'batch_number'])

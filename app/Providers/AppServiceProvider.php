@@ -2,10 +2,13 @@
 
 namespace App\Providers;
 
+use App\Services\DeficitStockService;
+use App\Services\ExpiredStockService;
 use App\Services\LowStockService;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
@@ -42,6 +45,22 @@ class AppServiceProvider extends ServiceProvider
 
         View::composer('layouts.master', function ($view) use ($loadCompanyLogo) {
             $view->with('companyLogo', $loadCompanyLogo());
+            // Badge Stok Minus (penjualan melebihi stok) untuk admin outlet / owner / superadmin.
+            // Di-cache 60 detik per outlet agar tidak menghitung ulang di setiap halaman.
+            if (Auth::check() && in_array(Auth::user()->role, ['staff-outlet', 'owner', 'superadmin'], true)) {
+                $isStaff = Auth::user()->role === 'staff-outlet';
+                $deficitOutletId = $isStaff ? (int) Auth::user()->outlet_id : null;
+
+                $view->with('deficitCount', $isStaff && ! $deficitOutletId
+                    ? 0
+                    : Cache::remember('deficit-count:'.($deficitOutletId ?: 'all'), 60, fn () => app(DeficitStockService::class)->countOpen($deficitOutletId)));
+
+                // Badge Stok Expired (sudah expired / akan expired). Ringkasan di-cache 60 detik di service.
+                $view->with('expirySummary', $isStaff && ! $deficitOutletId
+                    ? ['days' => 0, 'expired' => 0, 'soon' => 0, 'combo' => 0]
+                    : app(ExpiredStockService::class)->summary($deficitOutletId));
+            }
+
             // Notifikasi stok minimum hanya untuk admin-gudang (keputusan #1).
             // Dihitung di SQL & realtime (tanpa cache), dan hanya saat render halaman penuh.
             if (Auth::check() && Auth::user()->role === 'admin-gudang') {

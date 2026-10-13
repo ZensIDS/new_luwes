@@ -55,6 +55,13 @@
                                     @if($returnPinConfigured)<span class="text-success"><i class="fa fa-check"></i> PIN retur sudah dikonfigurasi.</span>@else<span class="text-danger"><i class="fa fa-warning"></i> PIN retur belum dikonfigurasi.</span>@endif
                                 </div>
                             @endif
+                            @if(in_array(auth()->user()?->role, ['superadmin', 'owner'], true))
+                                <div class="form-group">
+                                    <label for="expiry_warning_days">Ambang Notice Akan Expired (hari) :</label>
+                                    <input class="form-control" type="number" name="expiry_warning_days" id="expiry_warning_days" min="1" max="365" value="{{ old('expiry_warning_days', $expiryWarningDays ?? 30) }}">
+                                    <small class="help-block">Batch outlet yang expired dalam rentang ini muncul sebagai notice "akan expired" untuk admin outlet (1 sampai 365 hari, default 30).</small>
+                                </div>
+                            @endif
                             <button type="submit" class="btn btn-primary">Simpan</button>
                         </form>
                     </div><!-- /.box-body -->

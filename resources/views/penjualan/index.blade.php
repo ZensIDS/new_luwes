@@ -63,6 +63,7 @@
 @endsection
 
 @section('page-script')
+@include('penjualan._delete-script')
 <script>
 $(function () {
     var dateFrom = moment().format('YYYY-MM-DD');

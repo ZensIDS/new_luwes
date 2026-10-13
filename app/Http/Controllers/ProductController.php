@@ -8,6 +8,7 @@ use App\Http\Requests\ProductRequest;
 use App\Http\Resources\ProductResource;
 use App\Models\Category;
 use App\Models\Outlet;
+use App\Models\OwnerStock;
 use App\Models\Product;
 use App\Models\Stock;
 use App\Models\Supplier;
@@ -58,10 +59,17 @@ class ProductController extends Controller
         };
 
         $search = trim((string) $request->input('search', ''));
+
+        // Pencarian kasir (compact) tanpa kata kunci tidak menampilkan produk apa pun:
+        // daftar hanya muncul setelah kasir mencari.
+        if ($outletId && $search === '' && $request->boolean('compact') && request()->wantsJson()) {
+            return ProductResource::collection(Product::query()->whereRaw('1 = 0')->paginate(10));
+        }
+
         if ($search !== '') {
             // Jalur scan barcode/serial (kasir): pencocokan eksak dulu. Bila ketemu, tidak perlu
             // menjalankan LIKE '%...%' di 5 kolom + subquery serial yang berat.
-            $exactIds = $outletId ? $this->exactScanMatches($search, $outletId, $outletStockScope) : collect();
+            $exactIds = $outletId ? $this->exactScanMatches($search, $outletId, $outletStockScope, ! $request->boolean('compact')) : collect();
 
             if ($exactIds->isNotEmpty()) {
                 $products = $products->whereIn('products.id', $exactIds);
@@ -103,8 +111,9 @@ class ProductController extends Controller
             }
         }
 
-        if ($outletId) {
-            // Kasir hanya boleh menjual produk yang benar-benar punya stok di outlet ini.
+        // Pencarian kasir (compact) menampilkan produk walau stok sistem 0 karena penjualan boleh
+        // membuat stok minus. Daftar produk biasa dengan filter outlet tetap hanya yang berstok.
+        if ($outletId && ! $request->boolean('compact')) {
             $products = $products->whereHas('ownerStocks', $outletStockScope);
         }
 
@@ -141,8 +150,24 @@ class ProductController extends Controller
             if ($outletId) {
                 // Cashier searches only need stock owned by this outlet. Do not
                 // hydrate warehouse stocks for every search result.
-                $relations['ownerStocks'] = function ($query) use ($outletStockScope, $compact) {
-                    $outletStockScope($query);
+                $relations['ownerStocks'] = function ($query) use ($outletStockScope, $compact, $outletId) {
+                    if ($compact) {
+                        // Stok sistem untuk kasir = batch yang bisa dijual + saldo batch MINUS (negatif),
+                        // supaya produk yang sedang minus tampil negatif (merah), bukan 0.
+                        $query->where('owner_id', $outletId)
+                            ->where(function ($stockQuery) {
+                                $stockQuery->where(function ($sellable) {
+                                    $sellable->where('qty', '>', 0)
+                                        ->where(function ($expiryQuery) {
+                                            $expiryQuery->whereNull('expired_at')->orWhere('expired_at', '>=', today());
+                                        });
+                                })->orWhere(function ($deficit) {
+                                    $deficit->where('batch_number', OwnerStock::DEFICIT_BATCH)->where('qty', '<', 0);
+                                });
+                            });
+                    } else {
+                        $outletStockScope($query);
+                    }
 
                     if ($compact) {
                         $query->select([
@@ -172,7 +197,6 @@ class ProductController extends Controller
                     'products.code',
                     'products.harga_beli',
                     'products.harga_jual',
-                    'products.pic',
                     'products.is_serialized',
                     'products.created_at',
                 ]);
@@ -436,7 +460,7 @@ class ProductController extends Controller
      * Hanya dicoba bila input terlihat seperti barcode (>= 6 karakter, tanpa spasi).
      * Hasil kosong = lanjut ke pencarian LIKE biasa.
      */
-    private function exactScanMatches(string $search, $outletId, \Closure $outletStockScope)
+    private function exactScanMatches(string $search, $outletId, \Closure $outletStockScope, bool $requireStock = true)
     {
         if (! $this->looksLikeSerial($search, 6)) {
             return collect();
@@ -450,7 +474,7 @@ class ProductController extends Controller
                         $stockQuery->whereHas('stock', fn ($stock) => $stock->where('serial_number', $search));
                     });
             })
-            ->whereHas('ownerStocks', $outletStockScope)
+            ->when($requireStock, fn ($query) => $query->whereHas('ownerStocks', $outletStockScope))
             ->limit(10)
             ->pluck('products.id');
     }

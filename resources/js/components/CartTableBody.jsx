@@ -62,7 +62,7 @@ const CartTableBody = forwardRef(({
                     key={`item-${ index }`}
                     ref={(element) => { rowRefs.current[index] = element; }}
                     tabIndex="0"
-                    className={selectedCartProductId === c.id ? "info" : ""}
+                    className={selectedCartProductId === c.id ? "info" : (Number(c.oversold_qty || 0) > 0 ? "warning" : "")}
                     onClick={() => setSelectedCartProductId(c.id)}
                     onFocus={() => setSelectedCartProductId(c.id)}
                     onKeyDown={(event) => handleRowKeyDown(event, index)}
@@ -70,6 +70,40 @@ const CartTableBody = forwardRef(({
                 >
                     <td>
                         <span>{c.name}</span>
+                        {Number(c.oversold_qty || 0) > 0 && (
+                            <div
+                                style={{
+                                    display: "inline-block",
+                                    marginLeft: 8,
+                                    padding: "1px 6px",
+                                    fontSize: 12,
+                                    color: "#8a6d3b",
+                                    background: "#fcf8e3",
+                                    border: "1px solid #faebcc",
+                                    borderRadius: 3,
+                                }}
+                                title="Penjualan tetap diproses; kelebihannya tercatat sebagai stok minus."
+                            >
+                                Melebihi stok sistem: stok {Number(c.availableStock || 0)}, minus {Number(c.oversold_qty)}
+                            </div>
+                        )}
+                        {Number(c.expired_qty || 0) > 0 && (
+                            <div
+                                style={{
+                                    display: "inline-block",
+                                    marginLeft: 8,
+                                    padding: "1px 6px",
+                                    fontSize: 12,
+                                    color: "#8a6d3b",
+                                    background: "#fcf8e3",
+                                    border: "1px solid #faebcc",
+                                    borderRadius: 3,
+                                }}
+                                title="Batch expired tidak ikut dijual dan tidak dihitung sebagai stok tersedia."
+                            >
+                                Ada batch expired di sistem ({Number(c.expired_qty)}), informasikan admin outlet
+                            </div>
+                        )}
                     </td>
                     <td>
                         <input

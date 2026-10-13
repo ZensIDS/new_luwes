@@ -46,7 +46,7 @@
                                                 <th>Sub total</th>
                                             </tr>
                                             @php $totalCost = 0; @endphp
-                                            @foreach ($value->items as $item)
+                                            @foreach ($value->displayItems() as $item)
                                                 <tr>
                                                     <td>{{ $item->product->name }}</td>
                                                     <td>{{ $item->qty }}</td>

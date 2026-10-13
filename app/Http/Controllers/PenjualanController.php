@@ -10,11 +10,13 @@ use App\Models\Stock;
 use App\Models\User;
 use App\Models\Voucher;
 use App\Services\CashierSaleService;
+use App\Services\SaleCancellationService;
 use App\Support\OutletAccess;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 use PDF;
 use RuntimeException;
 
@@ -85,7 +87,7 @@ class PenjualanController extends Controller
      * relasi hanya dimuat untuk baris di halaman itu. Search berbasis AWALAN (LIKE 'kata%'):
      * kode invoice, serta kode/nama produk dan serial number pada item.
      */
-    public function getIndexData(Request $request)
+    public function getIndexData(Request $request, SaleCancellationService $cancellation)
     {
         $user = $request->user();
         $isCashier = $user->role === 'kasir';
@@ -169,22 +171,33 @@ class PenjualanController extends Controller
             'outlet:id,name',
             'kasir:id,name',
             'cashierShift',
+            'cashierSession:id,status',
             'voucher',
             // withTrashed: produk yang sudah di-soft-delete tetap tampil di riwayat penjualan
             'items.product' => fn ($q) => $q->withTrashed()->select('id', 'code', 'name'),
         ])
+            ->withCount('refundPenjualans')
             ->whereIn('id', $pageIds)
             ->get()
             ->sortBy(fn ($penjualan) => $order[$penjualan->id])
             ->values();
 
-        $data = $penjualans->map(function ($value) use ($canManageSales) {
+        $data = $penjualans->map(function ($value) use ($canManageSales, $cancellation, $user) {
             $aksi = '<a class="btn btn-info" href="' . e(route('penjualan.show', $value->id)) . '">Show</a> '
                 . '<a class="btn btn-warning" href="' . e(route('penjualan.print', $value->id)) . '">Re-Print</a>';
             if ($canManageSales) {
-                $aksi .= ' <form action="' . e(route('penjualan.destroy', $value->id)) . '" method="post" style="display:inline;">'
-                    . method_field('delete') . csrf_field()
-                    . '<button class="border-0 btn btn-danger" onclick="return confirm(\'Are you sure?\')">Hapus</button></form>';
+                $block = $cancellation->blockReason($value, $user);
+                if ($block) {
+                    $aksi .= ' <button type="button" class="border-0 btn btn-danger" disabled title="' . e($block) . '">Hapus</button>';
+                } else {
+                    $aksi .= ' <form action="' . e(route('penjualan.destroy', $value->id)) . '" method="post" class="form-delete-sale" style="display:inline;"'
+                        . ' data-code="' . e($value->code) . '"'
+                        . ' data-items="' . (int) $value->items->count() . '"'
+                        . ' data-qty="' . (int) $value->items->sum('qty') . '">'
+                        . method_field('delete') . csrf_field()
+                        . '<input type="hidden" name="reason" value="">'
+                        . '<button type="button" class="border-0 btn btn-danger btn-delete-sale">Hapus</button></form>';
+                }
             }
 
             return [
@@ -292,9 +305,10 @@ class PenjualanController extends Controller
         ], 201);
     }
 
-    public function show(Penjualan $penjualan)
+    public function show(Penjualan $penjualan, SaleCancellationService $cancellation)
     {
         $this->ensurePenjualanAccess($penjualan);
+        $penjualan->loadMissing('cashierSession');
 
         // dd($penjualan->load(['kasir', 'customer', 'items.product'])->toArray());
         // $pdf = PDF::loadView('penjualan.penjualan_pdf', ['penjualan' => $penjualan]);
@@ -302,6 +316,8 @@ class PenjualanController extends Controller
         // return $pdf->download('penjualan_'.$penjualan->id.'.pdf');
         return view('penjualan.show', [
             'penjualan' => $penjualan,
+            'canManageSales' => auth()->user()->role !== 'staff-outlet',
+            'deleteBlock' => $cancellation->blockReason($penjualan, auth()->user()),
         ]);
     }
 
@@ -330,14 +346,42 @@ class PenjualanController extends Controller
     //     return redirect(route('penjualan.index'))->with('toast_success', 'Berhasil Menyimpan Data!');
     // }
 
-    public function destroy(Penjualan $penjualan)
+    /**
+     * Hapus penjualan = batalkan: stok kembali ke batch asal, voucher bisa dipakai lagi
+     * (lihat SaleCancellationService). Alasan wajib untuk penjualan outlet/kasir.
+     * Penjualan marketplace (outlet_id null) hanya di-soft-delete seperti sebelumnya.
+     */
+    public function destroy(Request $request, Penjualan $penjualan, SaleCancellationService $cancellation)
     {
         $this->ensurePenjualanAccess($penjualan);
         // staff-outlet hanya boleh melihat penjualan
         abort_if(auth()->user()->role === 'staff-outlet', 403, 'Staff outlet tidak dapat menghapus penjualan.');
 
-        $penjualan->delete();
+        $validator = Validator::make($request->all(), [
+            'reason' => [$penjualan->outlet_id ? 'required' : 'nullable', 'string', 'min:5', 'max:255'],
+        ], [
+            'reason.required' => 'Alasan penghapusan wajib diisi.',
+            'reason.min' => 'Alasan penghapusan minimal 5 karakter.',
+            'reason.max' => 'Alasan penghapusan maksimal 255 karakter.',
+        ]);
+        if ($validator->fails()) {
+            return back()->with('toast_error', $validator->errors()->first());
+        }
 
-        return redirect(route('penjualan.index'))->with('toast_success', 'Berhasil Menghapus Data!');
+        try {
+            $summary = $cancellation->cancel($penjualan, $request->user(), $request->input('reason'));
+        } catch (RuntimeException $e) {
+            return back()->with('toast_error', $e->getMessage());
+        }
+
+        $message = 'Berhasil menghapus penjualan.';
+        if ($penjualan->outlet_id !== null) {
+            $message = "Penjualan dihapus. Stok {$summary['items']} item (total qty {$summary['qty']}) dikembalikan.";
+            if ($summary['skipped'] > 0) {
+                $message .= " {$summary['skipped']} item tanpa batch stok tidak dapat dikembalikan otomatis.";
+            }
+        }
+
+        return redirect(route('penjualan.index'))->with('toast_success', $message);
     }
 }

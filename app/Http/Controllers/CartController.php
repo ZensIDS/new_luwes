@@ -34,6 +34,8 @@ class CartController extends Controller
                 ->get();
             // Syarat sama persis dengan query $ownerStocks di atas -> cukup dijumlahkan dari hasilnya (hemat 1 query per item).
             $item->availableStock = $ownerStocks->sum('qty');
+            // Qty di keranjang yang melebihi stok sistem: tetap boleh dijual (jadi stok minus), hanya ditandai.
+            $item->oversold_qty = max(0, max(1, (int) $item->pivot->qty) - (int) $item->availableStock);
 
             $rule = OutletPrice::with('outlet')->where('outlet_id', $outletId)
                 ->where('product_id', $item->id)
@@ -65,6 +67,42 @@ class CartController extends Controller
                 ];
                 $remainingQty -= $allocatedQty;
             }
+
+            // Sisa qty di atas stok sistem dihitung sebagai alokasi batch MINUS dengan harga yang
+            // sama seperti checkout, supaya total di layar = total saat bayar.
+            if ($remainingQty > 0) {
+                $price = $calculator->calculateItem($latestHpp, $rule, $item);
+                $firstPrice ??= $price;
+                $allocations[] = [
+                    'cart_index' => $cartIndex,
+                    'product' => $item,
+                    'ownerStock' => new OwnerStock([
+                        'qty' => 0,
+                        'hpp' => $latestHpp,
+                        'batch_number' => OwnerStock::DEFICIT_BATCH,
+                    ]),
+                    'qty' => $remainingQty,
+                    'price' => $price,
+                    'base_line_total' => (int) ($price['price'] * $remainingQty),
+                    'line_total' => (int) ($price['price'] * $remainingQty),
+                ];
+                $remainingQty = 0;
+            }
+        }
+
+        // Batch expired berstok di sistem (tidak ikut dijual). Hanya untuk peringatan non-blokir di baris keranjang.
+        $expiredQtyByProduct = $cart->isEmpty() ? collect() : OwnerStock::query()
+            ->where('owner_id', $outletId)
+            ->whereIn('product_id', $cart->pluck('id')->all())
+            ->notDeficit()
+            ->where('qty', '>', 0)
+            ->whereNotNull('expired_at')
+            ->where('expired_at', '<', today()->toDateString())
+            ->selectRaw('product_id, SUM(qty) as qty')
+            ->groupBy('product_id')
+            ->pluck('qty', 'product_id');
+        foreach ($cart as $item) {
+            $item->expired_qty = (int) ($expiredQtyByProduct[$item->id] ?? 0);
         }
 
         $activePromotions = $promotionService->activeForOutlet($outletId);
@@ -115,28 +153,17 @@ class CartController extends Controller
             $outletId = OutletAccess::id($request);
             $product = Product::where('code', $request->barcode)->firstOrFail();
 
-            $stockQty = OwnerStock::where('owner_id', $outletId)
-                ->where('product_id', $product->id)
-                ->where('qty', '>', 0)
-                ->where(function ($expiryQuery) {
-                    $expiryQuery->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
-                })
-                ->sum('qty');
+            // Stok sistem tidak membatasi penjualan: bila melebihi stok, kelebihannya menjadi
+            // stok minus saat checkout (lihat CashierSaleService) dan hanya ditandai di keranjang.
             $cart = $request->user()->cart()
                 ->wherePivot('outlet_id', (string) $outletId)
                 ->where('products.id', $product->id)
                 ->first();
 
             if ($cart) {
-                if ($stockQty <= $cart->pivot->qty) {
-                    return response(['message' => 'Stok outlet tersedia hanya: ' . $stockQty], 400);
-                }
                 $cart->pivot->qty++;
                 $cart->pivot->save();
             } else {
-                if ($stockQty < 1) {
-                    return response(['message' => 'Produk tidak memiliki stok di outlet ini.'], 400);
-                }
                 $request->user()->cart()->attach($product->id, [
                     'qty' => 1,
                     'outlet_id' => $outletId,
@@ -161,17 +188,6 @@ class CartController extends Controller
             ]);
             $outletId = OutletAccess::id($request);
             $product = Product::findOrFail($request->product_id);
-
-            $stockQty = OwnerStock::where('owner_id', $outletId)
-                ->where('product_id', $product->id)
-                ->where('qty', '>', 0)
-                ->where(function ($expiryQuery) {
-                    $expiryQuery->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
-                })
-                ->sum('qty');
-            if ($stockQty < $request->qty) {
-                return response(['message' => 'Stok outlet tersedia hanya: ' . $stockQty], 400);
-            }
 
             $cart = $request->user()->cart()
                 ->wherePivot('outlet_id', (string) $outletId)

@@ -11,6 +11,8 @@ use App\Models\RequestOrder;
 use App\Models\RequestOrderItem;
 use App\Models\Stock;
 use App\Models\Supplier;
+use App\Services\DeficitStockService;
+use App\Services\ExpiredStockService;
 use App\Services\LowStockService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -31,6 +33,14 @@ class DashboardController extends Controller
                 'isStaffOutletDashboard' => true,
                 'outletRequestTotal' => (clone $requestOrdersBase)->count(),
                 'outletRequestPending' => (clone $requestOrdersBase)->where('status', 'pending')->count(),
+                // Notice stok minus hanya untuk admin outlet (staff-outlet), bukan kasir.
+                'outletDeficitCount' => $user->role === 'staff-outlet' && $user->outlet_id
+                    ? app(DeficitStockService::class)->countOpen((int) $user->outlet_id)
+                    : null,
+                // Notice stok expired untuk admin outlet (staff-outlet), bukan kasir.
+                'outletExpiry' => $user->role === 'staff-outlet' && $user->outlet_id
+                    ? app(ExpiredStockService::class)->summary((int) $user->outlet_id)
+                    : null,
             ]);
         }
 
@@ -173,6 +183,7 @@ class DashboardController extends Controller
             'website' => $settings['website'] ?? '',
             'logo'    => $settings['logo'] ?? '',
             'returnPinConfigured' => filled($settings['return_pin_hash'] ?? null),
+            'expiryWarningDays' => app(ExpiredStockService::class)->warningDays(),
         ]);
     }
 
@@ -188,6 +199,11 @@ class DashboardController extends Controller
         ];
         if (auth()->user()?->role === 'superadmin') {
             $rules['return_pin'] = 'nullable|digits_between:4,8';
+        }
+        // Ambang notice "akan expired": hanya owner / superadmin yang boleh mengubah.
+        $canSetExpiry = in_array(auth()->user()?->role, ['superadmin', 'owner'], true);
+        if ($canSetExpiry) {
+            $rules['expiry_warning_days'] = 'nullable|integer|min:1|max:365';
         }
 
         $this->validate($request, $rules, [
@@ -207,6 +223,9 @@ class DashboardController extends Controller
 
         if (auth()->user()?->role === 'superadmin' && $request->filled('return_pin')) {
             $data['return_pin_hash'] = Hash::make((string) $request->input('return_pin'));
+        }
+        if ($canSetExpiry && $request->filled('expiry_warning_days')) {
+            $data['expiry_warning_days'] = (int) $request->input('expiry_warning_days');
         }
         unset($data['return_pin']);
 

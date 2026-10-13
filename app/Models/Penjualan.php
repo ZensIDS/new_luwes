@@ -33,6 +33,8 @@ class Penjualan extends Model
         'payment_method_name',
         'payment_reference',
         'status',
+        'delete_reason',
+        'deleted_by',
     ];
 
     protected $casts = [
@@ -82,6 +84,11 @@ class Penjualan extends Model
         return $this->belongsTo(Voucher::class);
     }
 
+    public function deleter()
+    {
+        return $this->belongsTo(User::class, 'deleted_by');
+    }
+
     public function salesman()
     {
         return $this->belongsTo(Salesman::class);
@@ -95,6 +102,56 @@ class Penjualan extends Model
     public function items()
     {
         return $this->hasMany(PenjualanItem::class);
+    }
+
+    /**
+     * Item untuk TAMPILAN (halaman penjualan, detail, struk).
+     *
+     * Satu produk yang diambil dari beberapa batch stok disimpan sebagai beberapa baris
+     * penjualan_items (stok/HPP/retur butuh pencatatan per batch). Pembeli dan kasir tidak
+     * perlu melihat pecahan batch itu, jadi baris dengan produk, harga, dan serial yang sama (termasuk
+     * baris stok minus/oversold, yang digabung ke produk yang sama)
+     * digabung: qty dan subtotal dijumlahkan. Data di database TIDAK diubah.
+     *
+     * Hasilnya model PenjualanItem tiruan (jangan di-save).
+     */
+    public function displayItems()
+    {
+        $groups = [];
+
+        foreach ($this->items as $item) {
+            $key = implode('|', [
+                $item->product_id,
+                $item->serial_number ?? '',
+                (float) $item->price,
+            ]);
+
+            $lineSubtotal = $item->subtotal ?? ((int) $item->qty * (float) $item->price);
+            $lineBase = $item->base_subtotal;
+
+            if (! isset($groups[$key])) {
+                $merged = clone $item;
+                $merged->setAttribute('qty', (int) $item->qty);
+                $merged->setAttribute('subtotal', $lineSubtotal);
+                $merged->setAttribute('base_subtotal', $lineBase);
+                $merged->setAttribute('promotion_discount', (float) ($item->promotion_discount ?? 0));
+                $merged->setAttribute('is_oversold', (bool) $item->is_oversold);
+                $groups[$key] = $merged;
+
+                continue;
+            }
+
+            $merged = $groups[$key];
+            $merged->setAttribute('qty', (int) $merged->qty + (int) $item->qty);
+            $merged->setAttribute('is_oversold', (bool) $merged->is_oversold || (bool) $item->is_oversold);
+            $merged->setAttribute('subtotal', (float) $merged->subtotal + (float) $lineSubtotal);
+            if ($lineBase !== null || $merged->base_subtotal !== null) {
+                $merged->setAttribute('base_subtotal', (float) ($merged->base_subtotal ?? 0) + (float) ($lineBase ?? $lineSubtotal));
+            }
+            $merged->setAttribute('promotion_discount', (float) $merged->promotion_discount + (float) ($item->promotion_discount ?? 0));
+        }
+
+        return collect(array_values($groups));
     }
 
     public function refundPenjualans()

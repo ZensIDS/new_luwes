@@ -95,6 +95,7 @@
                                     <option value="">Semua Status</option>
                                     <option value="available" {{ request('status') === 'available' ? 'selected' : '' }}>Available</option>
                                     <option value="empty" {{ request('status') === 'empty' ? 'selected' : '' }}>Empty</option>
+                                    <option value="minus" {{ request('status') === 'minus' ? 'selected' : '' }}>Minus</option>
                                     <option value="expired" {{ request('status') === 'expired' ? 'selected' : '' }}>Expired</option>
                                 </select>
                             </div>
@@ -270,10 +271,13 @@
                     { data: 'qty_in' },
                     { data: 'qty_out' },
                     { data: 'adjustment' },
-                    { data: 'qty', render: function (v, type, row) { return '<strong>' + v + '</strong> ' + escapeHtml(row.satuan); } },
+                    { data: 'qty', render: function (v, type, row) {
+                        // Saldo negatif (stok minus) diberi warna merah.
+                        return '<strong' + (v < 0 ? ' class="text-danger"' : '') + '>' + v + '</strong> ' + escapeHtml(row.satuan);
+                    } },
                     { data: 'expired_at', render: function (v) { return v ? escapeHtml(v) : '-'; } },
                     { data: 'status', render: function (v) {
-                        var cls = v === 'available' ? 'success' : (v === 'expired' ? 'danger' : 'default');
+                        var cls = v === 'available' ? 'success' : ((v === 'expired' || v === 'minus') ? 'danger' : 'default');
                         return '<span class="label label-' + cls + '">' + escapeHtml(v) + '</span>';
                     } },
                     { data: null, render: function (data, type, row) {

@@ -14,6 +14,8 @@ const ProductSearchModal = ({ open, inputRef, search, onSearch, products, produc
 
     if (!open) return null;
 
+    const hasSearchTerm = String(search || "").trim().length >= 2;
+
     return (
         <div
             role="dialog"
@@ -40,9 +42,10 @@ const ProductSearchModal = ({ open, inputRef, search, onSearch, products, produc
                         autoComplete="off"
                     />
                     <p className="text-muted small">Tekan Tab lalu Enter untuk memilih produk, atau klik produk untuk memasukkannya ke transaksi.</p>
-                    {productsLoading && <p className="text-muted text-center">Memuat produk outlet...</p>}
-                    {!productsLoading && !products.length && <p className="text-muted text-center">Produk tidak ditemukan di outlet ini.</p>}
-                    {!productsLoading && <Gallery products={products} addProductToCart={onAddProduct} />}
+                    {!hasSearchTerm && <p className="text-muted">Ketik minimal 2 karakter untuk mencari produk.</p>}
+                    {hasSearchTerm && productsLoading && <p className="text-muted">Memuat produk outlet...</p>}
+                    {hasSearchTerm && !productsLoading && !products.length && <p className="text-muted">Produk tidak ditemukan di outlet ini.</p>}
+                    {hasSearchTerm && !productsLoading && products.length > 0 && <Gallery products={products} addProductToCart={onAddProduct} />}
                 </div>
             </div>
         </div>
@@ -201,11 +204,12 @@ const Cart = () => {
 
         window.clearTimeout(productSearchTimerRef.current);
 
-        // Pencarian 1 karakter hanya menghasilkan ratusan baris dan beban query besar,
-        // jadi tidak dikirim ke server (kosong = daftar default, >= 2 karakter = cari).
-        if (!immediate && String(term || "").trim().length === 1) {
+        // Daftar produk hanya diisi bila ada pencarian (>= 2 karakter). Kosong atau 1 karakter:
+        // batalkan request yang berjalan dan kosongkan daftar, tidak ada daftar default.
+        if (String(term || "").trim().length < 2) {
             productsRequestRef.current?.abort();
             productsRequestRef.current = null;
+            setProducts([]);
             setProductsLoading(false);
             return;
         }
@@ -241,7 +245,6 @@ const Cart = () => {
 
     useEffect(() => {
         loadCart();
-        loadProducts("", true);
         loadCustomers();
         loadPaymentMethods();
         const focusTimer = setTimeout(() => barcodeRef.current?.focus(), 100);

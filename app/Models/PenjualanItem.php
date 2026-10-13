@@ -14,6 +14,7 @@ class PenjualanItem extends Model
         'product_id',
         'stock_id',
         'owner_stock_id',
+        'is_oversold',
         'qty',
         'price',
         'subtotal',
@@ -49,6 +50,7 @@ class PenjualanItem extends Model
 
     protected $casts = [
         'hpp' => 'float',
+        'is_oversold' => 'boolean',
         'pajak_value' => 'float',
         'pajak_amount' => 'float',
         'hpp_setelah_pajak' => 'float',

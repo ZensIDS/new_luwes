@@ -39,7 +39,7 @@
         $tinyFont = $paper === '58' ? '6pt' : '6.75pt';
         $itemNameFont = $paper === '58' ? '7pt' : '8pt';
         $totalFont = $paper === '58' ? '9.5pt' : '11.5pt';
-        $items = $penjualan->items;
+        $items = $penjualan->displayItems();
         $itemCount = $items->sum(fn ($item) => (int) $item->qty);
         // Rincian per item dihitung dari satu sumber supaya semua angka di struk saling menjumlah:
         // harga normal x qty - diskon toko - diskon rafaksi = subtotal item.

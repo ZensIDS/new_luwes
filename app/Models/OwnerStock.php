@@ -12,6 +12,13 @@ class OwnerStock extends Model
     use SoftDeletes;
     use LogsActivity;
 
+    /**
+     * Nama batch khusus untuk stok minus: penjualan yang melebihi stok sistem
+     * dicatat ke batch ini (qty negatif) dan ditutup oleh penerimaan barang berikutnya.
+     * Satu baris per (outlet, produk).
+     */
+    public const DEFICIT_BATCH = 'MINUS';
+
     protected $fillable = [
         'owner_id',
         'product_id',
@@ -30,6 +37,23 @@ class OwnerStock extends Model
         'expired_at' => 'date',
         'hpp' => 'float',
     ];
+
+    public function isDeficit(): bool
+    {
+        return $this->batch_number === self::DEFICIT_BATCH;
+    }
+
+    public function scopeDeficit($query)
+    {
+        return $query->where('batch_number', self::DEFICIT_BATCH);
+    }
+
+    public function scopeNotDeficit($query)
+    {
+        return $query->where(function ($where) {
+            $where->whereNull('batch_number')->orWhere('batch_number', '!=', self::DEFICIT_BATCH);
+        });
+    }
 
     public function owner()
     {

@@ -14,6 +14,8 @@ use Illuminate\Support\Collection;
  * ada batch tersedia, dipakai batch terbaru apa pun; bila outlet belum punya batch
  * sama sekali, dipakai harga_beli produk.
  *
+ * Batch MINUS (stok minus) tidak pernah dipakai sebagai sumber HPP.
+ *
  * Service ini TIDAK mengubah HPP batch. HPP tiap batch tetap dipakai untuk
  * pembukuan stok (nilai persediaan, kartu stok, biaya pokok penjualan).
  */
@@ -24,6 +26,7 @@ class LatestHpp
     {
         $base = fn () => OwnerStock::where('owner_id', $outletId)
             ->where('product_id', $productId)
+            ->notDeficit()
             ->orderByDesc('created_at')
             ->orderByDesc('id');
 
@@ -63,6 +66,7 @@ class LatestHpp
             $available = $newestPerProduct(
                 OwnerStock::where('owner_id', $outletId)
                     ->whereIn('product_id', $ids->all())
+                    ->notDeficit()
                     ->where('qty', '>', 0)
                     ->where(function ($query) {
                         $query->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
@@ -77,6 +81,7 @@ class LatestHpp
                 : $newestPerProduct(
                     OwnerStock::where('owner_id', $outletId)
                         ->whereIn('product_id', $missing->all())
+                        ->notDeficit()
                         ->orderByDesc('created_at')->orderByDesc('id')
                         ->get(['id', 'product_id', 'hpp'])
                 );

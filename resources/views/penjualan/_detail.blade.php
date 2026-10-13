@@ -7,7 +7,7 @@
             <th>Sub total</th>
         </tr>
         @php $totalCost = 0; @endphp
-        @foreach ($value->items as $item)
+        @foreach ($value->displayItems() as $item)
             <tr>
                 <td>{{ $item->serial_number ? $item->serial_number : $item->product?->code }} - {{ $item->product?->name ?? '(produk dihapus)' }}</td>
                 <td>{{ $item->qty }}</td>

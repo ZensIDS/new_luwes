@@ -47,6 +47,54 @@
                 </div>
             </div>
         </div>
+        @if (($outletDeficitCount ?? null) !== null && $outletDeficitCount > 0)
+        <div class="row">
+            <div class="col-md-6">
+                <div class="small-box bg-red">
+                    <div class="inner">
+                        <h3>{{ number_format($outletDeficitCount) }}</h3>
+                        <p>Produk Stok Minus, Perlu Dicek</p>
+                    </div>
+                    <div class="icon"><i class="fa fa-minus-circle"></i></div>
+                    <a href="{{ route('deficit-stocks.index') }}" class="small-box-footer">
+                        Lihat Stok Minus <i class="fa fa-arrow-circle-right"></i>
+                    </a>
+                </div>
+            </div>
+        </div>
+        @endif
+        @if (! empty($outletExpiry) && ($outletExpiry['expired'] > 0 || $outletExpiry['soon'] > 0))
+        <div class="row">
+            @if ($outletExpiry['expired'] > 0)
+            <div class="col-md-6">
+                <div class="small-box bg-red">
+                    <div class="inner">
+                        <h3>{{ number_format($outletExpiry['expired']) }}</h3>
+                        <p>Batch Sudah Expired{{ $outletExpiry['combo'] > 0 ? ' ('.$outletExpiry['combo'].' produk juga minus, cek fisik)' : '' }}</p>
+                    </div>
+                    <div class="icon"><i class="fa fa-calendar-times-o"></i></div>
+                    <a href="{{ route('expired-stocks.index') }}" class="small-box-footer">
+                        Lihat Stok Expired <i class="fa fa-arrow-circle-right"></i>
+                    </a>
+                </div>
+            </div>
+            @endif
+            @if ($outletExpiry['soon'] > 0)
+            <div class="col-md-6">
+                <div class="small-box bg-yellow">
+                    <div class="inner">
+                        <h3>{{ number_format($outletExpiry['soon']) }}</h3>
+                        <p>Batch Akan Expired &le; {{ $outletExpiry['days'] }} Hari</p>
+                    </div>
+                    <div class="icon"><i class="fa fa-hourglass-half"></i></div>
+                    <a href="{{ route('expired-stocks.index', ['tab' => 'soon']) }}" class="small-box-footer">
+                        Lihat Stok Expired <i class="fa fa-arrow-circle-right"></i>
+                    </a>
+                </div>
+            </div>
+            @endif
+        </div>
+        @endif
         @else
         <!-- Baris 1: STAT CARDS -->
         <div class="row">

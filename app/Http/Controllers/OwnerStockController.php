@@ -9,6 +9,7 @@ use App\Models\OutletPurchaseItem;
 use App\Models\Product;
 use App\Models\StockMovement;
 use App\Models\Supplier;
+use App\Services\DeficitStockService;
 use App\Services\OutletStockService;
 use App\Services\OwnerKartuStokBuilder;
 use App\Support\OutletAccess;
@@ -159,7 +160,10 @@ class OwnerStockController extends Controller
         } elseif ($status === 'available') {
             $grouped->havingRaw("{$expiredExpr} = 0 AND SUM(os.qty) > 0");
         } elseif ($status === 'empty') {
-            $grouped->havingRaw("{$expiredExpr} = 0 AND SUM(os.qty) <= 0");
+            $grouped->havingRaw("{$expiredExpr} = 0 AND SUM(os.qty) = 0");
+        } elseif ($status === 'minus') {
+            // Saldo bersih negatif: ada penjualan melebihi stok sistem yang belum ditutup.
+            $grouped->havingRaw('SUM(os.qty) < 0');
         }
 
         $recordsFiltered = DB::query()->fromSub($grouped, 'g')->count();
@@ -196,7 +200,9 @@ class OwnerStockController extends Controller
                 'qty' => $qty,
                 'satuan' => $row->satuan ?? '',
                 'expired_at' => $expiredAt,
-                'status' => $expiredAt && $expiredAt < $today ? 'expired' : ($qty > 0 ? 'available' : 'empty'),
+                'status' => $qty < 0
+                    ? 'minus'
+                    : ($expiredAt && $expiredAt < $today ? 'expired' : ($qty > 0 ? 'available' : 'empty')),
             ];
         });
 
@@ -420,6 +426,9 @@ class OwnerStockController extends Controller
         return view('owner-stocks.opname', [
             'outlets' => $outlets,
             'selectedOwner' => $selectedOwner,
+            // Batch MINUS tidak punya supplier sehingga tidak muncul di daftar opname;
+            // minus dicek/ditutup lewat halaman Stok Minus.
+            'deficitCount' => $selectedOwner ? app(DeficitStockService::class)->countOpen($selectedOwner->id) : 0,
             'suppliers' => $this->supplierOptions($this->scopeOutletIds($outlets, $selectedOwner), true),
             'categoryOptions' => $this->categoryOptions(),
             'locationOptions' => $this->locationOptions(),

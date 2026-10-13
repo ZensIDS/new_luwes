@@ -145,7 +145,7 @@
 
         {{-- Stok Toko (superadmin, admin-gudang, staff-outlet, owner, kasir) --}}
         @if (in_array($role, ['superadmin', 'admin-gudang', 'staff-outlet', 'owner', 'kasir']))
-        <li class="treeview {{ request()->is('owner-stock*') || request()->is('owner-stocks*') ? 'active' : '' }}">
+        <li class="treeview {{ request()->is('owner-stock*') || request()->is('owner-stocks*') || request()->is('stok-minus*') ? 'active' : '' }}">
             <a href="#"><i class="fa fa-cubes"></i><span>Stok Toko</span><i class="fa fa-angle-left pull-right"></i></a>
             <ul class="treeview-menu">
                 <li class="{{ request()->routeIs('owner-stocks.index') ? 'active' : '' }}">
@@ -157,6 +157,26 @@
                 <li class="{{ request()->routeIs('owner-stock-opname') ? 'active' : '' }}">
                     <a href="{{ route('owner-stock-opname') }}"><i class="fa fa-cube"></i><span>Opname Toko</span></a>
                 </li>
+                @if (in_array($role, ['superadmin', 'owner', 'staff-outlet']))
+                <li class="{{ request()->is('stok-minus*') ? 'active' : '' }}">
+                    <a href="{{ route('deficit-stocks.index') }}">
+                        <i class="fa fa-minus-circle"></i><span>Stok Minus</span>
+                        @if (($deficitCount ?? 0) > 0)
+                            <span class="label label-danger pull-right">{{ $deficitCount }}</span>
+                        @endif
+                    </a>
+                </li>
+                <li class="{{ request()->is('stok-expired*') ? 'active' : '' }}">
+                    <a href="{{ route('expired-stocks.index') }}">
+                        <i class="fa fa-calendar-times-o"></i><span>Stok Expired</span>
+                        @if (($expirySummary['expired'] ?? 0) > 0)
+                            <span class="label label-danger pull-right">{{ $expirySummary['expired'] }}</span>
+                        @elseif (($expirySummary['soon'] ?? 0) > 0)
+                            <span class="label label-warning pull-right">{{ $expirySummary['soon'] }}</span>
+                        @endif
+                    </a>
+                </li>
+                @endif
             </ul>
         </li>
         @endif

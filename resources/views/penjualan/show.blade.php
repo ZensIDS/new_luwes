@@ -59,7 +59,7 @@
                                     <th>Sub total</th>
                                 </tr>
                                 @php $totalCost = 0; @endphp
-                                @foreach ($penjualan->items as $item)
+                                @foreach ($penjualan->displayItems() as $item)
                                     <tr>
                                         <td>{{ $item->serial_number ? $item->serial_number : $item->product?->code }} - {{ $item->product->name }}</td>
                                         <td>{{ $item->qty }}</td>
@@ -116,9 +116,30 @@
                     </div><!-- /.box-body -->
                     <div class="box-footer">
                         <a href="{{ route('penjualan.index') }}" class="btn btn-default">Kembali</a>
+                        @if ($canManageSales)
+                            @if ($deleteBlock)
+                                <button type="button" class="btn btn-danger" disabled title="{{ $deleteBlock }}">Hapus Penjualan</button>
+                                <span class="text-muted" style="margin-left:8px">{{ $deleteBlock }}</span>
+                            @else
+                                <form action="{{ route('penjualan.destroy', $penjualan->id) }}" method="post" class="form-delete-sale"
+                                    style="display:inline;" data-code="{{ $penjualan->code }}"
+                                    data-items="{{ $penjualan->items->count() }}" data-qty="{{ $penjualan->items->sum('qty') }}">
+                                    @method('delete')
+                                    @csrf
+                                    <input type="hidden" name="reason" value="">
+                                    <button type="button" class="btn btn-danger btn-delete-sale">Hapus Penjualan</button>
+                                </form>
+                            @endif
+                        @endif
                     </div>
                 </div><!-- /.box -->
             </div><!-- /.col -->
         </div><!-- /.row -->
     </section><!-- /.content -->
+@endsection
+
+@section('page-script')
+    @if ($canManageSales && ! $deleteBlock)
+        @include('penjualan._delete-script')
+    @endif
 @endsection

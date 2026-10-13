@@ -51,6 +51,30 @@
             </div>
         </div>
 
+        @if (($deficitCount ?? 0) > 0)
+            <div class="alert alert-warning" style="margin:8px 0;">
+                <i class="fa fa-exclamation-triangle"></i>
+                Ada <b>{{ $deficitCount }}</b> produk stok minus, perlu dicek.
+                <a href="{{ route('deficit-stocks.index', ['outlet_id' => $outlet->id]) }}" class="alert-link">Lihat Stok Minus</a>
+            </div>
+        @endif
+
+        @if ($expirySummary && ($expirySummary['expired'] > 0 || $expirySummary['soon'] > 0))
+            <div class="alert alert-{{ $expirySummary['expired'] > 0 ? 'danger' : 'warning' }}" style="margin:8px 0;">
+                <i class="fa fa-calendar-times-o"></i>
+                @if ($expirySummary['expired'] > 0)
+                    <b>{{ $expirySummary['expired'] }}</b> batch sudah expired
+                    @if ($expirySummary['soon'] > 0), <b>{{ $expirySummary['soon'] }}</b> batch akan expired &le; {{ $expirySummary['days'] }} hari @endif.
+                @else
+                    <b>{{ $expirySummary['soon'] }}</b> batch akan expired &le; {{ $expirySummary['days'] }} hari.
+                @endif
+                @if ($expirySummary['combo'] > 0)
+                    <b>{{ $expirySummary['combo'] }}</b> produk expired sekaligus minus, cek fisik.
+                @endif
+                <a href="{{ route('expired-stocks.index', ['outlet_id' => $outlet->id]) }}" class="alert-link">Lihat Stok Expired</a>
+            </div>
+        @endif
+
         @if (! $cashierSession)
             <div class="cashier-open-gate">
                 <div class="cashier-open-card">

@@ -18,7 +18,8 @@ class CashierSaleService
     public function __construct(
         private readonly PriceCalculator $calculator,
         private readonly OutletStockService $stockService,
-        private readonly PromotionService $promotionService
+        private readonly PromotionService $promotionService,
+        private readonly InvoiceNumberGenerator $invoiceNumbers
     ) {}
 
     public function checkout(Authenticatable $user, array $data): Penjualan
@@ -88,8 +89,27 @@ class CashierSaleService
                     $remaining -= $qty;
                 }
 
+                // Stok sistem tidak cukup (barang fisik ada tapi belum tercatat): sisanya dijual dari
+                // batch MINUS sehingga saldonya negatif dan nanti ditutup oleh penerimaan barang.
                 if ($remaining > 0) {
-                    throw new RuntimeException("Stok outlet untuk {$product->name} tidak mencukupi.");
+                    $deficitStock = $this->stockService->deficitStock($outletId, (int) $product->id, (float) $latestHpp, $user);
+                    $price = $this->calculator->calculateItem(
+                        $latestHpp,
+                        $rules->get($product->id),
+                        $product
+                    );
+                    $lineTotal = (int) ($price['price'] * $remaining);
+                    $allocations[] = [
+                        'product' => $product,
+                        'ownerStock' => $deficitStock,
+                        'qty' => $remaining,
+                        'price' => $price,
+                        'line_total' => $lineTotal,
+                        'remaining_total' => $lineTotal,
+                    ];
+                    $subtotal += $lineTotal;
+                    $discountTotal += (int) ($price['disc_toko_amount'] * $remaining);
+                    $remaining = 0;
                 }
             }
 
@@ -137,12 +157,9 @@ class CashierSaleService
                 throw new RuntimeException('Uang Diterima (F9) kurang dari Grand Total.');
             }
 
-            $lastOrder = Penjualan::where('outlet_id', $outletId)
-                ->lockForUpdate()
-                ->latest('id')
-                ->first();
-            $nextNumber = $lastOrder ? ((int) preg_replace('/\D+/', '', (string) $lastOrder->code) + 1) : 1;
-            $code = 'INV'.str_pad((string) $nextNumber, 6, '0', STR_PAD_LEFT);
+            // Nomor invoice berisi outlet + kasir + tanggal + urutan dari counter terkunci,
+            // jadi tidak mungkin kembar walau dua checkout berjalan bersamaan.
+            $code = $this->invoiceNumbers->next($outletId, (int) $user->getAuthIdentifier());
 
             $order = Penjualan::create([
                 'code' => $code,
@@ -184,6 +201,7 @@ class CashierSaleService
                     'stock_id' => $ownerStock->stock_id,
                     'owner_stock_id' => $ownerStock->id,
                     'qty' => $qty,
+                    'is_oversold' => $ownerStock->isDeficit(),
                     'price' => $this->calculator->money($allocation['line_total'] / max(1, $qty)),
                     'subtotal' => $allocation['line_total'],
                     'base_price' => $this->calculator->money($allocation['base_line_total'] / max(1, $qty)),
@@ -199,7 +217,8 @@ class CashierSaleService
                     Penjualan::class,
                     $order->id,
                     $user,
-                    "Penjualan {$order->code} - {$product->name}"
+                    "Penjualan {$order->code} - {$product->name}",
+                    $ownerStock->isDeficit()
                 );
             }
 
@@ -232,7 +251,9 @@ class CashierSaleService
             $user->cart()->wherePivot('outlet_id', (string) $outletId)->detach();
 
             return $order->load(['items.product', 'cashierShift', 'vouchers', 'promotionApplications.promotion', 'paymentMethod']);
-        });
+            // 3 percobaan: bila MySQL membatalkan salah satu transaksi karena deadlock,
+            // Laravel mengulang checkout otomatis (semua langkahnya ada di dalam transaksi).
+        }, 3);
     }
 
     private function lockedStocksForCartItem($product, int $outletId)

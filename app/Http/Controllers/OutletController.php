@@ -6,6 +6,8 @@ use App\Http\Requests\OutletRequest;
 use App\Models\CashierSession;
 use App\Models\Kas;
 use App\Models\Outlet;
+use App\Services\DeficitStockService;
+use App\Services\ExpiredStockService;
 use App\Support\OutletAccess;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -81,6 +83,14 @@ class OutletController extends Controller
             'cashierSession' => $cashierSession,
             'cashierSummary' => $cashierSession?->summary(),
             'suggestedOpeningCash' => $lastClosedSession?->carry_over_cash ?? 1000000,
+            // Banner "ada N produk stok minus": hanya untuk admin outlet / owner / superadmin, bukan kasir.
+            'deficitCount' => in_array($request->user()->role, ['staff-outlet', 'owner', 'superadmin'], true)
+                ? app(DeficitStockService::class)->countOpen($outlet->id)
+                : 0,
+            // Notice stok expired (sudah expired / akan expired): admin outlet / owner / superadmin saja.
+            'expirySummary' => in_array($request->user()->role, ['staff-outlet', 'owner', 'superadmin'], true)
+                ? app(ExpiredStockService::class)->summary($outlet->id)
+                : null,
         ]);
     }
 

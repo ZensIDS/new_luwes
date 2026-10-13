@@ -27,6 +27,14 @@
     <section class="content">
         <div class="row">
             <div class="col-xs-12">
+                @if (($deficitCount ?? 0) > 0 && in_array(auth()->user()->role, ['superadmin', 'owner', 'staff-outlet']))
+                    <div class="alert alert-warning">
+                        <i class="fa fa-exclamation-triangle"></i>
+                        Outlet ini punya <b>{{ $deficitCount }}</b> produk stok minus. Stok minus tidak muncul di opname per supplier;
+                        cek fisiknya lalu catat penerimaan atau tutup lewat
+                        <a href="{{ route('deficit-stocks.index', ['outlet_id' => $selectedOwner->id]) }}" class="alert-link">halaman Stok Minus</a>.
+                    </div>
+                @endif
                 <div class="box">
                     <div class="box-header">
                         <h3 class="box-title"><strong>STOCK OPNAME TOKO</strong></h3>

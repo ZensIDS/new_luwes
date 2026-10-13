@@ -4,6 +4,7 @@ Revisi Luwes
     [x] Error saat penerimaan barang (before delivery completed)
     [x] Check all search with front key
     [x] Check all pagination page & datatable query method
+    [x] Check bug on penjualan
 [x] Master Harga
     [x] Tambah data terakhir di check
     [x] Tambah note di master
