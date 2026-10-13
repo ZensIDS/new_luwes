@@ -110,8 +110,11 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::resource('/stock', StockController::class)->only(['index'])->middleware('role:superadmin|admin-gudang|owner|staff-outlet');
     Route::resource('/stock', StockController::class)->except(['index'])->middleware('role:superadmin|admin-gudang|owner');
     Route::resource('/outlet-prices', App\Http\Controllers\OutletPriceController::class)->except(['show']);
+    Route::post('/outlet-prices/products', [App\Http\Controllers\OutletPriceController::class, 'storeProduct'])->name('outlet-prices.products.store');
     Route::get('/outlet-prices/products/search', [App\Http\Controllers\OutletPriceController::class, 'searchProducts'])->middleware('throttle:120,1,search')->name('outlet-prices.products.search');
     Route::get('/outlet-prices/preview-hpp', [App\Http\Controllers\OutletPriceController::class, 'previewHpp'])->name('outlet-prices.preview-hpp');
+    Route::get('/outlet-prices/{outletPrice}/hpp-history', [App\Http\Controllers\OutletPriceController::class, 'hppHistory'])->name('outlet-prices.hpp-history');
+    Route::post('/outlet-prices/{outletPrice}/touch', [App\Http\Controllers\OutletPriceController::class, 'touch'])->name('outlet-prices.touch');
     Route::resource('/outlet-purchases', App\Http\Controllers\OutletPurchaseController::class)->only(['index', 'create', 'store', 'show']);
     Route::get('/owner-stock-kartu', [App\Http\Controllers\OwnerStockController::class, 'kartu'])->name('owner-stocks.kartu');
     Route::get('/owner-stock-kartu/data', [App\Http\Controllers\OwnerStockController::class, 'getKartuData'])->name('owner-stocks.kartu.data');

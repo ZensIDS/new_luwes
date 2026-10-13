@@ -7,6 +7,8 @@
     $storeDiscType = old('disc_toko_type', $price->disc_toko_type ?: 'nominal');
     $taxType = old('pajak_type', $price->pajak_type ?: 'percentage');
     $adjustmentType = old('outlet_adjustment_type', $price->outlet_adjustment_type ?: 'nominal');
+    // Panel "Daftarkan Produk Baru" otomatis terbuka lagi bila validasinya gagal.
+    $openNewProduct = $errors->newProduct->any() && old('_new_product');
 @endphp
 
 @section('title', $price->exists ? 'Edit Aturan Harga Jual' : 'Tambah Aturan Harga Jual')
@@ -30,6 +32,172 @@
                     @endforeach
                 </ul>
             </div>
+        @endif
+
+        @if (! $price->exists && isset($categories))
+            <div style="margin-bottom:15px;">
+                <button type="button" class="btn btn-primary" id="toggle-new-product-form"
+                    aria-controls="new-product-panel" aria-expanded="{{ $openNewProduct ? 'true' : 'false' }}">
+                    <i class="fa fa-plus-square"></i> Daftarkan Produk Baru
+                </button>
+                <span class="text-muted" style="margin-left:8px;">Barangnya belum ada di daftar produk? Daftarkan dulu di sini.</span>
+            </div>
+        {{-- Form daftar produk baru: tersembunyi sampai tombol "Daftarkan Produk Baru" diklik (bukan popup) --}}
+        <div class="box box-success" id="new-product-panel" style="{{ $openNewProduct ? '' : 'display:none;' }}">
+            <div class="box-header with-border">
+                <h3 class="box-title"><i class="fa fa-plus-square"></i> Daftarkan Produk Baru</h3>
+                <div class="box-tools pull-right">
+                    <button type="button" class="btn btn-box-tool" id="close-new-product-form" title="Tutup">
+                        <i class="fa fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            <form action="{{ route('outlet-prices.products.store') }}" method="POST" id="new-product-form" autocomplete="off">
+                @csrf
+                <input type="hidden" name="_new_product" value="1">
+                <input type="hidden" name="outlet_id" id="new-product-outlet-id" value="">
+                <div class="box-body">
+                    @if ($openNewProduct)
+                        <div class="alert alert-danger">
+                            <strong>Produk belum tersimpan. Periksa kembali input berikut:</strong>
+                            <ul style="margin-bottom:0;margin-top:8px">
+                                @foreach ($errors->newProduct->all() as $error)
+                                    <li>{{ $error }}</li>
+                                @endforeach
+                            </ul>
+                        </div>
+                    @endif
+                    <p class="text-muted">
+                        Cari dulu lewat pilihan <em>Produk</em> di form harga di bawah. Daftarkan di sini hanya jika
+                        barangnya benar-benar belum ada. Barcode tidak boleh sama dengan produk lain.
+                    </p>
+
+                    <div class="row">
+                        <div class="col-md-6 form-group {{ $errors->newProduct->has('name') ? 'has-error' : '' }}">
+                            <label>Nama <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="name" value="{{ old('name') }}" placeholder="Masukkan Nama">
+                            @error('name', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                        <div class="col-md-6 form-group {{ $errors->newProduct->has('code') ? 'has-error' : '' }}">
+                            <label>Barcode <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="code" value="{{ old('code') }}" placeholder="Scan / masukkan barcode">
+                            @error('code', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-4 form-group {{ $errors->newProduct->has('category_id') ? 'has-error' : '' }}">
+                            <label>Category <span class="text-danger">*</span></label>
+                            <select class="form-control np-select2" name="category_id" data-placeholder="Pilih Category" style="width:100%;">
+                                <option value=""></option>
+                                @foreach ($categories as $category)
+                                    <option value="{{ $category->id }}" {{ old('category_id') == $category->id ? 'selected' : '' }}>
+                                        {{ $category->name }}</option>
+                                @endforeach
+                            </select>
+                            @error('category_id', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                        <div class="col-md-4 form-group {{ $errors->newProduct->has('satuan_besar') ? 'has-error' : '' }}">
+                            <label>Satuan Besar</label>
+                            <input type="text" class="form-control" id="np-satuan-besar" name="satuan_besar"
+                                value="{{ old('satuan_besar') }}" placeholder="karton / box / lusin">
+                            @error('satuan_besar', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                        <div class="col-md-4 form-group {{ $errors->newProduct->has('satuan') ? 'has-error' : '' }}">
+                            <label>Satuan Kecil</label>
+                            <input type="text" class="form-control" id="np-satuan" name="satuan"
+                                value="{{ old('satuan') }}" placeholder="Contoh: Pcs, Kg">
+                            @error('satuan', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-4 form-group {{ $errors->newProduct->has('konversi_qty') ? 'has-error' : '' }}">
+                            <label>Isi Konversi</label>
+                            <input type="text" class="form-control np-integer-only" id="np-konversi" name="konversi_qty"
+                                value="{{ old('konversi_qty') }}" inputmode="numeric" placeholder="12">
+                            <span class="help-block" id="np-konversi-hint">Contoh: 1 karton = 12 pcs, isi 12.</span>
+                            @error('konversi_qty', 'newProduct')<span class="help-block text-danger">{{ $message }}</span>@enderror
+                        </div>
+                        <div class="col-md-5 form-group {{ $errors->newProduct->has('harga_beli') ? 'has-error' : '' }}">
+                            <label>Harga Beli <span class="text-danger">*</span></label>
+                            <div class="input-group">
+                                <span class="input-group-addon">Rp</span>
+                                <input type="text" inputmode="numeric" data-currency-input data-currency-decimals="0"
+                                    class="form-control" id="np-harga-beli" name="harga_beli"
+                                    value="{{ old('harga_beli', 0) }}" placeholder="Harga sesuai nota supplier">
+                            </div>
+                            @error('harga_beli', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                        <div class="col-md-3 form-group {{ $errors->newProduct->has('harga_beli_per') ? 'has-error' : '' }}">
+                            <label>Harga beli per</label>
+                            <select class="form-control" id="np-harga-per" name="harga_beli_per">
+                                <option value="besar" {{ old('harga_beli_per', 'besar') === 'besar' ? 'selected' : '' }}>Satuan Besar</option>
+                                <option value="kecil" {{ old('harga_beli_per', 'besar') === 'kecil' ? 'selected' : '' }}>Satuan Kecil</option>
+                            </select>
+                            @error('harga_beli_per', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                        <div class="col-md-12">
+                            <p class="help-block" id="np-hpp-hint" style="margin-top:0;"></p>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-12 form-group {{ $errors->newProduct->has('supplier_ids') || $errors->newProduct->has('supplier_ids.*') ? 'has-error' : '' }}">
+                            <label>Supplier</label>
+                            <select class="form-control np-select2" name="supplier_ids[]" multiple data-placeholder="Pilih Supplier" style="width:100%;">
+                                @foreach ($suppliers as $supplier)
+                                    <option value="{{ $supplier->id }}"
+                                        {{ in_array($supplier->id, old('supplier_ids', [])) ? 'selected' : '' }}>{{ $supplier->name }}</option>
+                                @endforeach
+                            </select>
+                            @error('supplier_ids', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
+                            @error('supplier_ids.*', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                    </div>
+
+                    <a href="#" id="toggle-new-product-extra"><i class="fa fa-caret-right"></i> Tampilkan field lainnya (opsional)</a>
+                    <div id="new-product-extra" class="row" style="display:none; margin-top:10px;">
+                        <div class="col-md-6 form-group {{ $errors->newProduct->has('brand') ? 'has-error' : '' }}">
+                            <label>Brand</label>
+                            <input type="text" class="form-control" name="brand" value="{{ old('brand') }}" placeholder="Masukkan Brand">
+                            @error('brand', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                        <div class="col-md-6 form-group {{ $errors->newProduct->has('min_stock') ? 'has-error' : '' }}">
+                            <label>Minimum Stock</label>
+                            <input type="text" class="form-control np-integer-only" name="min_stock" value="{{ old('min_stock', 0) }}" placeholder="0">
+                            @error('min_stock', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                        <div class="col-md-6 form-group {{ $errors->newProduct->has('warna') ? 'has-error' : '' }}">
+                            <label>Warna</label>
+                            <input type="text" class="form-control" name="warna" value="{{ old('warna') }}" placeholder="Masukkan Warna">
+                            @error('warna', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                        <div class="col-md-6 form-group {{ $errors->newProduct->has('ukuran') ? 'has-error' : '' }}">
+                            <label>Ukuran</label>
+                            <input type="text" class="form-control" name="ukuran" value="{{ old('ukuran') }}" placeholder="Masukkan Ukuran">
+                            @error('ukuran', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                        <div class="col-md-6 form-group {{ $errors->newProduct->has('model') ? 'has-error' : '' }}">
+                            <label>Model</label>
+                            <input type="text" class="form-control" name="model" value="{{ old('model') }}" placeholder="Masukkan Model">
+                            @error('model', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                        <div class="col-md-6 form-group {{ $errors->newProduct->has('lokasi') ? 'has-error' : '' }}">
+                            <label>Lokasi</label>
+                            <input type="text" class="form-control" name="lokasi" value="{{ old('lokasi') }}" placeholder="Contoh: Rak A, Gudang 1">
+                            @error('lokasi', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                    </div>
+                </div>
+                <div class="box-footer">
+                    <button type="button" class="btn btn-default" id="cancel-new-product-form">Batal</button>
+                    <button type="submit" class="btn btn-success" id="submit-new-product-form">
+                        <i class="fa fa-save"></i> Simpan &amp; Atur Harga
+                    </button>
+                </div>
+            </form>
+        </div>
         @endif
 
         <form method="POST" action="{{ $action }}" id="price-rule-form">
@@ -191,6 +359,19 @@
                                         @error('disc_toko_value') <span class="help-block text-danger">{{ $message }}</span> @enderror
                                     </div>
                                 </div>
+                                <div class="row">
+                                    <div class="col-sm-8 col-sm-offset-4 form-group">
+                                        <label for="target_netto">Atau isi Harga Netto yang diinginkan</label>
+                                        <div class="input-group">
+                                            <span class="input-group-addon">Rp</span>
+                                            <input id="target_netto" type="text" inputmode="numeric" data-currency-input
+                                                data-currency-decimals="0" class="form-control" autocomplete="off"
+                                                placeholder="Contoh: 5000 (persen diskon toko dihitung otomatis)">
+                                        </div>
+                                        <p class="help-block" id="target-netto-hint" style="margin-bottom:0;"></p>
+                                        <a href="#" id="target-use-nominal" style="display:none;"></a>
+                                    </div>
+                                </div>
                             </div>
 
                             <div class="price-rule-card price-rule-tax">
@@ -222,7 +403,7 @@
                                 <div class="row">
                                     <div class="col-sm-4">
                                         <h4 style="margin-top:0">Penyesuaian Harga Outlet</h4>
-                                        <p class="text-muted small">Tambahan harga untuk Beauty atau outlet lain. Default Rp0.</p>
+                                        <p class="text-muted small">Tambahan harga untuk Beauty atau outlet lain. Default Rp0, otomatis Rp100 untuk outlet tertentu.</p>
                                     </div>
                                     <div class="col-sm-4 form-group">
                                         <label for="outlet_adjustment_type">Tipe Penyesuaian</label>
@@ -256,6 +437,13 @@
                                         value="{{ old('effective_until', optional($price->effective_until)->format('Y-m-d')) }}">
                                     @error('effective_until') <span class="help-block text-danger">{{ $message }}</span> @enderror
                                 </div>
+                            </div>
+
+                            <div class="form-group" style="margin-top:15px">
+                                <label for="note">Catatan</label>
+                                <textarea id="note" name="note" rows="3" maxlength="500" class="form-control"
+                                    placeholder="Catatan untuk aturan harga ini (opsional, maks. 500 karakter)">{{ old('note', $price->note) }}</textarea>
+                                @error('note') <span class="help-block text-danger">{{ $message }}</span> @enderror
                             </div>
 
                             <label class="price-active-toggle">
@@ -311,14 +499,136 @@
             </div>
 
             <div class="box-footer" style="padding-left:0;padding-right:0">
-                <a class="btn btn-default" href="{{ route('outlet-prices.index') }}"><i class="fa fa-arrow-left"></i> Kembali</a>
+                @if ($price->exists)
+                    {{-- Kembali tetap memperbarui updated_at (POST ke form terpisah di bawah, bukan form harga) --}}
+                    <button type="submit" form="outlet-price-back-form" class="btn btn-default"><i class="fa fa-arrow-left"></i> Kembali</button>
+                @else
+                    <a class="btn btn-default" href="{{ route('outlet-prices.index', array_filter(['outlet_id' => $price->outlet_id ?: request('outlet_id')])) }}"><i class="fa fa-arrow-left"></i> Kembali</a>
+                @endif
                 <button type="submit" class="btn btn-primary pull-right"><i class="fa fa-save"></i> Simpan Aturan Harga</button>
             </div>
         </form>
+
+        @if ($price->exists)
+            <form id="outlet-price-back-form" method="POST" action="{{ route('outlet-prices.touch', $price) }}" style="display:none">
+                @csrf
+            </form>
+        @endif
     </section>
 @endsection
 
 @section('page-script')
+    @if (! $price->exists && isset($categories))
+    <script>
+        $(function () {
+            var $panel = $('#new-product-panel');
+            var $toggleBtn = $('#toggle-new-product-form');
+            var select2Ready = false;
+
+            function initNewProductSelect2() {
+                if (select2Ready) { return; }
+                select2Ready = true;
+                $('.np-select2').each(function () {
+                    $(this).select2({
+                        placeholder: $(this).data('placeholder'),
+                        allowClear: true,
+                        width: '100%'
+                    });
+                });
+            }
+
+            function openPanel() {
+                $panel.slideDown(150, function () {
+                    initNewProductSelect2();
+                    $panel.find('input[name="name"]').trigger('focus');
+                });
+                $toggleBtn.attr('aria-expanded', 'true');
+            }
+
+            function closePanel() {
+                $panel.slideUp(150);
+                $toggleBtn.attr('aria-expanded', 'false');
+            }
+
+            $toggleBtn.on('click', function () {
+                $panel.is(':visible') ? closePanel() : openPanel();
+            });
+            $('#close-new-product-form, #cancel-new-product-form').on('click', closePanel);
+
+            $('#toggle-new-product-extra').on('click', function (e) {
+                e.preventDefault();
+                $('#new-product-extra').slideToggle(150);
+                $(this).find('i').toggleClass('fa-caret-right fa-caret-down');
+            });
+
+            // Hanya angka untuk Isi Konversi & Minimum Stock
+            $(document).on('input', '.np-integer-only', function () {
+                var cleaned = $(this).val().replace(/[^0-9]/g, '');
+                if ($(this).val() !== cleaned) { $(this).val(cleaned); }
+            });
+
+            // ---- Harga beli per satuan besar -> HPP per satuan kecil (konversi otomatis) ----
+            function parseId(v) {
+                v = String(v || '').replace(/\./g, '').replace(',', '.');
+                var n = Number(v);
+                return isFinite(n) ? n : 0;
+            }
+            function fmt(n) {
+                return Number(n).toLocaleString('id-ID', { maximumFractionDigits: 2 });
+            }
+            function refreshHarga() {
+                var besar = $.trim($('#np-satuan-besar').val());
+                var kecil = $.trim($('#np-satuan').val());
+                var konv = parseId($('#np-konversi').val());
+                var harga = parseId($('#np-harga-beli').val());
+                var per = $('#np-harga-per').val();
+                var $hint = $('#np-hpp-hint');
+
+                $('#np-harga-per option[value="besar"]').text('Satuan Besar' + (besar ? ' (' + besar + ')' : ''));
+                $('#np-harga-per option[value="kecil"]').text('Satuan Kecil' + (kecil ? ' (' + kecil + ')' : ''));
+                $('#np-konversi-hint').text(besar && konv > 0
+                    ? '1 ' + besar + ' = ' + konv + ' ' + (kecil || 'satuan kecil')
+                    : 'Contoh: 1 karton = 12 pcs, isi 12.');
+
+                if (per === 'besar') {
+                    if (!besar || konv < 1) {
+                        $hint.attr('class', 'help-block text-warning')
+                            .text('Isi Satuan Besar dan Isi Konversi supaya HPP per satuan kecil bisa dihitung otomatis.');
+                    } else if (harga > 0) {
+                        $hint.attr('class', 'help-block text-success')
+                            .text('HPP per ' + (kecil || 'satuan kecil') + ' = Rp' + fmt(harga / konv)
+                                + ' (Rp' + fmt(harga) + ' ÷ ' + fmt(konv) + ')');
+                    } else {
+                        $hint.attr('class', 'help-block').text('');
+                    }
+                } else {
+                    $hint.attr('class', 'help-block').text(harga > 0
+                        ? 'Harga beli disimpan apa adanya sebagai HPP per ' + (kecil || 'satuan kecil') + '.'
+                        : '');
+                }
+            }
+            $('#np-satuan-besar, #np-satuan, #np-konversi, #np-harga-beli, #np-harga-per')
+                .on('input change keyup', refreshHarga);
+            refreshHarga();
+
+            // Outlet diambil dari pilihan outlet di form harga; cegah klik ganda saat menyimpan
+            $('#new-product-form').on('submit', function () {
+                $('#new-product-outlet-id').val($('#outlet_id').val() || '');
+                $('#submit-new-product-form').prop('disabled', true);
+            });
+
+            // Validasi gagal: panel sudah terbuka dari server
+            if ($panel.is(':visible')) {
+                initNewProductSelect2();
+                @if ($errors->newProduct->hasAny(['brand', 'min_stock', 'warna', 'ukuran', 'model', 'lokasi']))
+                    $('#new-product-extra').show();
+                    $('#toggle-new-product-extra i').removeClass('fa-caret-right').addClass('fa-caret-down');
+                @endif
+                $('html, body').animate({ scrollTop: $panel.offset().top - 60 }, 200);
+            }
+        });
+    </script>
+    @endif
     <style>
         .price-rule-card {
             border: 1px solid #e5e7eb;
@@ -406,6 +716,156 @@
                 return type === 'percentage' ? base * value / 100 : Math.max(0, value);
             }
 
+            // ===== Harga Netto yang diinginkan -> persen Diskon Toko dihitung otomatis =====
+            const OUTLET_ADJUSTMENT_DEFAULTS = @json($outletAdjustmentDefaults ?? new \stdClass);
+            const IS_CREATE_MODE = @json(! $price->exists);
+            let applyingTarget = false;
+            let adjustmentAutoFilled = false;
+            let targetNominal = null;
+
+            function targetNetto() {
+                const raw = $.trim($('#target_netto').val());
+                return raw === '' ? null : Math.max(0, round(number('#target_netto')));
+            }
+
+            function percentText(n) {
+                return Number(n).toLocaleString('id-ID', { maximumFractionDigits: 2 });
+            }
+
+            function nettoFromPreAdjustment(price) {
+                const adjustment = round(addition(price, $('#outlet_adjustment_type').val(), number('#outlet_adjustment_value')));
+                return round(price) + adjustment;
+            }
+
+            function setTargetHint(kind, text) {
+                $('#target-netto-hint').attr('class', 'help-block text-' + kind).text(text);
+            }
+
+            function clearTarget() {
+                $('#target_netto').val('');
+                $('#target-netto-hint').attr('class', 'help-block').text('');
+                $('#target-use-nominal').hide();
+                targetNominal = null;
+            }
+
+            function setStoreDiscount(type, valueText) {
+                if ($('#disc_toko_type').val() !== type) {
+                    $('#disc_toko_type').val(type).trigger('change.select2');
+                    syncPrefixes();
+                }
+                $('#disc_toko_value').val(valueText);
+            }
+
+            // Hitung persen Diskon Toko supaya Harga Netto = target (netto sudah termasuk penyesuaian outlet).
+            function applyTargetNetto(hargaAktif) {
+                const target = targetNetto();
+                const $nominalLink = $('#target-use-nominal').hide();
+                targetNominal = null;
+                if (target === null || applyingTarget) { return; }
+                applyingTarget = true;
+                try {
+                    if (hargaAktif <= 0) {
+                        setStoreDiscount('percentage', '0');
+                        setTargetHint('warning', 'Harga Aktif masih Rp0, belum ada yang bisa didiskon. Lengkapi HPP dan margin dulu.');
+                        return;
+                    }
+
+                    const maxNetto = nettoFromPreAdjustment(hargaAktif);   // netto tanpa diskon toko
+                    if (target >= maxNetto) {
+                        setStoreDiscount('percentage', '0');
+                        setTargetHint(target > maxNetto ? 'warning' : 'success',
+                            target > maxNetto
+                                ? 'Netto ' + money(target) + ' lebih tinggi dari netto tanpa diskon toko (' + money(maxNetto) + '). Diskon toko diset 0%.'
+                                : 'Netto ' + money(target) + ' sama dengan netto tanpa diskon toko, diskon toko 0%.');
+                        return;
+                    }
+
+                    // Cari harga sebelum penyesuaian (P) yang menghasilkan netto = target.
+                    const adjType = $('#outlet_adjustment_type').val();
+                    const adjValue = number('#outlet_adjustment_value');
+                    const guess = adjType === 'percentage' ? target / (1 + adjValue / 100) : target - adjValue;
+                    let bestPrice = Math.min(hargaAktif, Math.max(0, round(guess)));
+                    let bestDiff = Math.abs(nettoFromPreAdjustment(bestPrice) - target);
+                    for (let d = -3; d <= 3; d++) {
+                        const candidate = round(guess) + d;
+                        if (candidate < 0 || candidate > hargaAktif) { continue; }
+                        const diff = Math.abs(nettoFromPreAdjustment(candidate) - target);
+                        if (diff < bestDiff) { bestPrice = candidate; bestDiff = diff; }
+                    }
+                    const discountAmount = hargaAktif - bestPrice;
+
+                    // Persen disimpan 2 desimal (kolom decimal 15,2): coba sekitar nilai eksak, ambil yang paling pas.
+                    const exactPct = discountAmount / hargaAktif * 100;
+                    const basePct = Math.round(exactPct * 100) / 100;
+                    let pct = basePct;
+                    let pctNetto = null;
+                    [0, -0.01, 0.01, -0.02, 0.02].forEach(function (delta) {
+                        const candidate = Math.min(100, Math.max(0, Math.round((basePct + delta) * 100) / 100));
+                        const store = round(hargaAktif * candidate / 100);
+                        const netto = nettoFromPreAdjustment(hargaAktif - store);
+                        if (pctNetto === null || Math.abs(netto - target) < Math.abs(pctNetto - target)) {
+                            pct = candidate;
+                            pctNetto = netto;
+                        }
+                    });
+
+                    setStoreDiscount('percentage', String(pct));
+                    const storeAmount = round(hargaAktif * pct / 100);
+
+                    if (pctNetto === target) {
+                        setTargetHint('success', 'Diskon Toko = ' + percentText(pct) + '% (' + money(storeAmount)
+                            + ' dari Harga Aktif ' + money(hargaAktif) + ') → Netto ' + money(target));
+                    } else {
+                        targetNominal = discountAmount;
+                        setTargetHint('warning', 'Dengan persen 2 desimal, netto jadi ' + money(pctNetto) + ' (selisih '
+                            + money(Math.abs(pctNetto - target)) + ' dari target). ');
+                        $nominalLink.text('Pakai nominal ' + money(discountAmount) + ' agar netto tepat ' + money(target)).show();
+                    }
+                } finally {
+                    applyingTarget = false;
+                }
+            }
+
+            $('#target-use-nominal').on('click', function (e) {
+                e.preventDefault();
+                if (targetNominal === null) { return; }
+                const amount = targetNominal;
+                clearTarget();
+                $('#disc_toko_type').val('nominal').trigger('change');
+                $('#disc_toko_value').val(String(amount));
+                window.initCurrencyInputs?.($('#disc_toko_value')[0]);
+                updatePreview();
+            });
+
+            // Isi manual Diskon Toko = user memilih cara sendiri, kalkulator netto dimatikan.
+            $('#disc_toko_value').on('input', clearTarget);
+            $('#disc_toko_type').on('change', clearTarget);
+
+            // ===== Penyesuaian Outlet otomatis (mis. outlet ID 2 = Rp100) =====
+            function applyOutletAdjustmentDefault(initial) {
+                if (!IS_CREATE_MODE) { return; }
+                const defaultValue = OUTLET_ADJUSTMENT_DEFAULTS[$('#outlet_id').val()];
+                const $value = $('#outlet_adjustment_value');
+
+                if (defaultValue !== undefined) {
+                    if (initial && number('#outlet_adjustment_value') > 0) { return; } // jangan timpa isian yang sudah ada
+                    $('#outlet_adjustment_type').val('nominal').trigger('change.select2');
+                    syncPrefixes();
+                    $value.val(String(defaultValue));
+                    window.initCurrencyInputs?.($value[0]);
+                    adjustmentAutoFilled = true;
+                } else if (adjustmentAutoFilled) {
+                    $value.val('0');
+                    window.initCurrencyInputs?.($value[0]);
+                    adjustmentAutoFilled = false;
+                }
+                updatePreview();
+            }
+
+            $('#outlet_adjustment_value').on('input', function () { adjustmentAutoFilled = false; });
+            $('#outlet_adjustment_type').on('change', function () { adjustmentAutoFilled = false; });
+            $('#outlet_id').on('change', function () { applyOutletAdjustmentDefault(false); });
+
             function updatePreview() {
                 const hpp = round(number('#preview_hpp'));
                 const tax = round(addition(hpp, $('#pajak_type').val(), number('#pajak_value')));
@@ -418,6 +878,7 @@
                     ? round(hargaDasar * number('#margin_value') / 100)
                     : round(number('#margin_value'));
                 const hargaAktif = round(hargaDasar + margin);
+                applyTargetNetto(hargaAktif);
                 const store = round(discount(hargaAktif, $('#disc_toko_type').val(), number('#disc_toko_value')));
                 const hargaSebelumPenyesuaian = Math.max(0, round(hargaAktif - store));
                 const adjustment = round(addition(hargaSebelumPenyesuaian, $('#outlet_adjustment_type').val(), number('#outlet_adjustment_value')));
@@ -437,11 +898,15 @@
                 $('#preview-net').text(money(hargaNetto));
             }
 
-            function updatePrefixes() {
+            function syncPrefixes() {
                 $('.price-prefix').each(function () {
                     const type = $('#' + $(this).data('for')).val();
                     $(this).text(type === 'percentage' ? '%' : 'Rp');
                 });
+            }
+
+            function updatePrefixes() {
+                syncPrefixes();
                 updatePreview();
             }
 
@@ -473,6 +938,7 @@
                 updatePreview();
             });
             updatePrefixes();
+            applyOutletAdjustmentDefault(true);
         });
     </script>
 @endsection

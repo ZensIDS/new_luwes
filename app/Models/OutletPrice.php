@@ -28,6 +28,7 @@ class OutletPrice extends Model
         'effective_from',
         'effective_until',
         'is_active',
+        'note',
         'created_by',
     ];
 

@@ -3,12 +3,12 @@ Revisi Luwes
 [ ] Note
     [x] Error saat penerimaan barang (before delivery completed)
     [ ] Check all search with front key
-[ ] Master Harga
-    [ ] Tambah data terakhir di check
-    [ ] Tambah note di master
-    [ ] Check print label
-    [ ] Auto isi disc toko sesuai harga yang di inginkan
-    [ ] Bisa tambah barang sekalian, bisa edit barang sekalian, setting harga sekalian tanpa bolak balik
+[x] Master Harga
+    [x] Tambah data terakhir di check
+    [x] Tambah note di master
+    [x] Check print label
+    [x] Auto isi disc toko sesuai harga yang di inginkan
+    [x] Bisa tambah barang sekalian, bisa edit barang sekalian, setting harga sekalian tanpa bolak balik
 [ ] Belanja Langsung Toko
     [ ] tidak langsung masuk stock toko
 [ ] Voucher

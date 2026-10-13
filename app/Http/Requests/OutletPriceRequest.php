@@ -33,6 +33,7 @@ class OutletPriceRequest extends FormRequest
             'effective_from' => 'nullable|date',
             'effective_until' => 'nullable|date|after_or_equal:effective_from',
             'is_active' => 'nullable|boolean',
+            'note' => 'nullable|string|max:500',
             'hpp' => 'nullable|numeric|min:0',
             'hpp_changed' => 'nullable|boolean',
         ];
@@ -48,6 +49,7 @@ class OutletPriceRequest extends FormRequest
             'pajak_value' => IndonesianNumber::parse($this->input('pajak_value')),
             'outlet_adjustment_value' => IndonesianNumber::parse($this->input('outlet_adjustment_value')),
             'hpp' => IndonesianNumber::parse($this->input('hpp')),
+            'note' => $this->filled('note') ? trim((string) $this->input('note')) : null,
         ]);
     }
 }
