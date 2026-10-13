@@ -20,7 +20,7 @@
             <a href="/dashboard"><i class="fa fa-tachometer"></i><span>Dashboard</span></a>
         </li>
         @if ($role === 'kasir')
-            <li class="{{ request()->is('penjualan*') || request()->routeIs('outlet.show') ? 'active' : '' }}">
+            <li class="{{ request()->is('penjualan/create') || request()->is('cashier*') || request()->routeIs('outlet.show') ? 'active' : '' }}">
                 <a href="{{ route('penjualan.create') }}"><i class="fa fa-shopping-cart"></i><span>Kasir POS</span></a>
             </li>
         @endif
@@ -55,7 +55,7 @@
 
         {{-- Outlet (superadmin only) --}}
         @if ($role === 'superadmin')
-        <li class="{{ in_array(Route::currentRouteName(), ['outlet.index', 'outlet.create', 'outlet.edit']) ? 'active' : '' }}">
+        <li class="{{ request()->is('outlet') || request()->is('outlet/*') ? 'active' : '' }}">
             <a href="/outlet"><i class="fa fa-bank"></i><span>Outlet/Toko</span></a>
         </li>
         @endif
@@ -99,14 +99,14 @@
         <li class="treeview {{ request()->is('stock*') ? 'active' : '' }}">
             <a href="#"><i class="fa fa-cubes"></i><span>Stok Gudang</span><i class="fa fa-angle-left pull-right"></i></a>
             <ul class="treeview-menu">
-                <li class="{{ request()->routeIs('stock.index') ? 'active' : '' }}">
+                <li class="{{ request()->is('stock*') && ! request()->is('stock-kartu*') && ! request()->is('stock-opname*') && ! request()->is('stock/kartu*') ? 'active' : '' }}">
                     <a href="/stock"><i class="fa fa-cubes"></i><span>Stok Gudang</span></a>
                 </li>
-                <li class="{{ request()->routeIs('stock.kartu') ? 'active' : '' }}">
+                <li class="{{ request()->is('stock-kartu*') || request()->is('stock/kartu*') ? 'active' : '' }}">
                     <a href="/stock-kartu"><i class="fa fa-cube"></i><span>Kartu Stok Gudang</span></a>
                 </li>
                 @if ($role !== 'staff-outlet')
-                <li class="{{ request()->routeIs('stock.opname') ? 'active' : '' }}">
+                <li class="{{ request()->is('stock-opname*') ? 'active' : '' }}">
                     <a href="/stock-opname"><i class="fa fa-cube"></i><span>Stock Opname Gudang</span></a>
                 </li>
                 @endif
@@ -145,16 +145,16 @@
 
         {{-- Stok Toko (superadmin, admin-gudang, staff-outlet, owner, kasir) --}}
         @if (in_array($role, ['superadmin', 'admin-gudang', 'staff-outlet', 'owner', 'kasir']))
-        <li class="treeview {{ request()->is('owner-stock*') || request()->is('owner-stocks*') || request()->is('stok-minus*') ? 'active' : '' }}">
+        <li class="treeview {{ request()->is('owner-stock*') || request()->is('owner-stocks*') || request()->is('stok-minus*') || request()->is('stok-expired*') ? 'active' : '' }}">
             <a href="#"><i class="fa fa-cubes"></i><span>Stok Toko</span><i class="fa fa-angle-left pull-right"></i></a>
             <ul class="treeview-menu">
-                <li class="{{ request()->routeIs('owner-stocks.index') ? 'active' : '' }}">
+                <li class="{{ request()->is('owner-stocks*') ? 'active' : '' }}">
                     <a href="{{ route('owner-stocks.index') }}"><i class="fa fa-cubes"></i><span>Stock Toko</span></a>
                 </li>
-                <li class="{{ request()->routeIs('owner-stocks.kartu') ? 'active' : '' }}">
+                <li class="{{ request()->is('owner-stock-kartu*') ? 'active' : '' }}">
                     <a href="{{ route('owner-stocks.kartu') }}"><i class="fa fa-cube"></i><span>Kartu Stock Toko</span></a>
                 </li>
-                <li class="{{ request()->routeIs('owner-stock-opname') ? 'active' : '' }}">
+                <li class="{{ request()->is('owner-stock-opname*') ? 'active' : '' }}">
                     <a href="{{ route('owner-stock-opname') }}"><i class="fa fa-cube"></i><span>Opname Toko</span></a>
                 </li>
                 @if (in_array($role, ['superadmin', 'owner', 'staff-outlet']))
@@ -166,7 +166,7 @@
                         @endif
                     </a>
                 </li>
-                <li class="{{ request()->is('stok-expired*') ? 'active' : '' }}">
+                {{-- <li class="{{ request()->is('stok-expired*') ? 'active' : '' }}">
                     <a href="{{ route('expired-stocks.index') }}">
                         <i class="fa fa-calendar-times-o"></i><span>Stok Expired</span>
                         @if (($expirySummary['expired'] ?? 0) > 0)
@@ -175,7 +175,7 @@
                             <span class="label label-warning pull-right">{{ $expirySummary['soon'] }}</span>
                         @endif
                     </a>
-                </li>
+                </li> --}}
                 @endif
             </ul>
         </li>
@@ -194,7 +194,7 @@
 
         {{-- Penjualan (superadmin, staff-outlet, kasir) --}}
         @if (in_array($role, ['superadmin', 'staff-outlet', 'kasir']))
-        <li class="{{ request()->is('penjualan*') ? 'active' : '' }}">
+        <li class="{{ request()->is('penjualan*') && ! ($role === 'kasir' && request()->is('penjualan/create')) ? 'active' : '' }}">
             <a href="{{ route('penjualan.index') }}"><i class="fa fa-file-text"></i><span>Penjualan</span></a>
         </li>
         @endif
@@ -205,17 +205,25 @@
         @if (in_array($role, ['superadmin', 'admin-gudang', 'staff-outlet', 'kasir']))
         @php
             $returBarangActive = request()->is('refundPembelian*') || request()->is('refundPenjualan*');
+            $returRoute = request()->route('refundPembelian');
+            $returType = request()->get('type')
+                ?: (is_object($returRoute) ? $returRoute->type : ($returRoute ? \App\Models\RefundPembelian::withTrashed()->whereKey($returRoute)->value('type') : null));
+            if ($role === 'staff-outlet') {
+                $returType = 'outlet_ke_gudang';
+            } elseif (! $returType && request()->is('refundPembelian*')) {
+                $returType = 'gudang_ke_supplier';
+            }
         @endphp
         <li class="treeview {{ $returBarangActive ? 'active' : '' }}">
             <a href="#"><i class="fa fa-undo"></i><span>Retur Barang</span><i class="fa fa-angle-left pull-right"></i></a>
             <ul class="treeview-menu">
                 @if (in_array($role, ['superadmin', 'admin-gudang']))
-                <li class="{{ request()->is('refundPembelian*') && request()->get('type') === 'gudang_ke_supplier' ? 'active' : '' }}">
+                <li class="{{ request()->is('refundPembelian*') && $returType === 'gudang_ke_supplier' ? 'active' : '' }}">
                     <a href="/refundPembelian?type=gudang_ke_supplier"><i class="fa fa-undo"></i><span>Retur Barang Gudang ke Supplier</span></a>
                 </li>
                 @endif
                 @if (in_array($role, ['superadmin', 'admin-gudang', 'staff-outlet']))
-                <li class="{{ request()->is('refundPembelian*') && request()->get('type') === 'outlet_ke_gudang' ? 'active' : '' }}">
+                <li class="{{ request()->is('refundPembelian*') && $returType === 'outlet_ke_gudang' ? 'active' : '' }}">
                     <a href="/refundPembelian?type=outlet_ke_gudang"><i class="fa fa-undo"></i><span>Retur Barang Toko ke Gudang</span></a>
                 </li>
                 @endif
@@ -230,7 +238,7 @@
 
         {{-- Laporan --}}
         @if (in_array($role, ['superadmin', 'admin-gudang', 'staff-outlet', 'owner']))
-        <li class="{{ in_array(Route::currentRouteName(), ['laporan.index', 'laporan.outlet.index']) ? 'active' : '' }}">
+        <li class="{{ request()->is('laporan*') ? 'active' : '' }}">
             <a href="/laporan"><i class="fa fa-file-excel-o"></i><span>Laporan</span></a>
         </li>
         @endif

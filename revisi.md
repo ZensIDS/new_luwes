@@ -5,6 +5,7 @@ Revisi Luwes
     [x] Check all search with front key
     [x] Check all pagination page & datatable query method
     [x] Check bug on penjualan
+    [x] Check sidebar active bug
 [x] Master Harga
     [x] Tambah data terakhir di check
     [x] Tambah note di master
