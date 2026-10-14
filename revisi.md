@@ -6,6 +6,8 @@ Revisi Luwes
     [x] Check all pagination page & datatable query method
     [x] Check bug on penjualan
     [x] Check sidebar active bug
+    [ ] Check Bug on request-order
+    [ ] Check Bug on picking-list
 [x] Master Harga
     [x] Tambah data terakhir di check
     [x] Tambah note di master
@@ -23,9 +25,9 @@ Revisi Luwes
     [x] nama barang uppercase
     [x] dibagi harga satuan besar (khusus untuk daftar product di halaman master harga)
 
-[ ] Pendapatan lainnya
-    [ ] listing -> product baru -> nominal (setting)
-    [ ] sewa
+[x] Pendapatan lainnya
+    [x] listing -> product baru -> nominal (setting)
+    [x] sewa
 
 [x] Laporan
     [x] Pemisahan Laporan Gudang & Toko

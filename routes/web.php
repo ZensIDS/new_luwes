@@ -15,6 +15,8 @@ use App\Http\Controllers\ExpiredStockController;
 use App\Http\Controllers\KasController;
 use App\Http\Controllers\LaporanController;
 use App\Http\Controllers\MarketplaceController;
+use App\Http\Controllers\OtherIncomeCategoryController;
+use App\Http\Controllers\OtherIncomeController;
 use App\Http\Controllers\OutletController;
 use App\Http\Controllers\PaymentMethodController;
 use App\Http\Controllers\PembelianController;
@@ -159,6 +161,28 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::resource('/slider', SliderController::class);
 
     Route::resource('/pengeluaran', PengeluaranController::class);
+
+    // Other Income (pemasukan di luar penjualan kasir). Semua role boleh mengakses; staff-outlet dan kasir
+    // dibatasi ke outlet sendiri di controller. Kategori dan nominal Listing: hanya superadmin dan owner (K11).
+    Route::middleware('role:superadmin|owner')
+        ->prefix('other-income/categories')
+        ->name('other-income.categories.')
+        ->group(function () {
+            Route::get('/', [OtherIncomeCategoryController::class, 'index'])->name('index');
+            Route::post('/', [OtherIncomeCategoryController::class, 'store'])->name('store');
+            Route::put('/listing-nominal', [OtherIncomeCategoryController::class, 'updateListingNominal'])->name('listing-nominal');
+            Route::put('/{otherIncomeCategory}', [OtherIncomeCategoryController::class, 'update'])->whereNumber('otherIncomeCategory')->name('update');
+            Route::delete('/{otherIncomeCategory}', [OtherIncomeCategoryController::class, 'destroy'])->whereNumber('otherIncomeCategory')->name('destroy');
+        });
+    Route::prefix('other-income')->name('other-income.')->group(function () {
+        Route::get('/', [OtherIncomeController::class, 'index'])->name('index');
+        Route::get('/export', [OtherIncomeController::class, 'export'])->name('export');
+        Route::get('/create', [OtherIncomeController::class, 'create'])->name('create');
+        Route::post('/', [OtherIncomeController::class, 'store'])->name('store');
+        Route::get('/{otherIncome}/edit', [OtherIncomeController::class, 'edit'])->whereNumber('otherIncome')->name('edit');
+        Route::put('/{otherIncome}', [OtherIncomeController::class, 'update'])->whereNumber('otherIncome')->name('update');
+        Route::delete('/{otherIncome}', [OtherIncomeController::class, 'destroy'])->whereNumber('otherIncome')->name('destroy');
+    });
     Route::get('/pembelian/cek-stok-produk', [PembelianController::class, 'getAllProducts'])->name('pembelian.all-products');
     Route::get('pembelian/data', [PembelianController::class, 'getIndexData'])->name('pembelian.index.data');
     Route::get('pembelian/penerimaan/data', [PembelianController::class, 'getPenerimaanIndexData'])->name('pembelian.penerimaan.index.data');

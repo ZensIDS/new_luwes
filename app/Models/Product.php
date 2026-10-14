@@ -119,6 +119,12 @@ class Product extends Model
         return $this->hasMany(PenjualanItem::class);
     }
 
+    /** Other Income yang lahir otomatis dari produk ini (mis. Listing). */
+    public function otherIncomes()
+    {
+        return $this->morphMany(OtherIncome::class, 'source');
+    }
+
     /*
     |--------------------------------------------------------------------------
     | SUMBER KEBENARAN STOK (dipakai SEMUA tampilan stok)
@@ -310,8 +316,8 @@ class Product extends Model
             ->logOnly(['*'])
             ->logOnlyDirty()
             ->dontSubmitEmptyLogs()
-            ->logExcept(['created_at', 'updated_at'])
-            ->dontLogIfAttributesChangedOnly(['updated_at'])
+            ->logExcept(['created_at', 'updated_at', 'update_count'])
+            ->dontLogIfAttributesChangedOnly(['updated_at', 'update_count'])
             ->setDescriptionForEvent(fn (string $eventName) => "Data Product has been {$eventName}")
             ->useLogName('Product');
     }

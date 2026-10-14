@@ -224,7 +224,14 @@
                                     </div>
                                 @enderror
                             </div>
-                            
+
+                            @include('products._listing-info', [
+                                'select' => '#status-produk-select',
+                                'mode' => ($listingWindowOpen ?? false)
+                                    ? 'trigger'
+                                    : (($listingAlreadyRecorded ?? false) ? 'recorded' : 'closed'),
+                                'nominal' => $listingNominal ?? null,
+                            ])
                         </div><!-- /.box-body -->
 
                         <div class="box-footer">

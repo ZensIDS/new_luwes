@@ -12,8 +12,10 @@ use App\Models\OwnerStock;
 use App\Models\Product;
 use App\Models\Stock;
 use App\Models\Supplier;
+use App\Services\OtherIncomeService;
 use App\Support\OutletAccess;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Maatwebsite\Excel\Facades\Excel;
 use Spatie\Activitylog\Models\Activity;
@@ -255,6 +257,8 @@ class ProductController extends Controller
             'suppliers' => Supplier::get(),
             'categories' => Category::get(),
             'statusProdukOptions' => Product::STATUS_PRODUK,
+            // Keterangan Other Income Listing di bawah dropdown status (null = nominal belum diatur).
+            'listingNominal' => app(OtherIncomeService::class)->listingNominal(),
         ]);
     }
 
@@ -280,11 +284,28 @@ class ProductController extends Controller
             $data['pic'] = 'storage/pics/' . $fileName;
         }
 
-        $product = Product::create($data);
+        try {
+            // Satu transaksi: bila status = Listing, income Listing dicatat di transaksi yang sama.
+            // Gagal mencatat income (mis. nominal Listing belum diatur) = produk batal dibuat (B1).
+            DB::transaction(function () use ($request, $data) {
+                $product = Product::create($data);
 
-        // Sync suppliers (multiple select)
-        if ($request->has('supplier_ids')) {
-            $product->suppliers()->sync($request->supplier_ids);
+                // Sync suppliers (multiple select)
+                if ($request->has('supplier_ids')) {
+                    $product->suppliers()->sync($request->supplier_ids);
+                }
+
+                if (($data['status_produk'] ?? 'sudah') === 'listing') {
+                    app(OtherIncomeService::class)->recordListing($product, $request->user());
+                }
+            });
+        } catch (\Throwable $e) {
+            // Transaksi batal, jangan tinggalkan file gambar yatim.
+            if (! empty($data['pic'])) {
+                Storage::delete(str_replace('storage', 'public', $data['pic']));
+            }
+
+            throw $e;
         }
 
         return redirect(route('product.index'))->with('toast_success', 'Berhasil Menyimpan Data!');
@@ -307,12 +328,19 @@ class ProductController extends Controller
 
     public function edit(Product $product)
     {
+        $otherIncome = app(OtherIncomeService::class);
+        $listingAlreadyRecorded = $otherIncome->hasListing($product);
+
         return view('products.edit', [
             'product' => $product->load('suppliers'),
             'outlets' => Outlet::get(),
             'suppliers' => Supplier::get(),
             'categories' => Category::get(),
             'statusProdukOptions' => Product::STATUS_PRODUK,
+            // Jendela pemicu Other Income Listing (create / update pertama), dipakai view di Tahap C.
+            'listingWindowOpen' => (int) $product->update_count === 0 && ! $listingAlreadyRecorded,
+            'listingAlreadyRecorded' => $listingAlreadyRecorded,
+            'listingNominal' => $otherIncome->listingNominal(),
             // optional: selected supplier IDs for form
             'selectedSuppliers' => $product->suppliers->pluck('id')->toArray(),
         ]);
@@ -324,25 +352,58 @@ class ProductController extends Controller
         if (($data['status_produk'] ?? 'sudah') !== 'tambahan_diskon') {
             $data['status_produk_note'] = null;
         }
+
+        $oldPic = null;
         if ($request->hasFile('pic')) {
-            // Delete the old image file
-            if ($product->pic) {
-                Storage::delete(str_replace('storage', 'public', $product->pic));
-            }
-            // Store the new image file
+            $oldPic = $product->pic;
+            // Store the new image file (gambar lama baru dihapus setelah transaksi sukses)
             $file = $request->file('pic');
             $fileName = time() . '.' . $file->getClientOriginalExtension();
             $file->storeAs('public/pics', $fileName);
             $data['pic'] = 'storage/pics/' . $fileName;
         }
-        $product->update($data);
 
-        // Sync suppliers (multiple select)
-        if ($request->has('supplier_ids')) {
-            $product->suppliers()->sync($request->supplier_ids);
-        } else {
-            // If no supplier selected, detach all
-            $product->suppliers()->detach();
+        try {
+            DB::transaction(function () use ($request, $data, $product) {
+                // Kunci baris produk: dua simpan bersamaan (dua tab / klik ganda) dibaca bergantian,
+                // jadi tidak ada yang lolos dua kali lewat jendela update pertama (B3, B4).
+                $locked = Product::lockForUpdate()->findOrFail($product->id);
+
+                $isFirstUpdate = (int) $locked->update_count === 0;
+                $newStatus = $data['status_produk'] ?? $locked->status_produk;
+
+                $locked->update($data);
+
+                // Pemicu hanya bila: update PERTAMA + status baru Listing + belum punya Listing income.
+                // Update kedua dst tidak pernah memicu, berapa kali pun status dibolak-balik (B5).
+                $service = app(OtherIncomeService::class);
+                if ($isFirstUpdate && $newStatus === 'listing' && ! $service->hasListing($locked)) {
+                    $service->recordListing($locked, $request->user());
+                }
+
+                // Setiap simpan lewat form Product dihitung satu update, walau tidak ada yang berubah.
+                // Hanya method ini yang menaikkan angka (sinkron HPP / stok tidak, B6).
+                $locked->increment('update_count');
+
+                // Sync suppliers (multiple select)
+                if ($request->has('supplier_ids')) {
+                    $locked->suppliers()->sync($request->supplier_ids);
+                } else {
+                    // If no supplier selected, detach all
+                    $locked->suppliers()->detach();
+                }
+            });
+        } catch (\Throwable $e) {
+            // Transaksi batal (mis. nominal Listing belum diatur): gambar baru dibuang, gambar lama tetap.
+            if ($oldPic !== null && ! empty($data['pic'])) {
+                Storage::delete(str_replace('storage', 'public', $data['pic']));
+            }
+
+            throw $e;
+        }
+
+        if ($oldPic) {
+            Storage::delete(str_replace('storage', 'public', $oldPic));
         }
 
         return redirect(route('product.index'))->with('toast_success', 'Berhasil Menyimpan Data!');

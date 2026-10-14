@@ -156,6 +156,34 @@
                         </div>
                     </div>
 
+                    {{-- Status Produk: di form utama (bukan di "field lainnya"), tepat setelah Supplier --}}
+                    @php $npStatus = old('status_produk', 'sudah'); @endphp
+                    <div class="row">
+                        <div class="col-md-6 form-group {{ $errors->newProduct->has('status_produk') ? 'has-error' : '' }}">
+                            <label>Status Produk</label>
+                            <select class="form-control" name="status_produk" id="np-status-produk">
+                                @foreach ($statusProdukOptions as $statusValue => $statusLabel)
+                                    <option value="{{ $statusValue }}" {{ $npStatus === $statusValue ? 'selected' : '' }}>
+                                        {{ $statusLabel }}</option>
+                                @endforeach
+                            </select>
+                            @error('status_produk', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                        <div class="col-md-6 form-group {{ $errors->newProduct->has('status_produk_note') ? 'has-error' : '' }}"
+                            id="np-status-note-group" style="{{ $npStatus === 'tambahan_diskon' ? '' : 'display:none;' }}">
+                            <label>Catatan Tambahan Diskon <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="status_produk_note" id="np-status-note"
+                                value="{{ old('status_produk_note') }}" maxlength="255"
+                                placeholder="Contoh: tambah 10.000 atau diskon 5%">
+                            @error('status_produk_note', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
+                        </div>
+                        @include('products._listing-info', [
+                            'select' => '#np-status-produk',
+                            'mode' => 'trigger',
+                            'nominal' => $listingNominal ?? null,
+                        ])
+                    </div>
+
                     <a href="#" id="toggle-new-product-extra"><i class="fa fa-caret-right"></i> Tampilkan field lainnya (opsional)</a>
                     <div id="new-product-extra" class="row" style="display:none; margin-top:10px;">
                         <div class="col-md-6 form-group {{ $errors->newProduct->has('brand') ? 'has-error' : '' }}">
@@ -621,6 +649,15 @@
             $('#np-satuan-besar, #np-satuan, #np-konversi, #np-harga-beli, #np-harga-per')
                 .on('input change keyup', refreshHarga);
             refreshHarga();
+
+            // Catatan Tambahan Diskon: isian langsung (tanpa modal), hanya tampil untuk status Tambahan diskon
+            function refreshStatusNote() {
+                var isDiskon = $('#np-status-produk').val() === 'tambahan_diskon';
+                $('#np-status-note-group').toggle(isDiskon);
+                if (!isDiskon) { $('#np-status-note').val(''); }
+            }
+            $('#np-status-produk').on('change', refreshStatusNote);
+            refreshStatusNote();
 
             // Outlet diambil dari pilihan outlet di form harga; cegah klik ganda saat menyimpan
             $('#new-product-form').on('submit', function () {

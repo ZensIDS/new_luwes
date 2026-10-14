@@ -222,6 +222,12 @@
                                     </div>
                                 @enderror
                             </div>
+
+                            @include('products._listing-info', [
+                                'select' => '#status-produk-select',
+                                'mode' => 'trigger',
+                                'nominal' => $listingNominal ?? null,
+                            ])
                         </div><!-- /.box-body -->
 
                         <div class="box-footer">

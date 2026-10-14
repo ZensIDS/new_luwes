@@ -10,12 +10,14 @@ use App\Models\OwnerStock;
 use App\Models\Product;
 use App\Models\Supplier;
 use App\Services\LatestHpp;
+use App\Services\OtherIncomeService;
 use App\Services\PriceCalculator;
 use App\Support\OutletAccess;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Spatie\Activitylog\Models\Activity;
 
 class OutletPriceController extends Controller
@@ -264,6 +266,8 @@ class OutletPriceController extends Controller
             // Untuk panel "Daftarkan Produk Baru" (hanya dipakai di mode tambah)
             'categories' => Category::orderBy('name')->get(['id', 'name']),
             'suppliers' => Supplier::orderBy('name')->get(['id', 'name']),
+            'statusProdukOptions' => Product::STATUS_PRODUK,
+            'listingNominal' => app(OtherIncomeService::class)->listingNominal(),
         ]);
     }
 
@@ -311,15 +315,26 @@ class OutletPriceController extends Controller
             $data['status_produk_note'] = null;
         }
 
-        $product = DB::transaction(function () use ($request, $data) {
-            $product = Product::create($data);
+        try {
+            $product = DB::transaction(function () use ($request, $data) {
+                $product = Product::create($data);
 
-            if ($request->filled('supplier_ids')) {
-                $product->suppliers()->sync($request->supplier_ids);
-            }
+                if ($request->filled('supplier_ids')) {
+                    $product->suppliers()->sync($request->supplier_ids);
+                }
 
-            return $product;
-        });
+                // Status Listing: catat Other Income (umum, tanpa outlet) di transaksi yang sama.
+                // Gagal mencatat (mis. nominal belum diatur) = produk batal dibuat (B2).
+                if (($data['status_produk'] ?? 'sudah') === 'listing') {
+                    app(OtherIncomeService::class)->recordListing($product, $request->user());
+                }
+
+                return $product;
+            });
+        } catch (ValidationException $e) {
+            // Form ini memakai error bag "newProduct" (terpisah dari form aturan harga), C5.
+            throw $e->errorBag('newProduct');
+        }
 
         $outletId = $request->filled('outlet_id') ? (int) $request->input('outlet_id') : null;
 
