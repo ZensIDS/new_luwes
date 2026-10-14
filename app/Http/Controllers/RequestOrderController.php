@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Category;
+use App\Models\DeliveryOrder;
 use App\Models\Outlet;
 use App\Models\Product;
 use App\Models\RequestOrder;
@@ -744,10 +745,19 @@ class RequestOrderController extends Controller
                 'verification_notes' => 'Terverifikasi otomatis saat admin memilih SKU/stok.',
             ]);
 
+            // Picking list yang sudah terbentuk otomatis (saat halaman proses dibuka) masih berisi
+            // item tanpa SKU. Sinkronkan supaya mengikuti SKU & qty hasil pilihan admin.
+            $pickingReset = $this->syncPickingListWithRequestOrder($requestOrder);
+
             DB::commit();
 
+            $message = 'Stock assignment berhasil disimpan dan request otomatis terverifikasi.';
+            if ($pickingReset) {
+                $message .= ' Picking list disesuaikan dengan SKU yang dipilih (hasil scan sebelumnya direset, silakan scan ulang).';
+            }
+
             return redirect()->route('request-orders.show', $requestOrder)
-                ->with('toast_success', 'Stock assignment berhasil disimpan dan request otomatis terverifikasi.');
+                ->with('toast_success', $message);
         } catch (\Exception $e) {
             DB::rollBack();
 
@@ -833,6 +843,67 @@ class RequestOrderController extends Controller
         $pickingList->load(['items.product', 'items.stock']);
 
         return view('request-orders.process', compact('requestOrder', 'pickingList'));
+    }
+
+    /**
+     * Sinkronkan picking list yang MASIH AKTIF (draft / in_progress) dengan item RO terbaru.
+     *
+     * Dipanggil setelah admin memilih SKU (updateStocks): item RO dipecah per SKU, sedangkan
+     * picking list yang dibuat otomatis sebelumnya masih berisi item tanpa stok. Baris picking
+     * dibangun ulang dari item RO yang sudah punya SKU & qty disetujui.
+     *
+     * - Picking list yang sudah 'completed' tidak disentuh (stok sudah dipotong).
+     * - Stok baru dipotong di completeAndShip, jadi mereset baris picking aman secara stok.
+     *
+     * @return bool true jika ada hasil scan/picking sebelumnya yang ikut direset.
+     */
+    protected function syncPickingListWithRequestOrder(RequestOrder $requestOrder): bool
+    {
+        $pickingList = PickingList::where('request_order_id', $requestOrder->id)
+            ->whereIn('status', ['draft', 'in_progress'])
+            ->lockForUpdate()
+            ->first();
+
+        if (! $pickingList) {
+            return false;
+        }
+
+        $hadProgress = $pickingList->items()->where('qty_picked', '>', 0)->exists();
+
+        $assigned = $requestOrder->items()
+            ->with(['product', 'stock'])
+            ->whereNotNull('stock_id')
+            ->where('qty_approved', '>', 0)
+            ->get();
+
+        // Tidak ada item ber-SKU: jangan kosongkan picking list yang ada.
+        if ($assigned->isEmpty()) {
+            return false;
+        }
+
+        $pickingList->items()->delete();
+
+        foreach ($assigned as $item) {
+            PickingListItem::create([
+                'picking_list_id' => $pickingList->id,
+                'product_id'      => $item->product_id,
+                'stock_id'        => $item->stock_id,
+                'qty_to_pick'     => $item->qty_approved,
+                'qty_picked'      => 0,
+                'location'        => $item->product->lokasi ?? '-',
+                'sku'             => $item->stock->sku ?? null,
+                'is_picked'       => 0,
+            ]);
+        }
+
+        \Log::info('Picking list disinkronkan setelah pemilihan SKU', [
+            'picking_list_id'  => $pickingList->id,
+            'request_order_id' => $requestOrder->id,
+            'items'            => $assigned->count(),
+            'progress_reset'   => $hadProgress,
+        ]);
+
+        return $hadProgress;
     }
 
     /**
@@ -1232,6 +1303,28 @@ class RequestOrderController extends Controller
             return response()->json(['success' => false, 'message' => 'Sesi proses kirim tidak valid.'], 422);
         }
 
+        // Minimal harus ada 1 item yang benar-benar di-pick (qty_picked > 0) dan terhubung ke stok/SKU.
+        // Item yang tidak ready boleh dilewati, tapi kalau SEMUA item tidak di-pick, proses tidak boleh lanjut
+        // (Delivery Order tidak mungkin dibentuk tanpa item ter-pick).
+        $pickedItems = $pickingList->items()
+            ->where('is_picked', 1)
+            ->where('qty_picked', '>', 0)
+            ->get();
+
+        if ($pickedItems->isEmpty()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Proses belum bisa diselesaikan: belum ada satu pun item yang di-pick. Scan minimal 1 barang, atau batalkan RO jika semua barang tidak tersedia.',
+            ], 422);
+        }
+
+        if ($pickedItems->contains(fn ($item) => empty($item->stock_id))) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Proses belum bisa diselesaikan: ada item ter-pick yang belum terhubung ke stok/SKU gudang.',
+            ], 422);
+        }
+
         // Hitung jumlah item yang belum sempat di-scan (hanya untuk info di pesan akhir)
         $unpickedCount = $pickingList->items()->where('is_picked', 0)->count();
 
@@ -1326,13 +1419,52 @@ class RequestOrderController extends Controller
 
     public function destroy(RequestOrder $requestOrder)
     {
-        abort_unless($requestOrder->status == 'pending', 403, 'Request ini sudah tidak bisa dihapus.');
+        abort_unless(
+            in_array($requestOrder->status, ['pending', 'approved', 'partial'], true),
+            403,
+            'Request ini sudah tidak bisa dihapus.'
+        );
 
         // opsional: hanya pemilik request yang boleh hapus
         // abort_unless($requestOrder->requested_by === auth()->id(), 403);
 
         DB::beginTransaction();
         try {
+            $requestOrder = RequestOrder::lockForUpdate()->findOrFail($requestOrder->id);
+
+            // Sudah ada Delivery Order (termasuk yang soft delete, masih memegang FK ke picking list).
+            if (DeliveryOrder::withTrashed()->where('request_order_id', $requestOrder->id)->exists()) {
+                DB::rollBack();
+
+                return back()->with('toast_error', 'Request ini sudah punya Delivery Order sehingga tidak bisa dihapus.');
+            }
+
+            // Picking sudah selesai lewat proses kirim: stok gudang sudah dipotong (allocate), tidak bisa dibatalkan di sini.
+            if ($requestOrder->items()->where('item_status', 'picked')->exists()) {
+                DB::rollBack();
+
+                return back()->with('toast_error', 'Picking request ini sudah selesai dan stok gudang sudah dipotong, sehingga tidak bisa dihapus.');
+            }
+
+            // 1. Lepas reservasi stok milik RO ini (dibuat saat admin memilih SKU / verifikasi).
+            //    Harus dibaca SEBELUM item dihapus.
+            $reserved = $this->ownReservedByStock($requestOrder);
+            if (! empty($reserved)) {
+                $stocks = Stock::whereIn('id', array_keys($reserved))->lockForUpdate()->get()->keyBy('id');
+
+                foreach ($reserved as $stockId => $qty) {
+                    ($stocks[$stockId] ?? null)?->unreserve($qty);
+                }
+            }
+
+            // 2. Hapus picking list beserta itemnya. Hard delete: kode PICK unique, sedangkan generator
+            //    kode hanya melihat picking list yang belum soft delete (soft delete bisa bentrok kode).
+            foreach (PickingList::withTrashed()->where('request_order_id', $requestOrder->id)->get() as $pickingList) {
+                PickingListItem::where('picking_list_id', $pickingList->id)->delete();
+                $pickingList->forceDelete();
+            }
+
+            // 3. Item, catatan, lalu RO itu sendiri.
             $requestOrder->items()->delete();
             $requestOrder->additionalNotes()->delete();
             $requestOrder->delete();
@@ -1340,7 +1472,7 @@ class RequestOrderController extends Controller
             DB::commit();
 
             return back()->with('toast_success', 'Request berhasil dihapus.');
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             DB::rollBack();
 
             return back()->with('toast_error', $e->getMessage());

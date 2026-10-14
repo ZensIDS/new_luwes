@@ -202,11 +202,14 @@ class DeliveryOrderController extends Controller
             if ($itemsCreated === 0) {
                 DB::rollBack();
 
-                \Log::warning('Delivery order gagal generate: tidak ada item dengan qty_picked > 0', [
+                $reason = $this->explainNoDeliveryItems($pickingList);
+
+                \Log::warning('Delivery order gagal generate: tidak ada item yang bisa dijadikan item DO', [
                     'picking_list_id' => $pickingList->id,
+                    'reason' => $reason,
                 ]);
 
-                return back()->with('toast_error', 'Gagal membuat Delivery Order: tidak ada item yang sudah di-pick (qty_picked > 0) pada picking list ini.');
+                return back()->with('toast_error', 'Gagal membuat Delivery Order: ' . $reason);
             }
 
             DB::commit();
@@ -223,6 +226,34 @@ class DeliveryOrderController extends Controller
 
             return back()->with('toast_error', 'Gagal membuat Delivery Order: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Alasan sebenarnya kenapa tidak ada DeliveryOrderItem yang terbentuk.
+     * generateDeliveryOrderItems() melewati item tanpa relasi stock tanpa menghitungnya, sehingga
+     * pesan lama ("tidak ada item yang sudah di-pick") menyesatkan padahal item sudah di-pick.
+     */
+    protected function explainNoDeliveryItems(PickingList $pickingList): string
+    {
+        $items = $pickingList->items()->with(['product', 'stock'])->get();
+
+        if ($items->isEmpty()) {
+            return 'picking list ini tidak punya item sama sekali.';
+        }
+
+        $picked = $items->filter(fn ($item) => $item->qty_picked > 0);
+
+        if ($picked->isEmpty()) {
+            return 'semua item pada picking list ini masih qty picked 0 (belum ada yang benar-benar di-pick).';
+        }
+
+        $names = $picked->filter(fn ($item) => ! $item->stock)
+            ->map(fn ($item) => ($item->product?->name ?? 'Produk #' . $item->product_id) . ' (qty ' . $item->qty_picked . ')')
+            ->unique()
+            ->implode(', ');
+
+        return 'item sudah di-pick tetapi belum terhubung ke stok/SKU gudang (stock_id kosong atau stok sudah dihapus): '
+            . $names . '. Ulangi picking dengan memilih SKU/stok, atau hubungi admin.';
     }
 
     /**

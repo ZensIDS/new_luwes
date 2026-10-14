@@ -6,8 +6,8 @@ Revisi Luwes
     [x] Check all pagination page & datatable query method
     [x] Check bug on penjualan
     [x] Check sidebar active bug
-    [ ] Check Bug on request-order
-    [ ] Check Bug on picking-list
+    [x] Check Bug on request-order
+    [x] Check Bug on picking-list
 [x] Master Harga
     [x] Tambah data terakhir di check
     [x] Tambah note di master

@@ -45,51 +45,50 @@ class PickingListController extends Controller
 
         DB::beginTransaction();
         try {
-            $lastPicking = PickingList::latest('id')->first();
+            // Kunci baris RO: klik ganda / request bersamaan akan antre di sini, sehingga request
+            // kedua melihat picking list yang baru dibuat request pertama dan tidak membuat duplikat.
+            $locked = RequestOrder::where('id', $requestOrder->id)->lockForUpdate()->firstOrFail();
+
+            $existing = PickingList::where('request_order_id', $locked->id)->first();
+
+            if ($existing) {
+                DB::rollBack();
+
+                return redirect()->route('picking-lists.show', $existing)
+                    ->with('toast_success', 'Picking list untuk RO ini sudah ada ('.$existing->code.').');
+            }
+
+            $items = $locked->items()
+                ->with(['stock', 'product'])
+                ->where('qty_approved', '>', 0)
+                ->whereNotNull('stock_id')
+                ->get();
+
+            if ($items->isEmpty()) {
+                DB::rollBack();
+
+                return back()->with('toast_error', 'Belum ada item yang dipilih SKU/stoknya, picking list belum bisa dibuat.');
+            }
+
+            $lastPicking = PickingList::withTrashed()->lockForUpdate()->latest('id')->first();
             $nextNumber = $lastPicking ? ((int) substr($lastPicking->code, 4) + 1) : 1;
             $code = 'PICK'.str_pad($nextNumber, 5, '0', STR_PAD_LEFT);
 
             $pickingList = PickingList::create([
                 'code' => $code,
-                'request_order_id' => $requestOrder->id,
+                'request_order_id' => $locked->id,
                 'status' => 'draft',
             ]);
 
-            foreach ($requestOrder->items()->where('qty_approved', '>', 0)->get() as $item) {
-
+            foreach ($items as $item) {
                 PickingListItem::create([
                     'picking_list_id' => $pickingList->id,
                     'product_id' => $item->product_id,
-                    'stock_id' => $item->stock->id,
+                    'stock_id' => $item->stock_id,
                     'qty_to_pick' => min($item->qty_approved, $item->stock->qty_reserved),
-                    'location' => $item->stock->product->lokasi,
+                    'location' => $item->product->lokasi ?? '-',
                     'sku' => $item->stock->sku,
                 ]);
-
-                // $remainingQty = $item->qty_approved;
-
-                // $stocks = Stock::where('product_id', $item->product_id)
-                //     ->where('qty_reserved', '>', 0)
-                //     ->orderBy('expired_at', 'asc')
-                //     ->orderBy('created_at', 'asc')
-                //     ->get();
-
-                // foreach ($stocks as $stock) {
-                //     if ($remainingQty <= 0) { break; }
-
-                //     $qtyToPick = min($remainingQty, $stock->qty_reserved);
-
-                //     PickingListItem::create([
-                //         'picking_list_id' => $pickingList->id,
-                //         'product_id' => $item->product_id,
-                //         'stock_id' => $stock->id,
-                //         'qty_to_pick' => $qtyToPick,
-                //         'location' => $stock->product->lokasi,
-                //         'sku' => $stock->sku,
-                //     ]);
-
-                //     $remainingQty -= $qtyToPick;
-                // }
             }
 
             DB::commit();
@@ -185,6 +184,22 @@ class PickingListController extends Controller
 
         if (! $allPicked) {
             return back()->with('toast_error', 'All items must be picked');
+        }
+
+        // Picking baru boleh selesai bila ada item yang benar-benar di-pick dan terhubung ke stok/SKU gudang.
+        // Tanpa itu Delivery Order tidak bisa dibuat (item DO dibentuk dari qty_picked + stock).
+        $pickedItems = $pickingList->items()->where('qty_picked', '>', 0)->with(['product', 'stock'])->get();
+
+        if ($pickedItems->isEmpty()) {
+            return back()->with('toast_error', 'Picking belum bisa diselesaikan: belum ada item dengan qty picked lebih dari 0.');
+        }
+
+        $withoutStock = $pickedItems->filter(fn ($item) => ! $item->stock);
+
+        if ($withoutStock->isNotEmpty()) {
+            $names = $withoutStock->map(fn ($item) => $item->product?->name ?? ('Produk #' . $item->product_id))->unique()->implode(', ');
+
+            return back()->with('toast_error', 'Picking belum bisa diselesaikan: item berikut belum terhubung ke stok/SKU gudang: ' . $names . '.');
         }
 
         $data = ['status' => 'completed', 'completed_at' => now()];
