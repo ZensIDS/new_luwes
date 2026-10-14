@@ -1,3 +1,29 @@
+{{-- Gaya judul grup menu. Disimpan di sini supaya tetap tampil walau custom.css gagal dimuat di hosting. --}}
+<style>
+    .sidebar-menu > li.sidebar-divider {
+        display: flex !important;
+        align-items: center;
+        gap: 12px;
+        padding: 16px 20px 6px 30px !important;
+        background: transparent !important;
+        pointer-events: none;
+    }
+    .sidebar-menu > li.sidebar-divider > span {
+        font-size: 11px !important;
+        font-weight: 500 !important;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        color: #e9a9f0 !important;
+    }
+    .sidebar-menu > li.sidebar-divider::after {
+        content: "";
+        flex: 1 1 auto;
+        height: 1px;
+        background: #e9a9f0;
+    }
+</style>
+
 <aside class="main-sidebar">
     <section class="sidebar">
 
@@ -196,6 +222,23 @@
         @if (in_array($role, ['superadmin', 'staff-outlet', 'kasir']))
         <li class="{{ request()->is('penjualan*') && ! ($role === 'kasir' && request()->is('penjualan/create')) ? 'active' : '' }}">
             <a href="{{ route('penjualan.index') }}"><i class="fa fa-file-text"></i><span>Penjualan</span></a>
+        </li>
+        @endif
+
+        {{-- Other Income (tidak ditampilkan untuk admin-gudang & kasir; menu Kategori hanya superadmin & owner) --}}
+        @if (! in_array($role, ['admin-gudang', 'kasir']))
+        <li class="treeview {{ request()->is('other-income*') ? 'active' : '' }}">
+            <a href="#"><i class="fa fa-plus-circle"></i><span>Other Income</span><i class="fa fa-angle-left pull-right"></i></a>
+            <ul class="treeview-menu">
+                <li class="{{ request()->is('other-income*') && ! request()->is('other-income/categories*') ? 'active' : '' }}">
+                    <a href="{{ route('other-income.index') }}"><i class="fa fa-list"></i><span>Daftar Other Income</span></a>
+                </li>
+                @if (in_array($role, ['superadmin', 'owner']))
+                <li class="{{ request()->is('other-income/categories*') ? 'active' : '' }}">
+                    <a href="{{ route('other-income.categories.index') }}"><i class="fa fa-tags"></i><span>Kategori</span></a>
+                </li>
+                @endif
+            </ul>
         </li>
         @endif
 
