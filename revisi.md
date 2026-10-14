@@ -28,4 +28,6 @@ Revisi Luwes
     [ ] sewa
 
 [ ] Laporan
-    [ ] Check format all laporan
+    [x] Pemisahan Laporan Gudang & Toko
+    [x] Check format all laporan Toko
+    [ ] Check format all laporan Gudang

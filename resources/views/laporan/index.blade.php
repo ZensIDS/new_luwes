@@ -1,13 +1,10 @@
 @extends('layouts.master')
-@section('title', 'Laporan')
+@section('title', 'Laporan Gudang')
 @section('container')
 <section class="content-header">
-    <h1>Laporan & Export Data</h1>
-    <ul class="nav nav-tabs" style="margin-top:15px;">
-        <li class="active"><a href="{{ route('laporan.index') }}"><i class="fa fa-building"></i> Laporan Gudang / Warehouse</a></li>
-        <li><a href="{{ route('laporan.outlet.index') }}"><i class="fa fa-home"></i> Laporan Outlet</a></li>
-    </ul>
+    <h1>Laporan Gudang</h1>
 </section>
+
 <section class="content">
 
 @php $role = auth()->user()->role; @endphp
@@ -20,18 +17,6 @@
             <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-file-text-o"></i> Laporan PO</h3></div>
             <div class="box-footer">
                 <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_po"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
-            </div>
-        </div>
-    </div>
-    @endif
-
-    {{-- Laporan PR (Permintaan Outlet) --}}
-    @if (in_array($role, ['superadmin', 'staff-outlet']))
-    <div class="col-md-4 col-sm-6">
-        <div class="box box-primary">
-            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-file-text-o"></i> Laporan PR (Permintaan Outlet)</h3></div>
-            <div class="box-footer">
-                <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_pr"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
             </div>
         </div>
     </div>
@@ -169,13 +154,38 @@
     </div>
     @endif
 
+    {{-- Laporan PR (Permintaan Outlet) --}}
+    @if (in_array($role, ['superadmin', 'admin-gudang', 'owner']))
+    <div class="col-md-4 col-sm-6">
+        <div class="box box-primary">
+            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-file-text-o"></i> Laporan PR (Permintaan Outlet)</h3></div>
+            <div class="box-footer">
+                <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_pr"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
+            </div>
+        </div>
+    </div>
+    @endif
+
     {{-- Laporan Retur Outlet --}}
-    @if (in_array($role, ['superadmin', 'staff-outlet', 'owner']))
+    @if (in_array($role, ['superadmin', 'admin-gudang', 'owner']))
     <div class="col-md-4 col-sm-6">
         <div class="box box-danger">
             <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-undo"></i> Laporan Retur Outlet</h3></div>
             <div class="box-footer">
                 <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_retur_outlet"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
+            </div>
+        </div>
+    </div>
+    @endif
+
+    {{-- Minimal Stock & Alokasi PO (juga ada di Laporan Toko) --}}
+    @if (in_array($role, ['superadmin', 'admin-gudang', 'owner']))
+    <div class="col-md-4 col-sm-6">
+        <div class="box box-primary">
+            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-line-chart"></i> Minimal Stock &amp; Alokasi PO</h3></div>
+            <div class="box-body small">Rata-rata penjualan 3 bulan x faktor frekuensi PO. Menampilkan status out_of_stock dan saran qty PO.</div>
+            <div class="box-footer">
+                <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_outlet_minimal_stock"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
             </div>
         </div>
     </div>
@@ -187,7 +197,6 @@
 @php
 $modals = [
     ['id'=>'po',          'title'=>'Laporan PO',                           'pdf'=>'laporan.pdf.po',        'xls'=>'laporan.export.po',        'date'=>true],
-    ['id'=>'pr',          'title'=>'Laporan PR (Permintaan Outlet)',        'pdf'=>'laporan.pdf.pr',        'xls'=>'laporan.export.pr',        'date'=>true],
     ['id'=>'masuk',       'title'=>'Laporan Barang Masuk',                 'pdf'=>'laporan.pdf.barang-masuk',  'xls'=>'laporan.export.barang-masuk',  'date'=>true],
     ['id'=>'keluar',      'title'=>'Laporan Barang Keluar',                'pdf'=>'laporan.pdf.barang-keluar', 'xls'=>'laporan.export.barang-keluar', 'date'=>true],
     ['id'=>'stok',        'title'=>'Laporan Stok Barang',                  'pdf'=>'laporan.pdf.stok',      'xls'=>'laporan.stock',            'date'=>false],
@@ -198,8 +207,10 @@ $modals = [
     ['id'=>'pembelian',   'title'=>'Laporan Pembelian Barang',             'pdf'=>'laporan.pdf.pembelian', 'xls'=>'laporan.export.pembelian', 'date'=>true],
     ['id'=>'opname',      'title'=>'Laporan Stok Opname &amp; Adjusment',  'pdf'=>'laporan.pdf.opname',    'xls'=>'laporan.stock-opname',     'date'=>true],
     ['id'=>'pergerakan',  'title'=>'Laporan Pergerakan &amp; Kebutuhan Stok','pdf'=>'laporan.pdf.pergerakan','xls'=>'laporan.export.pergerakan','date'=>false],
+    ['id'=>'pr',          'title'=>'Laporan PR (Permintaan Outlet)',        'pdf'=>'laporan.pdf.pr',        'xls'=>'laporan.export.pr',        'date'=>true],
     ['id'=>'retur_supplier','title'=>'Laporan Retur Ke Supplier',          'pdf'=>'laporan.pdf.retur-supplier','xls'=>'laporan.retur-supplier','date'=>true],
     ['id'=>'retur_outlet',  'title'=>'Laporan Retur Outlet',               'pdf'=>'laporan.pdf.retur-outlet',  'xls'=>'laporan.retur-outlet',  'date'=>true],
+    ['id'=>'outlet_minimal_stock', 'title'=>'Minimal Stock &amp; Alokasi PO', 'pdf'=>'laporan.pdf.outlet.minimal-stock', 'xls'=>'laporan.outlet.minimal-stock', 'date'=>false, 'outlet'=>true],
 ];
 @endphp
 
@@ -228,6 +239,17 @@ $modals = [
                                 value="{{ now()->format('Y-m-d') }}">
                         </div>
                     </div>
+                </div>
+                @endif
+                @if(!empty($m['outlet']))
+                <div class="form-group">
+                    <label>Outlet</label>
+                    <select id="outlet_{{ $m['id'] }}" class="form-control">
+                        <option value="">Semua Outlet</option>
+                        @foreach($outlets as $outlet)
+                        <option value="{{ $outlet->id }}">{{ $outlet->name }}</option>
+                        @endforeach
+                    </select>
                 </div>
                 @endif
             </div>
@@ -259,10 +281,15 @@ $modals = [
 $(document).ready(function () {
 
     function buildUrl(baseUrl, id, hasDate) {
-        if (!hasDate) return baseUrl;
-        var mulai   = $('#mulai_'   + id).val();
-        var selesai = $('#selesai_' + id).val();
-        return baseUrl + '?tanggal_mulai=' + mulai + '&tanggal_selesai=' + selesai;
+        var params = {};
+        if (hasDate) {
+            params.tanggal_mulai   = $('#mulai_'   + id).val();
+            params.tanggal_selesai = $('#selesai_' + id).val();
+        }
+        var outlet = $('#outlet_' + id).val();
+        if (outlet) params.outlet_id = outlet;
+        var query = $.param(params);
+        return query ? baseUrl + '?' + query : baseUrl;
     }
 
     $(document).on('click', '.btn-preview-pdf', function () {

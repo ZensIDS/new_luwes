@@ -36,6 +36,7 @@ use App\Exports\OutletMinimalStockExport;
 use App\Exports\OutletPenjualanExport;
 use App\Exports\OutletRafaksiExport;
 use App\Exports\OutletReturExport;
+use App\Exports\LaporanToko\ReportMeta;
 use App\Models\DeliveryOrder;
 use App\Models\Outlet;
 use App\Models\Pembelian;
@@ -235,27 +236,27 @@ class LaporanController extends Controller
 
     public function exportOutletMinimalStock(Request $request)
     {
-        return Excel::download(new OutletMinimalStockExport($request), 'laporan-outlet-minimal-stock.xlsx');
+        return Excel::download(new OutletMinimalStockExport($request), ReportMeta::fileNameFor($request, 'Minimal-Stock-Toko', $request->filled('tanggal_selesai') ? \Carbon\Carbon::parse($request->input('tanggal_selesai')) : now()));
     }
 
     public function exportOutletPenjualan(Request $request)
     {
-        return Excel::download(new OutletPenjualanExport($request), 'laporan-outlet-penjualan.xlsx');
+        return Excel::download(new OutletPenjualanExport($request), ReportMeta::fileNameFor($request, 'Penjualan-Toko'));
     }
 
     public function exportOutletRafaksi(Request $request)
     {
-        return Excel::download(new OutletRafaksiExport($request), 'laporan-outlet-rafaksi.xlsx');
+        return Excel::download(new OutletRafaksiExport($request), ReportMeta::fileNameFor($request, 'Rafaksi-Toko', null, ReportMeta::promotionRange($request)));
     }
 
     public function exportOutletRetur(Request $request)
     {
-        return Excel::download(new OutletReturExport($request), 'laporan-outlet-retur.xlsx');
+        return Excel::download(new OutletReturExport($request), ReportMeta::fileNameFor($request, 'Retur-Penjualan-Toko'));
     }
 
     public function exportOutletAllStock(Request $request)
     {
-        return Excel::download(new OutletAllStockExport($request), 'laporan-outlet-all-stock.xlsx');
+        return Excel::download(new OutletAllStockExport($request), ReportMeta::fileNameFor($request, 'All-Stock-Toko', now()));
     }
 
     public function exportReturSupplier(Request $request)
@@ -271,12 +272,9 @@ class LaporanController extends Controller
 
     public function exportReturOutlet(Request $request)
     {
-        $settings = $this->getSettings();
-        [$mulai, $selesai] = $this->dateRange($request);
-
         return Excel::download(
-            new ReturOutletExport($mulai, $selesai, $settings),
-            'laporan-retur-outlet.xlsx'
+            new ReturOutletExport($request),
+            ReportMeta::fileNameFor($request, 'Retur-Toko-ke-Gudang')
         );
     }
 
@@ -813,7 +811,7 @@ class LaporanController extends Controller
 
     public function exportPR(Request $request)
     {
-        return Excel::download(new LaporanPRExport($request), 'laporan-pr.xlsx');
+        return Excel::download(new LaporanPRExport($request), ReportMeta::fileNameFor($request, 'PR-Toko'));
     }
 
     public function exportBarangMasuk(Request $request)

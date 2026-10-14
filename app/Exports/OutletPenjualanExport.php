@@ -2,17 +2,24 @@
 
 namespace App\Exports;
 
+use App\Exports\LaporanToko\OutletPenjualanRekapSheet;
+use App\Exports\LaporanToko\OutletPenjualanSheet;
 use App\Services\OutletLaporanService;
-use Illuminate\Contracts\View\View;
 use Illuminate\Http\Request;
-use Maatwebsite\Excel\Concerns\FromView;
+use Maatwebsite\Excel\Concerns\WithMultipleSheets;
 
-class OutletPenjualanExport implements FromView
+class OutletPenjualanExport implements WithMultipleSheets
 {
     public function __construct(private readonly Request $request) {}
 
-    public function view(): View
+    public function sheets(): array
     {
-        return view('exports.outlet.penjualan', app(OutletLaporanService::class)->sales($this->request));
+        // Data dihitung sekali lalu dipakai kedua sheet.
+        $data = app(OutletLaporanService::class)->sales($this->request);
+
+        return [
+            new OutletPenjualanSheet($this->request, $data),
+            new OutletPenjualanRekapSheet($this->request, $data),
+        ];
     }
 }

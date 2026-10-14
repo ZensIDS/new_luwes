@@ -2,175 +2,91 @@
 
 namespace App\Exports;
 
+use App\Exports\LaporanToko\BaseLaporanTokoExport;
+use App\Exports\LaporanToko\ReportMeta;
+use App\Exports\LaporanToko\SheetWriter;
+use App\Exports\LaporanToko\Theme;
 use App\Models\RefundPembelian;
-use Carbon\Carbon;
-use Maatwebsite\Excel\Concerns\Exportable;
-use Maatwebsite\Excel\Concerns\FromCollection;
-use Maatwebsite\Excel\Concerns\ShouldAutoSize;
-use Maatwebsite\Excel\Concerns\WithHeadings;
-use Maatwebsite\Excel\Concerns\WithMapping;
-use Maatwebsite\Excel\Concerns\WithProperties;
-use Maatwebsite\Excel\Concerns\WithStyles;
-use Maatwebsite\Excel\Concerns\WithTitle;
-use PhpOffice\PhpSpreadsheet\Style\Alignment;
-use PhpOffice\PhpSpreadsheet\Style\Border;
-use PhpOffice\PhpSpreadsheet\Style\Fill;
+use Illuminate\Http\Request;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
-class ReturOutletExport implements FromCollection, WithHeadings, WithMapping, WithStyles, WithTitle, ShouldAutoSize, WithProperties
+/** B7: Retur Toko ke Gudang (type outlet_ke_gudang). */
+class ReturOutletExport extends BaseLaporanTokoExport
 {
-    use Exportable;
+    public function __construct(private readonly Request $request) {}
 
-    protected $mulai;
-    protected $selesai;
-    protected $settings;
-    protected $no = 0;
-
-    public function __construct($mulai, $selesai, array $settings = [])
+    protected function makeMeta(): ReportMeta
     {
-        $this->mulai = $mulai;
-        $this->selesai = $selesai;
-        $this->settings = $settings;
+        return ReportMeta::fromRequest($this->request, 'LAPORAN RETUR TOKO KE GUDANG', 'Retur-Toko-ke-Gudang');
     }
 
-    public function collection()
+    protected function sheetName(): string
     {
-        return RefundPembelian::with([
-            'outlet',
-            'deliveryOrder',
-            'refundPembelianItems.product',
-            'refundPembelianItems.stock',
-        ])
+        return 'Retur Toko ke Gudang';
+    }
+
+    protected function build(SheetWriter $w, Worksheet $sheet, ReportMeta $meta): void
+    {
+        $w->columns([
+            ['h' => 'No', 'fmt' => Theme::FMT_NUMBER, 'align' => 'center', 'w' => 6],
+            ['h' => 'Tanggal', 'fmt' => Theme::FMT_DATE, 'align' => 'center'],
+            ['h' => 'Kode Retur'],
+            ['h' => 'Outlet'],
+            ['h' => 'Kode Request'],
+            ['h' => 'Kode Barang', 'text' => true],
+            ['h' => 'Nama Barang', 'max' => 45],
+            ['h' => 'Batch', 'text' => true],
+            ['h' => 'Expired', 'fmt' => Theme::FMT_DATE, 'align' => 'center'],
+            ['h' => 'Qty', 'fmt' => Theme::FMT_NUMBER],
+            ['h' => 'Satuan', 'align' => 'center'],
+            ['h' => 'Konversi'],
+            ['h' => 'Alasan Retur', 'max' => 40, 'wrap' => true],
+            ['h' => 'Penyelesaian', 'align' => 'center'],
+            ['h' => 'Status', 'align' => 'center'],
+        ])->kop()->info()->header();
+
+        $no = 0;
+        $returs = RefundPembelian::with(['outlet', 'deliveryOrder', 'refundPembelianItems.product', 'refundPembelianItems.stock'])
             ->where('type', 'outlet_ke_gudang')
-            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'tanggal', $this->mulai, $this->selesai))
-            ->orderBy('tanggal')
-            ->get()
-            ->flatMap(function ($retur) {
-                return $retur->refundPembelianItems->map(function ($item) use ($retur) {
-                    $item->retur = $retur;
+            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'tanggal', $meta->start->toDateString(), $meta->end->toDateString()))
+            ->orderBy('tanggal')->orderBy('id')
+            ->get();
 
-                    return $item;
-                });
-            });
-    }
+        (function () use ($returs, $w, &$no) {
+                foreach ($returs as $retur) {
+                    $done = $retur->status === 'complete';
 
-    public function title(): string
-    {
-        return 'LAPORAN RETUR OUTLET';
-    }
+                    foreach ($retur->refundPembelianItems as $item) {
+                        $konversi = $item->product?->konversiDisplay($item->qty ?? 0) ?? '-';
+                        $resolution = match ($item->resolution) {
+                            'barang' => 'Barang',
+                            'uang' => 'Uang',
+                            default => null,
+                        };
 
-    // 6 rows so data starts at row 7, matching styles() which targets row 6 as header
-    public function headings(): array
-    {
-        return [
-            ['LAPORAN RETUR OUTLET'], // row 1 — overwritten by styles()
-            [],                       // row 2
-            [],                       // row 3
-            [],                       // row 4
-            [],                       // row 5
-            ['No', 'Tanggal', 'Kode Retur', 'Jenis Retur', 'Outlet', 'Kode Request', 'Kode Barang', 'Nama Barang', 'Batch', 'Expired', 'Qty', 'Satuan', 'Alasan Retur', 'Status', 'Keterangan'],
-        ];
-    }
+                        $w->row([
+                            ++$no,
+                            $retur->tanggal,
+                            $retur->code,
+                            $retur->outlet?->name ?? '-',
+                            $retur->deliveryOrder?->code ?? '-',
+                            $item->product?->code ?? '-',
+                            $item->product?->name ?? '-',
+                            $item->sku ?: null,
+                            $item->stock?->expired_at ? \Carbon\Carbon::parse($item->stock->expired_at) : null,
+                            (float) ($item->qty ?? 0),
+                            $item->product?->satuan ?? 'PCS',
+                            $konversi !== '-' ? $konversi : null,
+                            $item->alasan ?: null,
+                            $resolution,
+                            $done ? 'Terkirim' : 'Proses',
+                        ], ['cells' => [15 => $done
+                            ? ['fill' => Theme::OK_BG, 'font' => Theme::OK_FG, 'bold' => true]
+                            : ['fill' => Theme::WARN_BG, 'font' => Theme::WARN_FG, 'bold' => true]]]);
+                    }
+                }
+        })();
 
-    public function map($item): array
-    {
-        $this->no++;
-        $retur = $item->retur;
-
-        return [
-            $this->no,
-            Carbon::parse($retur->tanggal)->isoFormat('DD MMMM YYYY'),
-            $retur->code,
-            'IN',
-            $retur->outlet->name ?? '-',
-            $retur->deliveryOrder->code ?? '-',
-            $item->product->code ?? '-',
-            $item->product->name ?? '-',
-            $item->sku ?? '-',
-            $item->stock?->expired_at ? Carbon::parse($item->stock->expired_at)->isoFormat('DD MMMM YYYY') : '-',
-            (function () use ($item) {
-                $k = $item->product?->konversiDisplay($item->qty) ?? '-';
-
-                return $item->qty.($k && $k !== '-' ? " ({$k})" : '');
-            })(),
-            $item->product->satuan ?? 'PCS',
-            $item->alasan,
-            $retur->status === 'complete' ? 'Terkirim' : 'Proses',
-            '',
-        ];
-    }
-
-    public function styles(Worksheet $sheet)
-    {
-        $companyName = $this->settings['name'] ?? 'NAMA PERUSAHAAN';
-        $address     = $this->settings['address'] ?? 'ALAMAT';
-        $phone       = $this->settings['telp'] ?? '';
-        $email       = $this->settings['email'] ?? '';
-        $website     = $this->settings['website'] ?? '';
-        $contactInfo = trim("$phone | $email | $website", ' |');
-
-        $sheet->mergeCells('A1:O1');
-        $sheet->setCellValue('A1', $companyName);
-        $sheet->getStyle('A1')->applyFromArray([
-            'font' => ['bold' => true, 'size' => 16],
-            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
-        ]);
-
-        $sheet->mergeCells('A2:O2');
-        $sheet->setCellValue('A2', $address);
-        $sheet->getStyle('A2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-
-        $sheet->mergeCells('A3:O3');
-        $sheet->setCellValue('A3', $contactInfo);
-        $sheet->getStyle('A3')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-
-        $periode = Carbon::parse($this->mulai)->isoFormat('DD MMMM YYYY').' s/d '.Carbon::parse($this->selesai)->isoFormat('DD MMMM YYYY');
-        $sheet->mergeCells('A4:O4');
-        $sheet->setCellValue('A4', 'Periode: '.$periode);
-        $sheet->getStyle('A4')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-
-        $sheet->getStyle('A6:O6')->applyFromArray([
-            'font' => ['bold' => true],
-            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
-            'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_THIN]],
-            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '8EAADB']],
-        ]);
-
-        $sheet->getColumnDimension('A')->setWidth(5);
-        $sheet->getColumnDimension('B')->setWidth(15);
-        $sheet->getColumnDimension('C')->setWidth(20);
-        $sheet->getColumnDimension('D')->setWidth(12);
-        $sheet->getColumnDimension('E')->setWidth(20);
-        $sheet->getColumnDimension('F')->setWidth(20);
-        $sheet->getColumnDimension('G')->setWidth(15);
-        $sheet->getColumnDimension('H')->setWidth(30);
-        $sheet->getColumnDimension('I')->setWidth(18);
-        $sheet->getColumnDimension('J')->setWidth(15);
-        $sheet->getColumnDimension('K')->setWidth(8);
-        $sheet->getColumnDimension('L')->setWidth(8);
-        $sheet->getColumnDimension('M')->setWidth(20);
-        $sheet->getColumnDimension('N')->setWidth(12);
-        $sheet->getColumnDimension('O')->setWidth(20);
-
-        $highestRow = $sheet->getHighestRow();
-        if ($highestRow > 6) {
-            $sheet->getStyle('A7:O'.$highestRow)
-                ->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
-        }
-
-        $sheet->getStyle('A')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $sheet->getStyle('B')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $sheet->getStyle('K')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $sheet->getStyle('L')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-        $sheet->getStyle('N')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-    }
-
-    public function properties(): array
-    {
-        return [
-            'creator' => config('app.name'),
-            'title' => 'Laporan Retur Outlet',
-            'description' => 'Laporan Retur Outlet Periode '.$this->mulai.' - '.$this->selesai,
-        ];
+        $w->totalRow('TOTAL QTY', [10 => 'sum'], ['grand' => true, 'label_col' => 7]);
     }
 }

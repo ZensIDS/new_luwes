@@ -1,12 +1,8 @@
 @extends('layouts.master')
-@section('title', 'Laporan Outlet')
+@section('title', 'Laporan Toko')
 @section('container')
 <section class="content-header">
-    <h1>Laporan Outlet</h1>
-    <ul class="nav nav-tabs" style="margin-top:15px;">
-        <li><a href="{{ route('laporan.index') }}"><i class="fa fa-building"></i> Laporan Gudang / Warehouse</a></li>
-        <li class="active"><a href="{{ route('laporan.outlet.index') }}"><i class="fa fa-home"></i> Laporan Outlet</a></li>
-    </ul>
+    <h1>Laporan Toko</h1>
 </section>
 <section class="content">
     <div class="alert alert-info">
@@ -52,6 +48,20 @@
                 <div class="box-footer"><button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_outlet_all_stock"><i class="fa fa-bar-chart"></i> Lihat Laporan</button></div>
             </div>
         </div>
+        <div class="col-md-4 col-sm-6">
+            <div class="box box-primary">
+                <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-file-text-o"></i> Laporan PR (Permintaan ke Gudang)</h3></div>
+                <div class="box-body small">Rekap permintaan barang (PR) dari toko ke gudang pada periode terpilih.</div>
+                <div class="box-footer"><button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_pr"><i class="fa fa-bar-chart"></i> Lihat Laporan</button></div>
+            </div>
+        </div>
+        <div class="col-md-4 col-sm-6">
+            <div class="box box-danger">
+                <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-undo"></i> Laporan Retur Toko ke Gudang</h3></div>
+                <div class="box-body small">Retur barang dari toko ke gudang pada periode terpilih.</div>
+                <div class="box-footer"><button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_retur_outlet"><i class="fa fa-bar-chart"></i> Lihat Laporan</button></div>
+            </div>
+        </div>
     </div>
 
     @php
@@ -61,6 +71,8 @@
             ['id' => 'outlet_rafaksi', 'title' => 'Rafaksi Outlet', 'pdf' => 'laporan.pdf.outlet.rafaksi', 'xls' => 'laporan.outlet.rafaksi', 'date' => true, 'outlet' => true, 'cashier' => false, 'rafaksi' => true],
             ['id' => 'outlet_retur', 'title' => 'Retur Outlet', 'pdf' => 'laporan.pdf.outlet.retur', 'xls' => 'laporan.outlet.retur', 'date' => true, 'outlet' => true, 'cashier' => false, 'rafaksi' => false],
             ['id' => 'outlet_all_stock', 'title' => 'All Stock Outlet', 'pdf' => 'laporan.pdf.outlet.all-stock', 'xls' => 'laporan.outlet.all-stock', 'date' => false, 'outlet' => true, 'cashier' => false, 'rafaksi' => false],
+            ['id' => 'pr', 'title' => 'PR (Permintaan ke Gudang)', 'pdf' => 'laporan.pdf.pr', 'xls' => 'laporan.export.pr', 'date' => true, 'outlet' => false, 'cashier' => false, 'rafaksi' => false],
+            ['id' => 'retur_outlet', 'title' => 'Retur Toko ke Gudang', 'pdf' => 'laporan.pdf.retur-outlet', 'xls' => 'laporan.retur-outlet', 'date' => true, 'outlet' => false, 'cashier' => false, 'rafaksi' => false],
         ];
     @endphp
 
