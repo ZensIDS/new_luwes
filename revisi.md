@@ -27,7 +27,7 @@ Revisi Luwes
     [ ] listing -> product baru -> nominal (setting)
     [ ] sewa
 
-[ ] Laporan
+[x] Laporan
     [x] Pemisahan Laporan Gudang & Toko
     [x] Check format all laporan Toko
-    [ ] Check format all laporan Gudang
+    [x] Check format all laporan Gudang

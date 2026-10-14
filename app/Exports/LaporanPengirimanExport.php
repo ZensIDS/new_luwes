@@ -2,81 +2,91 @@
 
 namespace App\Exports;
 
+use App\Exports\LaporanGudang\Konversi;
+use App\Exports\LaporanGudang\Status;
+use App\Exports\LaporanToko\BaseLaporanTokoExport;
+use App\Exports\LaporanToko\ReportMeta;
+use App\Exports\LaporanToko\SheetWriter;
+use App\Exports\LaporanToko\Theme;
 use App\Models\DeliveryOrder;
-use Carbon\Carbon;
+use App\Support\ReportQuery;
 use Illuminate\Http\Request;
-use Maatwebsite\Excel\Concerns\Exportable;
-use Maatwebsite\Excel\Concerns\FromCollection;
-use Maatwebsite\Excel\Concerns\WithHeadings;
-use Maatwebsite\Excel\Concerns\WithTitle;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
-class LaporanPengirimanExport implements FromCollection, WithHeadings, WithTitle
+/** B5: Laporan Pengiriman Barang, dikelompokkan per Surat Jalan dengan subtotal qty. */
+class LaporanPengirimanExport extends BaseLaporanTokoExport
 {
-    use Exportable;
-    protected $request;
+    private const STATUS = ['draft' => 'Draft', 'sent' => 'Dikirim', 'delivered' => 'Diterima', 'completed' => 'Selesai'];
 
-    public function __construct(Request $request)
+    public function __construct(private readonly Request $request) {}
+
+    protected function makeMeta(): ReportMeta
     {
-        $this->request = $request;
+        return ReportMeta::fromRequest($this->request, 'LAPORAN PENGIRIMAN BARANG', 'Pengiriman-Barang');
     }
 
-    public function title(): string
+    protected function sheetName(): string
     {
-        return 'Laporan Pengiriman Barang';
+        return 'Pengiriman Barang';
     }
 
-    public function headings(): array
+    protected function build(SheetWriter $w, Worksheet $sheet, ReportMeta $meta): void
     {
-        return [
-            'No',
-            'Tanggal',
-            'No Surat Jalan',
-            'No Dokumen',
-            'Tujuan',
-            'Kode Barang',
-            'Nama Barang',
-            'Batch',
-            'Qty',
-            'Satuan',
-            'Status',
-            'Keterangan'
-        ];
-    }
-
-    public function collection()
-    {
-        $mulai   = $this->request->input('tanggal_mulai');
-        $selesai = $this->request->input('tanggal_selesai');
+        $w->columns([
+            ['h' => 'Tanggal', 'fmt' => Theme::FMT_DATE, 'align' => 'center'],
+            ['h' => 'No Surat Jalan'],
+            ['h' => 'No Dokumen'],
+            ['h' => 'Tujuan'],
+            ['h' => 'Kode Barang', 'text' => true],
+            ['h' => 'Nama Barang', 'max' => 45],
+            ['h' => 'Batch', 'text' => true],
+            ['h' => 'Expired', 'fmt' => Theme::FMT_DATE, 'align' => 'center'],
+            ['h' => 'Qty', 'fmt' => Theme::FMT_NUMBER],
+            ['h' => 'Satuan', 'align' => 'center'],
+            ['h' => 'Konversi'],
+            ['h' => 'Status', 'align' => 'center'],
+            ['h' => 'Keterangan', 'max' => 40, 'wrap' => true],
+        ])->kop()->info()->header();
 
         $deliveries = DeliveryOrder::with(['owner', 'requestOrder', 'items.product'])
-            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'delivery_date', $mulai, $selesai))
-            ->orderBy('delivery_date')
+            ->tap(fn ($q) => ReportQuery::betweenDates($q, 'delivery_date', $meta->start->toDateString(), $meta->end->toDateString()))
+            ->orderBy('delivery_date')->orderBy('id')
             ->get();
 
-        $rows = collect();
-        $no = 1;
-
         foreach ($deliveries as $do) {
-            foreach ($do->items as $item) {
-                $k = $item->product?->konversiDisplay($item->qty) ?? '-';
+            if ($do->items->isEmpty()) {
+                continue;
+            }
 
-                $rows->push([
-                    $no++,
-                    Carbon::parse($do->delivery_date)->format('d M Y'),
+            $status = self::STATUS[$do->status ?? ''] ?? ucfirst((string) $do->status);
+            $first = null;
+
+            foreach ($do->items as $item) {
+                $qty = (float) ($item->qty ?? 0);
+                $r = $w->row([
+                    $do->delivery_date,
                     $do->code,
                     $do->requestOrder?->code ?? '-',
                     $do->owner?->name ?? '-',
                     $item->product?->code ?? '-',
                     $item->product?->name ?? '-',
-                    $item->sku ?? '-',
-                    $item->qty.($k && $k !== '-' ? " ({$k})" : ''),
+                    $item->sku ?: null,
+                    $item->expired_at,
+                    $qty,
                     $item->product?->satuan ?? 'PCS',
-                    ucfirst($do->status ?? '-'),
-                    '',
-                ]);
+                    Konversi::of($item->product, $qty),
+                    $status,
+                    $do->notes ?: null,
+                ], ['cells' => array_filter([12 => Status::cell($status)])]);
+
+                $first ??= $r;
             }
+
+            $w->totalRow('Subtotal '.$do->code, [9 => 'sum'], [
+                'from' => $first, 'to' => $w->currentRow() - 1, 'label_col' => 6, 'sub' => true,
+            ]);
         }
 
-        return $rows;
+        $w->totalRow('TOTAL', [9 => 'sum'], ['grand' => true, 'label_col' => 6]);
     }
 }

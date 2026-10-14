@@ -2,110 +2,100 @@
 
 namespace App\Exports;
 
+use App\Exports\LaporanGudang\Konversi;
+use App\Exports\LaporanGudang\Status;
+use App\Exports\LaporanToko\BaseLaporanTokoExport;
+use App\Exports\LaporanToko\ReportMeta;
+use App\Exports\LaporanToko\SheetWriter;
+use App\Exports\LaporanToko\Theme;
+use App\Models\ProductMinimumAdjustment;
 use App\Models\Stock;
-use Carbon\Carbon;
-use Maatwebsite\Excel\Concerns\Exportable;
-use Maatwebsite\Excel\Concerns\FromQuery;
-use Maatwebsite\Excel\Concerns\WithHeadings;
-use Maatwebsite\Excel\Concerns\WithMapping;
-use Maatwebsite\Excel\Concerns\WithTitle;
+use Illuminate\Http\Request;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
-class StockExport implements FromQuery, WithHeadings, WithMapping, WithTitle
+/** B7: Laporan Stok Barang, laporan posisi (per tanggal cetak), satu baris per batch. */
+class StockExport extends BaseLaporanTokoExport
 {
-    use Exportable;
+    public function __construct(private readonly Request $request) {}
 
-    /** Nomor urut baris; map() dipanggil berurutan per baris oleh Laravel Excel. */
-    private int $no = 0;
-
-    /** @var \Illuminate\Support\Collection<int, \App\Models\ProductMinimumAdjustment>|null */
-    private $activeAdjs = null;
-
-    /** @var \Illuminate\Support\Collection<int|string, mixed>|null */
-    private $productTotals = null;
-
-    public function title(): string
+    protected function makeMeta(): ReportMeta
     {
-        return 'Laporan Stok Barang';
+        return ReportMeta::fromRequest($this->request, 'LAPORAN STOK BARANG', 'Stok-Barang', [], now());
     }
 
-    public function headings(): array
+    protected function sheetName(): string
     {
-        return [
-            'No',
-            'Kode Barang',
-            'Nama Barang',
-            'Batch',
-            'Expired Date',
-            'Kategori',
-            'Satuan',
-            'Stok Batch',
-            'Total Stok Produk',
-            'Min Stok',
-            'Selisih',
-            'Status Stok',
-            'Status Expired',
-            'Lokasi',
-        ];
+        return 'Stok Barang';
     }
 
-    /**
-     * Dibaca per potongan (chunk) oleh Laravel Excel, bukan ->get() seluruh batch stok.
-     * `id` sebagai pembeda urutan agar paging stabil (urutan produk tetap sama).
-     */
-    public function query()
+    protected function build(SheetWriter $w, Worksheet $sheet, ReportMeta $meta): void
     {
-        return Stock::query()
-            ->with(['product.category'])
-            ->orderBy('product_id')
-            ->orderBy('id');
-    }
+        $w->columns([
+            ['h' => 'Kode Barang', 'text' => true],
+            ['h' => 'Nama Barang', 'max' => 45],
+            ['h' => 'Kategori'],
+            ['h' => 'Batch', 'text' => true],
+            ['h' => 'Expired Date', 'fmt' => Theme::FMT_DATE, 'align' => 'center'],
+            ['h' => 'Satuan', 'align' => 'center'],
+            ['h' => 'Stok Batch', 'fmt' => Theme::FMT_NUMBER],
+            ['h' => 'Konversi (Batch)'],
+            ['h' => 'Total Stok Produk', 'fmt' => Theme::FMT_NUMBER],
+            ['h' => 'Min Stok', 'fmt' => Theme::FMT_NUMBER],
+            ['h' => 'Selisih', 'fmt' => '+#,##0;-#,##0;0'],
+            ['h' => 'Status Stok', 'align' => 'center'],
+            ['h' => 'Status Expired', 'align' => 'center', 'min' => 15],
+            ['h' => 'Lokasi'],
+        ])->kop()->info()->header();
 
-    public function map($s): array
-    {
-        // Data pendukung dimuat sekali (bukan per baris) saat baris pertama dipetakan.
-        if ($this->activeAdjs === null) {
-            $this->activeAdjs = \App\Models\ProductMinimumAdjustment::activeOn(now()->toDateString())
-                ->orderByDesc('active_from')
-                ->orderByDesc('id')
-                ->get()
-                ->keyBy('product_id');
+        // Dimuat sekali. Total stok produk = SUM(stocks.qty) semua batch (sama dengan menu Stok/Produk);
+        // Min Stok, Selisih, dan Status Stok dinilai terhadap total ini, bukan qty satu batch.
+        $adjustments = ProductMinimumAdjustment::activeOn(now()->toDateString())
+            ->orderByDesc('active_from')->orderByDesc('id')
+            ->get()->keyBy('product_id');
 
-            // Total stok fisik per produk = SUM(stocks.qty) semua batch (sama dengan menu Stok/Produk).
-            // Min Stok, Selisih, dan Status Stok dinilai terhadap TOTAL ini, bukan qty satu batch.
-            $this->productTotals = Stock::selectRaw('product_id, SUM(qty) as total_qty')
-                ->groupBy('product_id')
-                ->pluck('total_qty', 'product_id');
+        $totals = Stock::selectRaw('product_id, SUM(qty) as total_qty')
+            ->groupBy('product_id')->pluck('total_qty', 'product_id');
+
+        // lazy(): dibaca per potongan (relasi ikut dimuat per potongan), urutan produk tetap stabil.
+        $stocks = Stock::query()->with(['product.category'])
+            ->orderBy('product_id')->orderBy('id')
+            ->lazy(1000);
+
+        foreach ($stocks as $s) {
+            $r = $w->currentRow();
+            $product = $s->product;
+            $baseMin = (float) ($product?->min_stock ?? 0);
+            $adj = $adjustments->get($s->product_id);
+            $min = $adj ? (int) ceil($baseMin * (1 + $adj->adjustment_percentage / 100)) : (int) $baseMin;
+            $total = (int) ($totals[$s->product_id] ?? 0);
+            $diff = $total - $min;
+
+            $statusStok = $total > $min ? 'Aman' : ($total > 0 ? 'Kritis' : 'Habis');
+            $statusExp = $s->expired_at ? ($s->expired_at->isPast() ? 'Expired' : 'Belum Expired') : null;
+            $qty = (float) ($s->qty ?? 0);
+
+            $w->row([
+                $product?->code ?? '-',
+                $product?->name ?? '-',
+                $product?->category?->name ?? '-',
+                $s->sku ?: null,
+                $s->expired_at,
+                $product?->satuan ?? 'PCS',
+                $qty,
+                Konversi::of($product, $qty),
+                (float) $total,
+                (float) $min,
+                SheetWriter::f("I{$r}-J{$r}"),
+                $statusStok,
+                $statusExp,
+                $s->location ?: null,
+            ], ['cells' => array_filter([
+                11 => $diff < 0 ? ['font' => Theme::DANGER_FG, 'bold' => true] : null,
+                12 => Status::cell($statusStok),
+                13 => Status::cell($statusExp),
+            ])]);
         }
 
-        $baseMin = $s->product?->min_stock ?? 0;
-        $adj = $this->activeAdjs->get($s->product_id);
-        $minStok = $adj
-            ? (int) ceil($baseMin * (1 + $adj->adjustment_percentage / 100))
-            : (int) $baseMin;
-        $totalQty = (int) ($this->productTotals[$s->product_id] ?? 0);
-        $selisih = $totalQty - $minStok;
-        $statusStok = $totalQty > $minStok ? 'Aman' : ($totalQty > 0 ? 'Kritis' : 'Habis');
-        $statusExp = $s->expired_at && Carbon::parse($s->expired_at)->isPast() ? 'Expired' : 'Belum Expired';
-
-        $qty         = $s->qty ?? 0;
-        $konvDisplay = $s->product?->konversiDisplay($qty) ?? '-';
-        $konvTotal   = $s->product?->konversiDisplay($totalQty) ?? '-';
-
-        return [
-            ++$this->no,
-            $s->product?->code ?? '-',
-            $s->product?->name ?? '-',
-            $s->sku ?? '-',
-            $s->expired_at ? Carbon::parse($s->expired_at)->format('d/m/Y') : '-',
-            $s->product?->category?->name ?? '-',
-            $s->product?->satuan ?? 'PCS',
-            $qty.($konvDisplay && $konvDisplay !== '-' ? " ({$konvDisplay})" : ''),
-            $totalQty.($konvTotal && $konvTotal !== '-' ? " ({$konvTotal})" : ''),
-            $minStok,
-            ($selisih >= 0 ? '+' : '').$selisih,
-            $statusStok,
-            $s->expired_at ? $statusExp : '-',
-            $s->location ?? '-',
-        ];
+        $w->totalRow('TOTAL STOK BATCH', [7 => 'sum'], ['grand' => true, 'label_col' => 2]);
     }
 }

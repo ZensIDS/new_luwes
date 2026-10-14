@@ -2,80 +2,31 @@
 
 namespace App\Exports;
 
+use App\Exports\LaporanGudang\PembelianBarangRekapSheet;
+use App\Exports\LaporanGudang\PembelianBarangSheet;
 use App\Models\Pembelian;
-use Carbon\Carbon;
+use App\Support\ReportQuery;
 use Illuminate\Http\Request;
-use Maatwebsite\Excel\Concerns\Exportable;
-use Maatwebsite\Excel\Concerns\FromCollection;
-use Maatwebsite\Excel\Concerns\WithHeadings;
-use Maatwebsite\Excel\Concerns\WithTitle;
+use Maatwebsite\Excel\Concerns\WithMultipleSheets;
 
-class LaporanPembelianBarangExport implements FromCollection, WithHeadings, WithTitle
+/** B2: Laporan Pembelian Barang (sheet detail + rekap per supplier). */
+class LaporanPembelianBarangExport implements WithMultipleSheets
 {
-    use Exportable;
-    protected $request;
+    public function __construct(private readonly Request $request) {}
 
-    public function __construct(Request $request)
+    public function sheets(): array
     {
-        $this->request = $request;
-    }
+        $meta = \App\Exports\LaporanToko\ReportMeta::fromRequest($this->request, '', 'Pembelian-Barang');
 
-    public function title(): string
-    {
-        return 'Laporan Pembelian Barang';
-    }
-
-    public function headings(): array
-    {
-        return [
-            'No',
-            'Tanggal',
-            'Kode PO',
-            'Supplier',
-            'Kode Barang',
-            'Nama Barang',
-            'Qty',
-            'Satuan',
-            'Harga Satuan',
-            'Total Harga',
-            'Status',
-            'Keterangan'
-        ];
-    }
-
-    public function collection()
-    {
-        $mulai   = $this->request->input('tanggal_mulai');
-        $selesai = $this->request->input('tanggal_selesai');
-
-        $pembelians = Pembelian::with(['supplier', 'pembelianProducts.product'])
-            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'created_at', $mulai, $selesai))
-            ->orderBy('created_at')
+        // Data dibaca sekali lalu dipakai kedua sheet.
+        $orders = Pembelian::with(['supplier', 'pembelianProducts.product'])
+            ->tap(fn ($q) => ReportQuery::betweenDates($q, 'created_at', $meta->start->toDateString(), $meta->end->toDateString()))
+            ->orderBy('created_at')->orderBy('id')
             ->get();
 
-        $rows = collect();
-        $no = 1;
-
-        foreach ($pembelians as $p) {
-            foreach ($p->pembelianProducts as $pp) {
-                $k = $pp->product?->konversiDisplay($pp->qty ?? 0);
-                $rows->push([
-                    $no++,
-                    Carbon::parse($p->created_at)->format('d M Y'),
-                    $p->code,
-                    $p->supplier?->name ?? '-',
-                    $pp->product?->code ?? '-',
-                    $pp->product?->name ?? '-',
-                    ($pp->qty ?? 0).($k && $k !== '-' ? " ({$k})" : ''),
-                    $pp->product?->satuan ?? 'PCS',
-                    $pp->harga_beli,
-                    $pp->subtotal,
-                    ucfirst($p->status ?? '-'),
-                    '',
-                ]);
-            }
-        }
-
-        return $rows;
+        return [
+            new PembelianBarangSheet($this->request, $orders),
+            new PembelianBarangRekapSheet($this->request, $orders),
+        ];
     }
 }

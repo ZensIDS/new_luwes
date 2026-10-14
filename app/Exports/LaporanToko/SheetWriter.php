@@ -177,6 +177,21 @@ final class SheetWriter
         return $this;
     }
 
+    /** Baris peringatan berwarna (mis. data dipotong), ditulis sebelum header tabel. */
+    public function notice(string $text): static
+    {
+        $r = $this->row++;
+        $this->str('A'.$r, $text);
+        $this->style('A'.$r.':'.$this->col($this->colCount).$r, [
+            'fill' => $this->fill(Theme::WARN_BG),
+            'font' => $this->font(['bold' => true, 'color' => Theme::WARN_FG]),
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT, 'vertical' => Alignment::VERTICAL_CENTER],
+        ]);
+        $this->sheet->getRowDimension($r)->setRowHeight(20);
+
+        return $this;
+    }
+
     // ── A5: header tabel ────────────────────────────────────────────────────
 
     /** Baris pengelompokan kolom di atas header. $groups = [['label' => 'Produk', 'from' => 1, 'to' => 4], ...] */

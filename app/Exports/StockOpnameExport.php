@@ -2,265 +2,145 @@
 
 namespace App\Exports;
 
-use Carbon\Carbon;
-use Maatwebsite\Excel\Concerns\Exportable;
-use Maatwebsite\Excel\Concerns\FromCollection;
-use Maatwebsite\Excel\Concerns\WithCustomStartCell;
-use Maatwebsite\Excel\Concerns\WithDrawings;
-use Maatwebsite\Excel\Concerns\WithHeadings;
-use Maatwebsite\Excel\Concerns\WithMapping;
-use Maatwebsite\Excel\Concerns\WithProperties;
-use Maatwebsite\Excel\Concerns\WithStyles;
-use PhpOffice\PhpSpreadsheet\Style\Alignment;
-use PhpOffice\PhpSpreadsheet\Style\Border;
-use PhpOffice\PhpSpreadsheet\Style\Fill;
-use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
+use App\Exports\LaporanGudang\Konversi;
+use App\Exports\LaporanGudang\Status;
+use App\Exports\LaporanToko\BaseLaporanTokoExport;
+use App\Exports\LaporanToko\ReportMeta;
+use App\Exports\LaporanToko\SheetWriter;
+use App\Exports\LaporanToko\Theme;
+use App\Models\StockAdjustment;
+use App\Support\ReportQuery;
+use Illuminate\Http\Request;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
-class StockOpnameExport implements FromCollection, WithHeadings, WithMapping, WithStyles, WithDrawings, WithCustomStartCell, WithProperties
+/**
+ * B12: Laporan Stok Opname & Adjustment.
+ *
+ *  - Memakai fondasi baru (kop, info, header, filter, freeze, cetak); tidak ada lagi posisi tetap B16.
+ *  - Satu baris per penyesuaian dengan kolom Tanggal, jadi laporan bisa berupa rentang tanggal.
+ *  - "No Dokumen" buatan dan "Nama" kosong dihapus (tidak ada nomor dokumen nyata di data).
+ *  - Selisih = rumus (Stok Fisik - Stok Sistem); plus hijau, minus merah.
+ *  - Periode tanpa data menghasilkan sheet kosong dengan pesan (D3), tanpa fallback 500 data terbaru.
+ *  - Filter Lokasi (produk) tampil di blok info.
+ */
+class StockOpnameExport extends BaseLaporanTokoExport
 {
-    use Exportable;
+    private const COL_SISTEM = 7;
+    private const COL_FISIK = 8;
+    private const COL_SELISIH = 9;
+    private const COL_ADJUST = 10;
 
-    protected $adjustments;
-    protected $date;
-    protected $settings;
+    public function __construct(private readonly Request $request) {}
 
-    public function __construct($adjustments, $date, array $settings = [])
+    protected function makeMeta(): ReportMeta
     {
-        $this->adjustments = $adjustments;
-        $this->date        = $date;
-        $this->settings    = $settings;
+        return ReportMeta::fromRequest($this->request, 'LAPORAN STOK OPNAME & ADJUSTMENT', 'Stok-Opname', ['lokasi']);
     }
 
-    public function collection()
+    protected function sheetName(): string
     {
-        return $this->adjustments;
+        return 'Stok Opname';
     }
 
-    public function headings(): array
+    protected function build(SheetWriter $w, Worksheet $sheet, ReportMeta $meta): void
     {
-        return [
-            'No',
-            'Kode Barang',
-            'Nama Barang',
-            'Batch',
-            'Expired',
-            'Satuan',
-            'Stok Sistem',
-            'Stok Fisik',
-            'Selisih',
-            'QTY Adjust',
-            'Alasan',
-            'Status',
-            'Keterangan',
-        ];
-    }
+        @ini_set('memory_limit', '1024M');
+        @set_time_limit(300);
 
-    public function map($item): array
-    {
-        static $no = 0;
-        $no++;
+        $w->columns([
+            ['h' => 'Tanggal', 'fmt' => Theme::FMT_DATE, 'align' => 'center'],
+            ['h' => 'Kode Barang', 'text' => true],
+            ['h' => 'Nama Barang', 'max' => 45],
+            ['h' => 'Batch', 'text' => true],
+            ['h' => 'Expired', 'fmt' => Theme::FMT_DATE, 'align' => 'center'],
+            ['h' => 'Satuan', 'align' => 'center'],
+            ['h' => 'Stok Sistem', 'fmt' => Theme::FMT_NUMBER],
+            ['h' => 'Stok Fisik', 'fmt' => Theme::FMT_NUMBER],
+            ['h' => 'Selisih', 'fmt' => Theme::FMT_NUMBER],
+            ['h' => 'Qty Adjust', 'fmt' => Theme::FMT_NUMBER],
+            ['h' => 'Konversi Stok Sistem'],
+            ['h' => 'Lokasi'],
+            ['h' => 'Alasan', 'max' => 30, 'wrap' => true],
+            ['h' => 'Status', 'align' => 'center'],
+            ['h' => 'Keterangan', 'max' => 50, 'wrap' => true],
+        ])->kop()->info()->header();
 
-        $systemQty   = $item->system_qty ?? 0;
-        $physicalQty = $item->physical_qty ?? 0;
-        $selisih     = $physicalQty - $systemQty;
-        $konvDisplay = $item->product->konversiDisplay($systemQty);
+        $query = StockAdjustment::with(['product', 'stock'])
+            ->tap(fn ($q) => ReportQuery::betweenDates(
+                $q,
+                'adjustment_date',
+                $meta->start->toDateString(),
+                $meta->end->toDateString()
+            ))
+            ->orderBy('adjustment_date')
+            ->orderBy('id');
 
-        return [
-            $no,
-            $item->product->code ?? '-',
-            $item->product->name ?? '-',
-            $item->sku ?? '-',
-            $item->stock?->expired_at
-                ? Carbon::parse($item->stock->expired_at)->format('d/m/Y')
-                : '-',
-            $item->product->satuan ?? 'PCS',
-            $systemQty.($konvDisplay && $konvDisplay !== '-' ? " ({$konvDisplay})" : ''),
-            $physicalQty,
-            ($selisih >= 0 ? '+' : '').$selisih,
-            ($item->quantity >= 0 ? '+' : '').$item->quantity,
-            $item->reason ?? '-',
-            $item->status ?? 'Selesai',
-            $item->keterangan ?? '-',
-        ];
-    }
-
-    public function startCell(): string
-    {
-        return 'B16';
-    }
-
-    public function styles(Worksheet $sheet)
-    {
-        $companyName = $this->settings['name'] ?? 'NAMA PERUSAHAAN';
-        $address     = $this->settings['address'] ?? 'ALAMAT';
-        $phone       = $this->settings['telp'] ?? '';
-        $email       = $this->settings['email'] ?? '';
-        $website     = $this->settings['website'] ?? '';
-        $contactInfo = trim("$phone | $email | $website", ' |');
-
-        $sheet->getRowDimension(1)->setRowHeight(50);
-
-        $sheet->setCellValue('D2', $companyName);
-        $sheet->mergeCells('D2:O2');
-        $sheet->getStyle('D2')->applyFromArray([
-            'font'      => ['bold' => true, 'size' => 14],
-            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
-        ]);
-        $sheet->setCellValue('D3', $address);
-        $sheet->mergeCells('D3:O3');
-        $sheet->setCellValue('D4', $contactInfo);
-        $sheet->mergeCells('D4:O4');
-        $sheet->getStyle('D3:D4')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-
-        $sheet->getRowDimension(5)->setRowHeight(20);
-
-        $sheet->mergeCells('B6:O6');
-        $sheet->getStyle('B6:O6')->getBorders()->getTop()->setBorderStyle(Border::BORDER_THICK);
-
-        $sheet->setCellValue('B8', 'LAPORAN STOK OPNAME & ADJUSTMENT');
-        $sheet->mergeCells('B8:O8');
-        $sheet->getStyle('B8')->applyFromArray([
-            'font'      => ['bold' => true, 'size' => 12],
-            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
-        ]);
-
-        $docNo = 'SO/'.Carbon::parse($this->date)->format('Y/m').'/'.str_pad($this->adjustments->count(), 5, '0', STR_PAD_LEFT);
-        $sheet->setCellValue('B10', 'No Dokumen :');
-        $sheet->setCellValue('D10', $docNo);
-        $sheet->getStyle('B10')->getFont()->setBold(true);
-
-        $sheet->setCellValue('B11', 'Tanggal :');
-        $sheet->setCellValue('D11', Carbon::parse($this->date)->isoFormat('DD MMMM YYYY'));
-        $sheet->getStyle('B11')->getFont()->setBold(true);
-
-        $sheet->setCellValue('B12', 'Nama :');
-        $sheet->setCellValue('D12', ' ');
-        $sheet->getStyle('B12')->getFont()->setBold(true);
-
-        $sheet->setCellValue('B13', 'Referensi :');
-        $sheet->setCellValue('D13', 'Stok Opname / Koreksi Stok');
-        $sheet->getStyle('B13')->getFont()->setBold(true);
-
-        $sheet->setCellValue('B15', 'Detail Penyesuaian Stok');
-        $sheet->getStyle('B15')->getFont()->setBold(true);
-
-        // TABLE HEADER — cols B:N = 13 columns
-        $sheet->getStyle('B16:N16')->applyFromArray([
-            'font'      => ['bold' => true],
-            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'wrapText' => true],
-            'borders'   => ['allBorders' => ['borderStyle' => Border::BORDER_THIN]],
-            'fill'      => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '8EAADB']],
-        ]);
-        $sheet->getRowDimension(16)->setRowHeight(28);
-
-        $highestRow = $sheet->getHighestRow();
-        if ($highestRow > 16) {
-            $sheet->getStyle('B17:N'.$highestRow)
-                ->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+        if ($this->request->filled('lokasi')) {
+            $lokasi = (string) $this->request->input('lokasi');
+            $query->whereHas('product', fn ($q) => $q->where('lokasi', $lokasi));
         }
 
-        $sheet->getColumnDimension('B')->setWidth(5);
-        $sheet->getColumnDimension('C')->setWidth(12);
-        $sheet->getColumnDimension('D')->setWidth(24);
-        $sheet->getColumnDimension('E')->setWidth(14);
-        $sheet->getColumnDimension('F')->setWidth(10);
-        $sheet->getColumnDimension('G')->setWidth(7);
-        $sheet->getColumnDimension('H')->setWidth(12);
-        $sheet->getColumnDimension('I')->setWidth(10);
-        $sheet->getColumnDimension('J')->setWidth(9);
-        $sheet->getColumnDimension('K')->setWidth(9);
-        $sheet->getColumnDimension('L')->setWidth(16);
-        $sheet->getColumnDimension('M')->setWidth(10);
-        $sheet->getColumnDimension('N')->setWidth(16);
+        foreach ($query->lazy(2000) as $a) {
+            $sistem = (float) ($a->system_qty ?? 0);
+            $fisik = (float) ($a->physical_qty ?? 0);
+            $selisih = $fisik - $sistem;
+            $adjust = (float) ($a->quantity ?? 0);
 
-        foreach (['G', 'H', 'I', 'J', 'K', 'M'] as $col) {
-            $sheet->getStyle($col)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            // Rumus Selisih ditulis di baris yang sedang dibuat.
+            $selisihFormula = SheetWriter::f($w->ref(self::COL_FISIK).'-'.$w->ref(self::COL_SISTEM));
+
+            $tone = match (true) {
+                $selisih > 0 => ['fill' => Theme::OK_BG, 'font' => Theme::OK_FG, 'bold' => true],
+                $selisih < 0 => ['fill' => Theme::DANGER_BG, 'font' => Theme::DANGER_FG, 'bold' => true],
+                default => null,
+            };
+            $adjustTone = match (true) {
+                $adjust > 0 => ['font' => Theme::OK_FG, 'bold' => true],
+                $adjust < 0 => ['font' => Theme::DANGER_FG, 'bold' => true],
+                default => null,
+            };
+
+            $cells = array_filter([
+                self::COL_SELISIH => $tone,
+                self::COL_ADJUST => $adjustTone,
+                14 => Status::cell($a->status ?? 'Selesai'),
+            ]);
+
+            $w->row([
+                $a->adjustment_date,
+                $a->product?->code ?? '-',
+                $a->product?->name ?? '-',
+                $a->sku,
+                $a->stock?->expired_at,
+                $a->product?->satuan ?? 'PCS',
+                $sistem,
+                $fisik,
+                $selisihFormula,
+                $adjust,
+                Konversi::of($a->product, $sistem),
+                $a->product?->lokasi,
+                $a->reason,
+                $a->status ?? 'Selesai',
+                $a->keterangan,
+            ], $cells ? ['cells' => $cells] : []);
         }
 
-        // SUMMARY
-        $totalMasuk  = $this->adjustments->where('quantity', '>', 0)->sum('quantity');
-        $totalKeluar = $this->adjustments->where('quantity', '<', 0)->sum(fn ($a) => abs($a->quantity));
+        $first = $w->firstDataRow();
+        $last = $w->currentRow() - 1;
 
-        $summaryRow = $highestRow + 2;
-        $sheet->setCellValue('B'.$summaryRow, 'Total Penyesuaian Masuk :');
-        $sheet->mergeCells('B'.$summaryRow.':E'.$summaryRow);
-        $sheet->setCellValue('F'.$summaryRow, $totalMasuk);
-        $sheet->getStyle('B'.$summaryRow)->getFont()->setBold(true);
+        if ($first !== null && $last >= $first) {
+            $range = $w->col(self::COL_ADJUST).$first.':'.$w->col(self::COL_ADJUST).$last;
 
-        $sheet->setCellValue('B'.($summaryRow + 1), 'Total Penyesuaian Keluar :');
-        $sheet->mergeCells('B'.($summaryRow + 1).':E'.($summaryRow + 1));
-        $sheet->setCellValue('F'.($summaryRow + 1), $totalKeluar);
-        $sheet->getStyle('B'.($summaryRow + 1))->getFont()->setBold(true);
-
-        $sheet->getStyle('B'.$summaryRow.':N'.($summaryRow + 1))
-            ->getBorders()->getOutline()->setBorderStyle(Border::BORDER_THIN);
-
-        // SIGNATURE
-        $row = $summaryRow + 4;
-        $sheet->mergeCells('B'.$row.':D'.$row);
-        $sheet->mergeCells('F'.$row.':I'.$row);
-        $sheet->mergeCells('K'.$row.':N'.$row);
-        $sheet->setCellValue('B'.$row, 'Dibuat Oleh');
-        $sheet->setCellValue('F'.$row, 'Diperiksa');
-        $sheet->setCellValue('K'.$row, 'Disetujui');
-        $sheet->getStyle('B'.$row.':N'.$row)->applyFromArray([
-            'font'      => ['bold' => true],
-            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
-        ]);
-
-        $row++;
-        $sheet->mergeCells('B'.$row.':D'.$row);
-        $sheet->mergeCells('F'.$row.':I'.$row);
-        $sheet->mergeCells('K'.$row.':N'.$row);
-        $sheet->setCellValue('B'.$row, 'Staff Gudang');
-        $sheet->setCellValue('F'.$row, 'Supervisor Gudang');
-        $sheet->setCellValue('K'.$row, 'Manager');
-        $sheet->getStyle('B'.$row.':N'.$row)->applyFromArray([
-            'font'      => ['bold' => true],
-            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
-        ]);
-
-        $row += 5;
-        $sheet->mergeCells('B'.$row.':D'.$row);
-        $sheet->mergeCells('F'.$row.':I'.$row);
-        $sheet->mergeCells('K'.$row.':N'.$row);
-        $sheet->setCellValue('B'.$row, 'Nama');
-        $sheet->setCellValue('F'.$row, 'Nama');
-        $sheet->setCellValue('K'.$row, 'Nama');
-        $sheet->getStyle('B'.$row.':N'.$row)->applyFromArray([
-            'font'      => ['bold' => true],
-            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
-        ]);
-        $sheet->getStyle('B'.($row - 1).':N'.($row - 1))
-            ->getBorders()->getBottom()->setBorderStyle(Border::BORDER_THIN);
-    }
-
-    public function drawings()
-    {
-        $drawing = new Drawing();
-        $drawing->setName('Logo');
-        $drawing->setDescription('Logo');
-
-        $logoPath = $this->settings['logo'] ?? null;
-        if ($logoPath && \Illuminate\Support\Facades\Storage::disk('public')->exists($logoPath)) {
-            $drawing->setPath(\Illuminate\Support\Facades\Storage::disk('public')->path($logoPath));
-        } else {
-            $drawing->setPath(public_path('img/logo.jpeg'));
+            // Ringkasan dengan rumus. SUMIF mengikuti seluruh data (tidak berubah saat difilter).
+            $w->totalRow('Total Penyesuaian Masuk', [
+                self::COL_ADJUST => SheetWriter::f('SUMIF('.$range.',">0")'),
+            ], ['grand' => true, 'label_col' => 3]);
+            $w->totalRow('Total Penyesuaian Keluar', [
+                self::COL_ADJUST => SheetWriter::f('-SUMIF('.$range.',"<0")'),
+            ], ['label_col' => 3]);
+            $w->totalRow('Selisih Bersih (Masuk - Keluar)', [
+                self::COL_ADJUST => SheetWriter::f($w->col(self::COL_ADJUST).($last + 1).'-'.$w->col(self::COL_ADJUST).($last + 2)),
+            ], ['label_col' => 3]);
         }
-
-        $drawing->setHeight(80);
-        $drawing->setCoordinates('B2');
-
-        return [$drawing];
-    }
-
-    public function properties(): array
-    {
-        return [
-            'creator'     => config('app.name'),
-            'title'       => 'Laporan Stok Opname & Adjustment',
-            'description' => 'Stock Opname '.$this->date,
-        ];
     }
 }

@@ -2,86 +2,109 @@
 
 namespace App\Exports;
 
-use App\Models\Stock;
-use Carbon\Carbon;
+use App\Exports\LaporanGudang\Konversi;
+use App\Exports\LaporanGudang\PembelianBarangSheet;
+use App\Exports\LaporanGudang\Status;
+use App\Exports\LaporanToko\BaseLaporanTokoExport;
+use App\Exports\LaporanToko\ReportMeta;
+use App\Exports\LaporanToko\SheetWriter;
+use App\Exports\LaporanToko\Theme;
+use App\Models\Pembelian;
 use Illuminate\Http\Request;
-use Maatwebsite\Excel\Concerns\Exportable;
-use Maatwebsite\Excel\Concerns\FromCollection;
-use Maatwebsite\Excel\Concerns\WithHeadings;
-use Maatwebsite\Excel\Concerns\WithTitle;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
-class LaporanPenerimaanBarangExport implements FromCollection, WithHeadings, WithTitle
+/**
+ * B4: Laporan Penerimaan Barang, satu baris per barang pada PO yang sudah diterima.
+ * Qty diterima diambil dari item PO (`qty_diterima`); batch, expired, dan kondisi dari stok PO tersebut.
+ */
+class LaporanPenerimaanBarangExport extends BaseLaporanTokoExport
 {
-    use Exportable;
-    protected $request;
+    private const CONDITION = ['new' => 'Baru', 'used' => 'Bekas', 'refurbished' => 'Refurbished'];
 
-    public function __construct(Request $request)
+    public function __construct(private readonly Request $request) {}
+
+    protected function makeMeta(): ReportMeta
     {
-        $this->request = $request;
+        return ReportMeta::fromRequest($this->request, 'LAPORAN PENERIMAAN BARANG', 'Penerimaan-Barang');
     }
 
-    public function title(): string
+    protected function sheetName(): string
     {
-        return 'Laporan Penerimaan Barang';
+        return 'Penerimaan Barang';
     }
 
-    public function headings(): array
+    protected function build(SheetWriter $w, Worksheet $sheet, ReportMeta $meta): void
     {
-        return [
-            'No',
-            'Tanggal',
-            'No Dokumen',
-            'No PO',
-            'Supplier',
-            'Kode Barang',
-            'Nama Barang',
-            'Batch',
-            'Expired',
-            'Qty',
-            'Qty Diterima',
-            'Satuan',
-            'Kondisi',
-            'Keterangan'
-        ];
-    }
+        $w->columns([
+            ['h' => 'Tanggal Terima', 'fmt' => Theme::FMT_DATE, 'align' => 'center'],
+            ['h' => 'No Dokumen'],
+            ['h' => 'Kode PO'],
+            ['h' => 'Supplier'],
+            ['h' => 'Kode Barang', 'text' => true],
+            ['h' => 'Nama Barang', 'max' => 45],
+            ['h' => 'Batch', 'text' => true, 'max' => 30],
+            ['h' => 'Expired', 'fmt' => Theme::FMT_DATE, 'align' => 'center'],
+            ['h' => 'Qty PO', 'fmt' => Theme::FMT_NUMBER],
+            ['h' => 'Qty Diterima', 'fmt' => Theme::FMT_NUMBER],
+            ['h' => 'Selisih', 'fmt' => '+#,##0;-#,##0;0'],
+            ['h' => 'Satuan', 'align' => 'center'],
+            ['h' => 'Konversi'],
+            ['h' => 'Kondisi', 'align' => 'center'],
+            ['h' => 'Status Penerimaan', 'align' => 'center', 'min' => 16],
+        ])->kop()->info()->header();
 
-    public function collection()
-    {
-        $mulai   = $this->request->input('tanggal_mulai');
-        $selesai = $this->request->input('tanggal_selesai');
+        $start = $meta->start;
+        $end = $meta->end;
 
-        $stocks = Stock::with(['pembelian.supplier', 'product'])
-            ->whereHas('pembelian')
-            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'created_at', $mulai, $selesai))
-            ->orderBy('created_at')
+        // Tanggal terima = receipt_date; bila kosong, memakai tanggal PO dibuat.
+        $orders = Pembelian::with(['supplier', 'pembelianProducts.product', 'stocks'])
+            ->whereHas('pembelianProducts', fn ($q) => $q->where('qty_diterima', '>', 0))
+            ->where(function ($q) use ($start, $end) {
+                $q->whereBetween('receipt_date', [$start, $end])
+                    ->orWhere(fn ($q2) => $q2->whereNull('receipt_date')->whereBetween('created_at', [$start, $end]));
+            })
+            ->orderByRaw('COALESCE(receipt_date, created_at)')->orderBy('id')
             ->get();
 
-        $rows = collect();
-        $no = 1;
+        foreach ($orders as $po) {
+            $date = $po->receipt_date ?? $po->created_at;
+            $doc = $po->code_gr ?: $po->code;
+            $receipt = PembelianBarangSheet::RECEIPT[$po->receipt_status ?? 'draft'] ?? ucfirst((string) $po->receipt_status);
+            $stocksByProduct = $po->stocks->groupBy('product_id');
 
-        foreach ($stocks as $s) {
-            $qty        = $s->qty ?? 0;
-            $qtyDiterima = $s->qty_diterima ?? 0;
-            $kQty      = $s->product?->konversiDisplay($qty);
-            $kDiterima  = $s->product?->konversiDisplay($qtyDiterima);
-            $rows->push([
-                $no++,
-                Carbon::parse($s->created_at)->format('d M Y'),
-                $s->pembelian?->code_gr ?? ($s->pembelian?->code ?? '-'),
-                $s->pembelian?->code ?? '-',
-                $s->pembelian?->supplier?->name ?? '-',
-                $s->product?->code ?? '-',
-                $s->product?->name ?? '-',
-                $s->sku ?? '-',
-                $s->expired_date ? Carbon::parse($s->expired_date)->format('d/m/Y') : '-',
-                $qty.($kQty && $kQty !== '-' ? " ({$kQty})" : ''),
-                $qtyDiterima.($kDiterima && $kDiterima !== '-' ? " ({$kDiterima})" : ''),
-                $s->product?->satuan ?? 'PCS',
-                'Baik',
-                $s->pembelian?->notes ?? 'Pembelian',
-            ]);
+            foreach ($po->pembelianProducts as $pp) {
+                if ((float) ($pp->qty_diterima ?? 0) <= 0) {
+                    continue;
+                }
+
+                $r = $w->currentRow();
+                $qty = (float) ($pp->qty ?? 0);
+                $received = (float) $pp->qty_diterima;
+                $batches = $stocksByProduct->get($pp->product_id, collect());
+
+                $expired = $batches->pluck('expired_at')->filter()->sort()->first();
+                $conditions = $batches->pluck('condition')->filter()->unique()
+                    ->map(fn ($c) => self::CONDITION[$c] ?? ucfirst((string) $c))->implode(', ');
+                $diff = $received - $qty;
+
+                $w->row([
+                    $date, $doc, $po->code, $po->supplier?->name ?? '-',
+                    $pp->product?->code ?? '-', $pp->product?->name ?? '-',
+                    $batches->pluck('sku')->filter()->unique()->implode(', ') ?: null,
+                    $expired,
+                    $qty, $received,
+                    SheetWriter::f("J{$r}-I{$r}"),
+                    $pp->product?->satuan ?? 'PCS',
+                    Konversi::of($pp->product, $received),
+                    $conditions ?: null,
+                    $receipt,
+                ], ['cells' => array_filter([
+                    11 => $diff < 0 ? ['font' => Theme::DANGER_FG, 'bold' => true] : ($diff > 0 ? ['font' => Theme::WARN_FG, 'bold' => true] : null),
+                    15 => Status::cell($receipt),
+                ])]);
+            }
         }
 
-        return $rows;
+        $w->totalRow('TOTAL', [9 => 'sum', 10 => 'sum', 11 => 'sum'], ['grand' => true, 'label_col' => 6]);
     }
 }

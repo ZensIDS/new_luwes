@@ -2,102 +2,138 @@
 
 namespace App\Exports;
 
+use App\Exports\LaporanGudang\Konversi;
+use App\Exports\LaporanGudang\StockMovementExport;
+use App\Exports\LaporanToko\ReportMeta;
+use App\Exports\LaporanToko\SheetWriter;
+use App\Exports\LaporanToko\Theme;
+use App\Models\DeliveryOrder;
+use App\Models\Pembelian;
+use App\Models\RefundPembelian;
+use App\Models\StockAdjustment;
 use App\Models\StockMovement;
-use Carbon\Carbon;
 use App\Support\ReportQuery;
-use Illuminate\Http\Request;
-use Maatwebsite\Excel\Concerns\Exportable;
-use Maatwebsite\Excel\Concerns\FromCollection;
-use Maatwebsite\Excel\Concerns\WithHeadings;
-use Maatwebsite\Excel\Concerns\WithTitle;
+use Illuminate\Database\Eloquent\Builder;
 
-class LaporanAktifitasExport implements FromCollection, WithHeadings, WithTitle
+/**
+ * B11: Laporan Aktivitas Gudang (semua pergerakan stok, masuk dan keluar).
+ *
+ *  - Jenis Aktivitas dibaca dari `type` + dokumen referensi + ada/tidaknya `owner_id` (sisi toko),
+ *    bukan lagi sekadar "Penerimaan/Pengiriman" berdasarkan qty masuk.
+ *  - Arah (Masuk/Keluar) berwarna; Qty Masuk dan Qty Keluar dipisah supaya bisa dijumlah dan di-pivot.
+ *  - Lokasi = Gudang, atau nama outlet bila pergerakan terjadi di sisi toko (`owner_id`).
+ *  - PIC = user yang mencatat pergerakan (`user_id`), bukan PIC supplier dari master produk.
+ *  - Lokasi rak produk dari master produk tidak dipakai lagi karena bukan lokasi aktivitas.
+ */
+class LaporanAktifitasExport extends StockMovementExport
 {
-    use Exportable;
-    protected $request;
+    private const COL_JENIS = 2;
+    private const COL_ARAH = 3;
 
-    public function __construct(Request $request)
+    protected function makeMeta(): ReportMeta
     {
-        $this->request = $request;
+        return ReportMeta::fromRequest($this->request, 'LAPORAN AKTIVITAS GUDANG', 'Aktivitas-Gudang');
     }
 
-    public function title(): string
+    protected function sheetName(): string
     {
-        return 'Laporan Aktivitas Gudang';
+        return 'Aktivitas Gudang';
     }
 
-    public function headings(): array
+    protected function columnDefs(): array
     {
         return [
-            'No',
-            'Tanggal',
-            'Jenis Aktivitas',
-            'No Dokumen',
-            'Kode Barang',
-            'Nama Barang',
-            'Qty',
-            'Satuan',
-            'Lokasi',
-            'PIC',
-            'Status',
-            'Keterangan'
+            ['h' => 'Tanggal', 'fmt' => Theme::FMT_DATETIME, 'align' => 'center'],
+            ['h' => 'Jenis Aktivitas', 'max' => 30],
+            ['h' => 'Arah', 'align' => 'center'],
+            ['h' => 'No Dokumen'],
+            ['h' => 'Kode Barang', 'text' => true],
+            ['h' => 'Nama Barang', 'max' => 45],
+            ['h' => 'Batch', 'text' => true],
+            ['h' => 'Qty Masuk', 'fmt' => Theme::FMT_NUMBER],
+            ['h' => 'Qty Keluar', 'fmt' => Theme::FMT_NUMBER],
+            ['h' => 'Satuan', 'align' => 'center'],
+            ['h' => 'Konversi'],
+            ['h' => 'Lokasi', 'max' => 28],
+            ['h' => 'PIC', 'max' => 24],
+            ['h' => 'Keterangan', 'max' => 50, 'wrap' => true],
         ];
     }
 
-    public function collection()
+    protected function baseQuery(): Builder
     {
-        $mulai   = $this->request->input('tanggal_mulai');
-        $selesai = $this->request->input('tanggal_selesai');
+        // Relasi tambahan dimuat di sini; StockMovementExport menambahkan 'product' sendiri.
+        return StockMovement::query()->with(['user', 'owner']);
+    }
 
-        // product.suppliers di-eager-load (sebelumnya lazy-load per baris)
-        $query = ReportQuery::betweenDates(
-            StockMovement::with(['product.suppliers']),
-            'created_at', $mulai, $selesai
-        )->orderBy('created_at')->orderBy('id');
+    protected function referenceRelations(): array
+    {
+        return [];
+    }
 
-        $rows = collect();
-        $no = 1;
+    protected function movementRow(object $m, array $refs): array
+    {
+        $ref = ReportQuery::ref($refs, $m);
+        $in = (float) ($m->qty_in ?? 0);
+        $out = (float) ($m->qty_out ?? 0);
+        $arah = $in > 0 ? 'Masuk' : ($out > 0 ? 'Keluar' : '-');
 
-        // Dibaca per potongan; dokumen referensi di-resolve per potongan (1 query per tipe).
-        $query->chunk(2000, function ($chunk) use (&$rows, &$no) {
-        $refs = ReportQuery::resolveReferences($chunk);
+        $tone = match ($arah) {
+            'Masuk' => ['fill' => Theme::OK_BG, 'font' => Theme::OK_FG, 'bold' => true],
+            'Keluar' => ['fill' => Theme::WARN_BG, 'font' => Theme::WARN_FG, 'bold' => true],
+            default => null,
+        };
 
-        $movements = $chunk
-            ->map(function ($m) use ($refs) {
-                $docCode = ReportQuery::ref($refs, $m)?->code ?? '-';
-                $jenis = $m->qty_in > 0 ? 'Penerimaan' : 'Pengiriman';
-                $qty   = max($m->qty_in ?? 0, $m->qty_out ?? 0);
+        $lokasi = $m->owner_id
+            ? ($m->owner?->name ?? 'Toko #'.$m->owner_id)
+            : 'Gudang';
 
-                return (object) [
-                    'created_at' => $m->created_at,
-                    'jenis'      => $jenis,
-                    'doc_code'   => $docCode,
-                    'product'    => $m->product,
-                    'qty'        => $qty,
-                    'type'      => $m->type,
-                    'notes'      => $m->notes,
-                ];
-            });
+        return [[
+            $m->created_at,
+            $this->jenis($m),
+            $arah,
+            $ref?->code ?? '-',
+            $m->product?->code ?? '-',
+            $m->product?->name ?? '-',
+            $this->batchFromNotes($m->notes),
+            $in > 0 ? $in : null,
+            $out > 0 ? $out : null,
+            $m->product?->satuan ?? 'PCS',
+            Konversi::of($m->product, max($in, $out)),
+            $lokasi,
+            $m->user?->name ?? '-',
+            $m->notes ?: null,
+        ], $tone ? ['cells' => [self::COL_JENIS => $tone, self::COL_ARAH => $tone]] : []];
+    }
 
-        foreach ($movements as $m) {
-            $k = $m->product?->konversiDisplay($m->qty ?? 0);
-            $rows->push([
-                $no++,
-                Carbon::parse($m->created_at)->format('d M Y'),
-                $m->jenis,
-                $m->doc_code,
-                $m->product?->code ?? '-',
-                $m->product?->name ?? '-',
-                ($m->qty ?? 0).($k && $k !== '-' ? " ({$k})" : ''),
-                $m->product?->satuan ?? 'PCS',
-                $m->product?->lokasi,
-                optional($m->product?->suppliers)->pluck('pic_supplier')?->filter()->implode(', '),
-                $m->type,
-                $m->notes ?? '',
-            ]);
-        }
-        });
+    protected function addTotals(SheetWriter $w): void
+    {
+        $w->totalRow('TOTAL', [8 => 'sum', 9 => 'sum'], ['grand' => true, 'label_col' => 6]);
+    }
 
-        return $rows;
+    /** Nama aktivitas yang mudah dibaca, dari kombinasi type, dokumen referensi, dan sisi (gudang/toko). */
+    private function jenis(object $m): string
+    {
+        $toko = (bool) $m->owner_id;
+
+        return match ($m->type) {
+            'in' => match (true) {
+                $toko => 'Penerimaan Toko',
+                $m->reference_type === Pembelian::class => 'Penerimaan Barang',
+                $m->reference_type === DeliveryOrder::class => 'Pengembalian Sisa Pengiriman',
+                default => 'Barang Masuk',
+            },
+            'out' => match (true) {
+                $toko && $m->reference_type === RefundPembelian::class => 'Retur Toko ke Gudang',
+                $toko => 'Pengeluaran Toko',
+                $m->reference_type === DeliveryOrder::class => 'Pengiriman Barang',
+                default => 'Barang Keluar',
+            },
+            'adjustment' => $m->reference_type === StockAdjustment::class ? 'Stok Opname / Adjustment' : 'Penyesuaian Stok',
+            'retur_ke_supplier' => 'Retur ke Supplier',
+            'retur_dari_outlet' => 'Retur dari Outlet',
+            'penerimaan_retur' => 'Penerimaan Retur',
+            default => $m->type ? ucfirst(str_replace('_', ' ', (string) $m->type)) : ($m->qty_in > 0 ? 'Barang Masuk' : 'Barang Keluar'),
+        };
     }
 }

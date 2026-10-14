@@ -2,71 +2,76 @@
 
 namespace App\Exports;
 
+use App\Exports\LaporanGudang\Konversi;
+use App\Exports\LaporanGudang\StockMovementExport;
+use App\Exports\LaporanToko\ReportMeta;
+use App\Exports\LaporanToko\SheetWriter;
+use App\Exports\LaporanToko\Theme;
+use App\Models\Pembelian;
 use App\Models\StockMovement;
 use App\Support\ReportQuery;
-use Illuminate\Http\Request;
-use Maatwebsite\Excel\Concerns\Exportable;
-use Maatwebsite\Excel\Concerns\FromCollection;
-use Maatwebsite\Excel\Concerns\WithHeadings;
-use Maatwebsite\Excel\Concerns\WithTitle;
+use Illuminate\Database\Eloquent\Builder;
 
-class LaporanBarangMasukExport implements FromCollection, WithHeadings, WithTitle
+/** B9: Laporan Barang Masuk (pergerakan stok dengan qty masuk). */
+class LaporanBarangMasukExport extends StockMovementExport
 {
-    use Exportable;
-    protected $request;
-    public function __construct(Request $request)
+    protected function makeMeta(): ReportMeta
     {
-        $this->request = $request;
+        return ReportMeta::fromRequest($this->request, 'LAPORAN BARANG MASUK', 'Barang-Masuk');
     }
-    public function title(): string
+
+    protected function sheetName(): string
     {
-        return 'Laporan Barang Masuk';
+        return 'Barang Masuk';
     }
-    public function headings(): array
+
+    protected function columnDefs(): array
     {
-        return ['No', 'Tanggal', 'No Dokumen', 'Supplier', 'Kode Barang', 'Nama Barang', 'Batch', 'Qty Masuk', 'Satuan', 'Keterangan'];
+        return [
+            ['h' => 'Tanggal', 'fmt' => Theme::FMT_DATETIME, 'align' => 'center'],
+            ['h' => 'No Dokumen'],
+            ['h' => 'Supplier'],
+            ['h' => 'Kode Barang', 'text' => true],
+            ['h' => 'Nama Barang', 'max' => 45],
+            ['h' => 'Batch', 'text' => true],
+            ['h' => 'Qty Masuk', 'fmt' => Theme::FMT_NUMBER],
+            ['h' => 'Satuan', 'align' => 'center'],
+            ['h' => 'Konversi'],
+            ['h' => 'Keterangan', 'max' => 50, 'wrap' => true],
+        ];
     }
-    public function collection()
+
+    protected function baseQuery(): Builder
     {
-        $mulai = $this->request->input('tanggal_mulai');
-        $selesai = $this->request->input('tanggal_selesai');
-        $query = ReportQuery::betweenDates(
-            StockMovement::with(['product'])->where('qty_in', '>', 0),
-            'created_at', $mulai, $selesai
-        )->orderBy('created_at')->orderBy('id');
+        return StockMovement::query()->where('qty_in', '>', 0);
+    }
 
-        $rows = collect();
-        $no = 1;
+    protected function referenceRelations(): array
+    {
+        return [Pembelian::class => ['supplier']];
+    }
 
-        // Dibaca per potongan: model & relasi dilepas tiap potongan, koneksi DB tidak menahan
-        // satu query raksasa. Dokumen referensi di-resolve per potongan (1 query per tipe).
-        $query->chunk(2000, function ($movements) use (&$rows, &$no) {
-        $refs = ReportQuery::resolveReferences($movements, [
-            \App\Models\Pembelian::class => ['supplier'],
-        ]);
-        foreach ($movements as $m) {
-            $docCode = '-';
-            $supplier = '-';
-            $ref = ReportQuery::ref($refs, $m);
-            $docCode = $ref?->code ?? '-';
-            if ($m->reference_type === \App\Models\Pembelian::class) { $supplier = $ref?->supplier?->name ?? '-'; }
-            preg_match('/SKU:\s*(\S+)/', $m->notes ?? '', $matches);
-            $k = $m->product?->konversiDisplay($m->qty_in ?? 0);
-            $rows->push([
-                $no++,
-                $m->created_at->format('d M Y'),
-                $docCode,
-                $supplier,
-                $m->product?->code ?? '-',
-                $m->product?->name ?? '-',
-                $matches[1] ?? '-',
-                ($m->qty_in ?? 0).($k && $k !== '-' ? " ({$k})" : ''),
-                $m->product?->satuan ?? 'PCS',
-                $m->notes ?? ''
-            ]);
-        }
-        });
+    protected function movementRow(object $m, array $refs): array
+    {
+        $ref = ReportQuery::ref($refs, $m);
+        $qty = (float) ($m->qty_in ?? 0);
 
-        return $rows;
+        return [[
+            $m->created_at,
+            $ref?->code ?? '-',
+            $m->reference_type === Pembelian::class ? ($ref?->supplier?->name ?? '-') : '-',
+            $m->product?->code ?? '-',
+            $m->product?->name ?? '-',
+            $this->batchFromNotes($m->notes),
+            $qty,
+            $m->product?->satuan ?? 'PCS',
+            Konversi::of($m->product, $qty),
+            $m->notes ?: null,
+        ], []];
+    }
+
+    protected function addTotals(SheetWriter $w): void
+    {
+        $w->totalRow('TOTAL', [7 => 'sum'], ['grand' => true, 'label_col' => 5]);
     }
 }

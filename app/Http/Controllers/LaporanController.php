@@ -155,36 +155,15 @@ class LaporanController extends Controller
 
     public function exportStockOpname(Request $request)
     {
-        $settings = json_decode(Storage::disk('public')->get('settings.json'), true) ?? [];
-
-        $today   = date('Y-m-d');
-        $mulai   = $request->input('tanggal_mulai', $request->input('tanggal', $today)) ?: $today;
-        $selesai = $request->input('tanggal_selesai', $mulai) ?: $mulai;
-        $lokasi  = $request->input('lokasi');
-
-        $lokasiFilter = $lokasi ? fn($q) => $q->where('lokasi', $lokasi) : null;
-
-        $query = StockAdjustment::with(['product', 'stock'])
-            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'adjustment_date', $mulai, $selesai));
-
-        if ($lokasiFilter) {
-            $query->whereHas('product', $lokasiFilter);
+        // Halaman Stock Opname Gudang mengirim satu tanggal ('tanggal'); laporan memakai rentang tanggal.
+        if (! $request->filled('tanggal_mulai') && $request->filled('tanggal')) {
+            $request->merge([
+                'tanggal_mulai' => $request->input('tanggal'),
+                'tanggal_selesai' => $request->input('tanggal'),
+            ]);
         }
 
-        $adjustments = $query->get();
-
-        // No data for the selected date — fall back to all adjustments (no date limit)
-        if ($adjustments->isEmpty()) {
-            $fallback = StockAdjustment::with(['product', 'stock'])
-                ->orderByDesc('adjustment_date')
-                ->limit(500);
-            if ($lokasiFilter) {
-                $fallback->whereHas('product', $lokasiFilter);
-            }
-            $adjustments = $fallback->get();
-        }
-
-        return Excel::download(new StockOpnameExport($adjustments, $mulai, $settings), 'Stock_Opname-' . $mulai . '.xlsx');
+        return Excel::download(new StockOpnameExport($request), ReportMeta::fileNameFor($request, 'Stok-Opname'));
     }
 
     public function exportPenerimaan(Request $request, Pembelian $pembelian, $type = 'po')
@@ -219,9 +198,9 @@ class LaporanController extends Controller
         return Excel::download(new PenjualanSupplierExport($request), 'laporan-penjualan-supplier.xlsx');
     }
 
-    public function exportStock()
+    public function exportStock(Request $request)
     {
-        return Excel::download(new StockExport, 'laporan-stock.xlsx');
+        return Excel::download(new StockExport($request), ReportMeta::fileNameFor($request, 'Stok-Barang', now()));
     }
 
     public function exportPengeluaran()
@@ -261,12 +240,9 @@ class LaporanController extends Controller
 
     public function exportReturSupplier(Request $request)
     {
-        $settings = $this->getSettings();
-        [$mulai, $selesai] = $this->dateRange($request);
-
         return Excel::download(
-            new ReturSupplierExport($mulai, $selesai, $settings),
-            'laporan-retur-supplier.xlsx'
+            new ReturSupplierExport($request),
+            ReportMeta::fileNameFor($request, 'Retur-Supplier')
         );
     }
 
@@ -806,7 +782,7 @@ class LaporanController extends Controller
 
     public function exportLaporanPO(Request $request)
     {
-        return Excel::download(new LaporanPOExport($request), 'laporan-po.xlsx');
+        return Excel::download(new LaporanPOExport($request), ReportMeta::fileNameFor($request, 'PO'));
     }
 
     public function exportPR(Request $request)
@@ -816,42 +792,42 @@ class LaporanController extends Controller
 
     public function exportBarangMasuk(Request $request)
     {
-        return Excel::download(new LaporanBarangMasukExport($request), 'laporan-barang-masuk.xlsx');
+        return Excel::download(new LaporanBarangMasukExport($request), ReportMeta::fileNameFor($request, 'Barang-Masuk'));
     }
 
     public function exportBarangKeluar(Request $request)
     {
-        return Excel::download(new LaporanBarangKeluarExport($request), 'laporan-barang-keluar.xlsx');
+        return Excel::download(new LaporanBarangKeluarExport($request), ReportMeta::fileNameFor($request, 'Barang-Keluar'));
     }
 
     public function exportPenerimaanBarang(Request $request)
     {
-        return Excel::download(new LaporanPenerimaanBarangExport($request), 'laporan-penerimaan-barang.xlsx');
+        return Excel::download(new LaporanPenerimaanBarangExport($request), ReportMeta::fileNameFor($request, 'Penerimaan-Barang'));
     }
 
     public function exportPengiriman(Request $request)
     {
-        return Excel::download(new LaporanPengirimanExport($request), 'laporan-pengiriman.xlsx');
+        return Excel::download(new LaporanPengirimanExport($request), ReportMeta::fileNameFor($request, 'Pengiriman-Barang'));
     }
 
     public function exportPickingPacking(Request $request)
     {
-        return Excel::download(new LaporanPickingPackingExport($request), 'laporan-picking-packing.xlsx');
+        return Excel::download(new LaporanPickingPackingExport($request), ReportMeta::fileNameFor($request, 'Picking-Packing'));
     }
 
     public function exportAktifitas(Request $request)
     {
-        return Excel::download(new LaporanAktifitasExport($request), 'laporan-aktifitas-gudang.xlsx');
+        return Excel::download(new LaporanAktifitasExport($request), ReportMeta::fileNameFor($request, 'Aktivitas-Gudang'));
     }
 
     public function exportPembelianBarang(Request $request)
     {
-        return Excel::download(new LaporanPembelianBarangExport($request), 'laporan-pembelian-barang.xlsx');
+        return Excel::download(new LaporanPembelianBarangExport($request), ReportMeta::fileNameFor($request, 'Pembelian-Barang'));
     }
 
     public function exportPergerakan(Request $request)
     {
-        return Excel::download(new LaporanPergerakanExport($request), 'laporan-pergerakan-stok.xlsx');
+        return Excel::download(new LaporanPergerakanExport($request), ReportMeta::fileNameFor($request, 'Pergerakan-Stok', now()));
     }
 
     public function pdfOutletMinimalStock(Request $request)
