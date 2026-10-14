@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\OutletPriceRequest;
 use App\Http\Requests\NewProductFromPriceRequest;
 use App\Models\Category;
+use App\Models\Outlet;
 use App\Models\OutletPrice;
 use App\Models\OwnerStock;
 use App\Models\Product;
@@ -24,6 +25,9 @@ class OutletPriceController extends Controller
 {
     private const HPP_LOG_NAME = 'OutletPriceHpp';
 
+    /** Session key: outlet terakhir yang dibuka di halaman Master Harga Jual. */
+    private const LAST_OUTLET_SESSION = 'outlet_prices.last_outlet_id';
+
     /**
      * Penyesuaian Harga Outlet (nominal, Rp) yang otomatis terisi di form saat outlet tertentu dipilih.
      * Format: [outlet_id => nominal].
@@ -32,10 +36,44 @@ class OutletPriceController extends Controller
         2 => 100,
     ];
 
+    /**
+     * Outlet yang dipakai di index: pilihan di URL, kalau kosong pakai outlet terakhir yang dibuka
+     * (disimpan di session), baru fallback ke outlet milik user. Hasilnya diingat lagi.
+     */
+    private function resolveOutletId(Request $request): ?int
+    {
+        if (! $request->filled('outlet_id') && ! $this->isOutletRestricted($request)) {
+            $lastId = $this->lastOutletId();
+            if ($lastId) {
+                $request->merge(['outlet_id' => $lastId]);
+            }
+        }
+
+        $outletId = OutletAccess::id($request, false);
+
+        if ($outletId) {
+            session([self::LAST_OUTLET_SESSION => $outletId]);
+        }
+
+        return $outletId;
+    }
+
+    private function lastOutletId(): ?int
+    {
+        $lastId = (int) session(self::LAST_OUTLET_SESSION, 0);
+
+        return $lastId && Outlet::whereKey($lastId)->exists() ? $lastId : null;
+    }
+
+    private function isOutletRestricted(Request $request): bool
+    {
+        return $request->user() && in_array($request->user()->role, ['staff-outlet', 'kasir'], true);
+    }
+
     public function index(Request $request, PriceCalculator $calculator)
     {
         $this->ensureManagementAccess();
-        $outletId = OutletAccess::id($request, false);
+        $outletId = $this->resolveOutletId($request);
         $search = trim((string) $request->input('search', ''));
         $prices = $outletId
             ? $this->pricePage($outletId, $search)
@@ -100,7 +138,8 @@ class OutletPriceController extends Controller
             ->orderByDesc('outlet_prices.updated_at')
             ->orderByDesc('outlet_prices.id')
             ->paginate(25)
-            ->withQueryString();
+            ->withQueryString()
+            ->appends(['outlet_id' => $outletId]);
 
         $ids = $page->getCollection()->pluck('id');
         $order = $ids->flip();
@@ -253,6 +292,8 @@ class OutletPriceController extends Controller
         $outlets = OutletAccess::outlets();
         if ($request->filled('outlet_id') && $outlets->contains('id', (int) $request->query('outlet_id'))) {
             $newPrice->outlet_id = (int) $request->query('outlet_id');
+        } elseif (! $request->filled('outlet_id') && ($lastId = $this->lastOutletId()) && $outlets->contains('id', $lastId)) {
+            $newPrice->outlet_id = $lastId;
         }
 
         return view('outlet-prices.form', [
