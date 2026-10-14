@@ -531,7 +531,15 @@
                     {{-- Kembali tetap memperbarui updated_at (POST ke form terpisah di bawah, bukan form harga) --}}
                     <button type="submit" form="outlet-price-back-form" class="btn btn-default"><i class="fa fa-arrow-left"></i> Kembali</button>
                 @else
-                    <a class="btn btn-default" href="{{ route('outlet-prices.index', array_filter(['outlet_id' => $price->outlet_id ?: request('outlet_id')])) }}"><i class="fa fa-arrow-left"></i> Kembali</a>
+                    @php
+                        $backOutletId = $price->outlet_id ?: request('outlet_id');
+                        $backSearch = (string) session('outlet_prices.last_search', '');
+                        $backParams = array_filter(['outlet_id' => $backOutletId]);
+                        if ($backOutletId && $backSearch !== '' && (int) session('outlet_prices.last_outlet_id', 0) === (int) $backOutletId) {
+                            $backParams['search'] = $backSearch;
+                        }
+                    @endphp
+                    <a class="btn btn-default" href="{{ route('outlet-prices.index', $backParams) }}"><i class="fa fa-arrow-left"></i> Kembali</a>
                 @endif
                 <button type="submit" class="btn btn-primary pull-right"><i class="fa fa-save"></i> Simpan Aturan Harga</button>
             </div>

@@ -22,6 +22,9 @@ use Spatie\Activitylog\Models\Activity;
 
 class ProductController extends Controller
 {
+    /** Session key: filter/pencarian/halaman terakhir di daftar produk. */
+    private const INDEX_QUERY_SESSION = 'product.index_query';
+
     /**
      * Return only products available in the requested outlet for the cashier.
      * The outlet is part of the URL so the client cannot accidentally fall
@@ -41,6 +44,29 @@ class ProductController extends Controller
 
     public function index(Request $request)
     {
+        // Hanya halaman web (bukan JSON/kasir): ingat filter terakhir supaya setelah
+        // tambah/edit/hapus daftar kembali ke posisi yang sama.
+        if (! $request->wantsJson() && ! $request->boolean('compact')) {
+            if ($request->boolean('reset')) {
+                session()->forget(self::INDEX_QUERY_SESSION);
+
+                return redirect()->route('product.index');
+            }
+
+            if (empty($request->query())) {
+                $saved = session(self::INDEX_QUERY_SESSION, []);
+
+                if ($saved) {
+                    return redirect()->route('product.index', $saved);
+                }
+            } else {
+                session([self::INDEX_QUERY_SESSION => array_filter(
+                    $request->only(['outlet_id', 'status_produk', 'search', 'category_id', 'lokasi', 'page']),
+                    fn ($value) => $value !== null && $value !== ''
+                )]);
+            }
+        }
+
         // Kasir/staff-outlet selalu discope ke outlet miliknya sendiri, terlepas dari
         // outlet_id yang dikirim dari klien.
         if (in_array($request->user()?->role, ['staff-outlet', 'kasir'], true)) {
@@ -308,7 +334,7 @@ class ProductController extends Controller
             throw $e;
         }
 
-        return redirect(route('product.index'))->with('toast_success', 'Berhasil Menyimpan Data!');
+        return redirect(route('product.index', session(self::INDEX_QUERY_SESSION, [])))->with('toast_success', 'Berhasil Menyimpan Data!');
     }
 
     public function show(Product $product)
@@ -406,7 +432,7 @@ class ProductController extends Controller
             Storage::delete(str_replace('storage', 'public', $oldPic));
         }
 
-        return redirect(route('product.index'))->with('toast_success', 'Berhasil Menyimpan Data!');
+        return redirect(route('product.index', session(self::INDEX_QUERY_SESSION, [])))->with('toast_success', 'Berhasil Menyimpan Data!');
     }
 
     public function destroy(Product $product)
@@ -427,7 +453,7 @@ class ProductController extends Controller
 
         $product->delete();
 
-        return redirect(route('product.index'))->with('toast_success', 'Berhasil Menghapus Data!');
+        return redirect(route('product.index', session(self::INDEX_QUERY_SESSION, [])))->with('toast_success', 'Berhasil Menghapus Data!');
     }
 
     /**

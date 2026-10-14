@@ -28,6 +28,9 @@ class OutletPriceController extends Controller
     /** Session key: outlet terakhir yang dibuka di halaman Master Harga Jual. */
     private const LAST_OUTLET_SESSION = 'outlet_prices.last_outlet_id';
 
+    /** Session key: kata pencarian terakhir di outlet tersebut. */
+    private const LAST_SEARCH_SESSION = 'outlet_prices.last_search';
+
     /**
      * Penyesuaian Harga Outlet (nominal, Rp) yang otomatis terisi di form saat outlet tertentu dipilih.
      * Format: [outlet_id => nominal].
@@ -58,6 +61,22 @@ class OutletPriceController extends Controller
         return $outletId;
     }
 
+    /**
+     * Parameter URL index setelah create/update/hapus: outlet yang dikerjakan + pencarian terakhir
+     * (hanya jika pencarian itu memang di outlet yang sama).
+     */
+    private function indexParams(?int $outletId): array
+    {
+        $params = array_filter(['outlet_id' => $outletId]);
+        $search = (string) session(self::LAST_SEARCH_SESSION, '');
+
+        if ($outletId && $search !== '' && (int) session(self::LAST_OUTLET_SESSION, 0) === (int) $outletId) {
+            $params['search'] = $search;
+        }
+
+        return $params;
+    }
+
     private function lastOutletId(): ?int
     {
         $lastId = (int) session(self::LAST_OUTLET_SESSION, 0);
@@ -73,8 +92,18 @@ class OutletPriceController extends Controller
     public function index(Request $request, PriceCalculator $calculator)
     {
         $this->ensureManagementAccess();
+        // Buka tanpa parameter apa pun = kembali ke outlet + pencarian terakhir.
+        $bareVisit = ! $request->has('outlet_id') && ! $request->has('search');
+        $previousOutletId = (int) session(self::LAST_OUTLET_SESSION, 0);
+
         $outletId = $this->resolveOutletId($request);
+
+        if ($bareVisit && $outletId && $outletId === $previousOutletId) {
+            $request->merge(['search' => (string) session(self::LAST_SEARCH_SESSION, '')]);
+        }
+
         $search = trim((string) $request->input('search', ''));
+        session([self::LAST_SEARCH_SESSION => $search]);
         $prices = $outletId
             ? $this->pricePage($outletId, $search)
             : new LengthAwarePaginator([], 0, 25);
@@ -139,7 +168,7 @@ class OutletPriceController extends Controller
             ->orderByDesc('outlet_prices.id')
             ->paginate(25)
             ->withQueryString()
-            ->appends(['outlet_id' => $outletId]);
+            ->appends(['outlet_id' => $outletId, 'search' => $search]);
 
         $ids = $page->getCollection()->pluck('id');
         $order = $ids->flip();
@@ -337,7 +366,7 @@ class OutletPriceController extends Controller
         });
 
         return redirect()
-            ->route('outlet-prices.index', ['outlet_id' => $request->outlet_id])
+            ->route('outlet-prices.index', $this->indexParams((int) $request->outlet_id))
             ->with('toast_success', 'Master harga outlet berhasil disimpan.');
     }
 
@@ -519,7 +548,7 @@ class OutletPriceController extends Controller
         });
 
         return redirect()
-            ->route('outlet-prices.index', ['outlet_id' => $outletPrice->outlet_id])
+            ->route('outlet-prices.index', $this->indexParams((int) $outletPrice->outlet_id))
             ->with('toast_success', 'Master harga outlet berhasil diperbarui.');
     }
 
@@ -534,7 +563,7 @@ class OutletPriceController extends Controller
         $outletPrice->setUpdatedAt(now());
         $outletPrice->save();
 
-        return redirect()->route('outlet-prices.index', ['outlet_id' => $outletPrice->outlet_id]);
+        return redirect()->route('outlet-prices.index', $this->indexParams((int) $outletPrice->outlet_id));
     }
 
     public function destroy(OutletPrice $outletPrice)
@@ -544,7 +573,7 @@ class OutletPriceController extends Controller
         $outletPrice->delete();
 
         return redirect()
-            ->route('outlet-prices.index', ['outlet_id' => $outletId])
+            ->route('outlet-prices.index', $this->indexParams((int) $outletId))
             ->with('toast_success', 'Master harga outlet berhasil dihapus.');
     }
 

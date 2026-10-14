@@ -66,7 +66,7 @@
                                 <button type="submit" class="btn btn-sm btn-primary">
                                     <i class="fa fa-search"></i> Filter
                                 </button>
-                                <a href="{{ route('product.index') }}" class="btn btn-sm btn-default">Reset</a>
+                                <a href="{{ route('product.index', ['reset' => 1]) }}" class="btn btn-sm btn-default">Reset</a>
                             </div>
                         </form>
                     </div><!-- /.box-header -->
