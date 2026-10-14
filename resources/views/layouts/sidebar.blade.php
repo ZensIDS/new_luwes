@@ -199,21 +199,6 @@
         </li>
         @endif
 
-        {{-- Other Income (semua role; menu Kategori hanya superadmin & owner) --}}
-        <li class="treeview {{ request()->is('other-income*') ? 'active' : '' }}">
-            <a href="#"><i class="fa fa-plus-circle"></i><span>Other Income</span><i class="fa fa-angle-left pull-right"></i></a>
-            <ul class="treeview-menu">
-                <li class="{{ request()->is('other-income*') && ! request()->is('other-income/categories*') ? 'active' : '' }}">
-                    <a href="{{ route('other-income.index') }}"><i class="fa fa-list"></i><span>Daftar Other Income</span></a>
-                </li>
-                @if (in_array($role, ['superadmin', 'owner']))
-                <li class="{{ request()->is('other-income/categories*') ? 'active' : '' }}">
-                    <a href="{{ route('other-income.categories.index') }}"><i class="fa fa-tags"></i><span>Kategori</span></a>
-                </li>
-                @endif
-            </ul>
-        </li>
-
         <li class="sidebar-divider"><span>RETUR &amp; LAPORAN</span></li>
 
         {{-- Retur Barang (superadmin, admin-gudang, staff-outlet, kasir) --}}
