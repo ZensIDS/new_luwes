@@ -92,15 +92,9 @@ class OutletPriceController extends Controller
     public function index(Request $request, PriceCalculator $calculator)
     {
         $this->ensureManagementAccess();
-        // Buka tanpa parameter apa pun = kembali ke outlet + pencarian terakhir.
-        $bareVisit = ! $request->has('outlet_id') && ! $request->has('search');
-        $previousOutletId = (int) session(self::LAST_OUTLET_SESSION, 0);
-
+        // Buka tanpa parameter (misal dari menu) = outlet terakhir tetap dipakai, pencarian mulai kosong.
+        // Pencarian hanya dibawa lewat redirect setelah simpan/edit/hapus (lihat indexParams()).
         $outletId = $this->resolveOutletId($request);
-
-        if ($bareVisit && $outletId && $outletId === $previousOutletId) {
-            $request->merge(['search' => (string) session(self::LAST_SEARCH_SESSION, '')]);
-        }
 
         $search = trim((string) $request->input('search', ''));
         session([self::LAST_SEARCH_SESSION => $search]);

@@ -231,7 +231,7 @@
                         </div><!-- /.box-body -->
 
                         <div class="box-footer">
-                            <a href="{{ route('product.index') }}" class="btn btn-default">Kembali</a>
+                            <a href="{{ route('product.index', session('product.index_query', [])) }}" class="btn btn-default">Kembali</a>
                             <button type="submit" class="btn btn-primary">Simpan</button>
                         </div>
                     </form>

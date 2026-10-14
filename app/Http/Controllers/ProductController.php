@@ -44,21 +44,12 @@ class ProductController extends Controller
 
     public function index(Request $request)
     {
-        // Hanya halaman web (bukan JSON/kasir): ingat filter terakhir supaya setelah
-        // tambah/edit/hapus daftar kembali ke posisi yang sama.
+        // Hanya halaman web (bukan JSON/kasir). Filter diingat supaya setelah tambah/edit/hapus
+        // daftar kembali ke posisi yang sama; membuka /product tanpa parameter (misal dari menu)
+        // = mulai bersih.
         if (! $request->wantsJson() && ! $request->boolean('compact')) {
-            if ($request->boolean('reset')) {
-                session()->forget(self::INDEX_QUERY_SESSION);
-
-                return redirect()->route('product.index');
-            }
-
             if (empty($request->query())) {
-                $saved = session(self::INDEX_QUERY_SESSION, []);
-
-                if ($saved) {
-                    return redirect()->route('product.index', $saved);
-                }
+                session()->forget(self::INDEX_QUERY_SESSION);
             } else {
                 session([self::INDEX_QUERY_SESSION => array_filter(
                     $request->only(['outlet_id', 'status_produk', 'search', 'category_id', 'lokasi', 'page']),
