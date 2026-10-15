@@ -1,312 +1,99 @@
 @extends('layouts.master')
 @section('title', 'Laporan Gudang')
 @section('container')
+@include('laporan.partials._style')
+
+@php
+    $role = auth()->user()->role;
+    $all = ['superadmin', 'admin-gudang', 'owner'];
+
+    // group => daftar laporan. 'date' = butuh rentang tanggal, 'roles' = role yang boleh melihat.
+    $groups = [
+        'Pembelian & Penerimaan' => [
+            ['id'=>'po', 'title'=>'Laporan PO', 'icon'=>'fa-file-text-o', 'color'=>'blue', 'xls'=>'laporan.export.po', 'date'=>true,
+             'desc'=>'Daftar purchase order ke supplier pada periode terpilih.', 'roles'=>['superadmin', 'admin-gudang']],
+            ['id'=>'pembelian', 'title'=>'Pembelian Barang', 'icon'=>'fa-shopping-cart', 'color'=>'blue', 'xls'=>'laporan.export.pembelian', 'date'=>true,
+             'desc'=>'Rekap pembelian barang dari supplier.', 'roles'=>['superadmin', 'owner']],
+            ['id'=>'penerimaan', 'title'=>'Penerimaan Barang', 'icon'=>'fa-inbox', 'color'=>'green', 'xls'=>'laporan.export.penerimaan', 'date'=>true,
+             'desc'=>'Barang yang sudah diterima gudang.', 'roles'=>$all],
+        ],
+        'Stok' => [
+            ['id'=>'stok', 'title'=>'Stok Barang', 'icon'=>'fa-cubes', 'color'=>'teal', 'xls'=>'laporan.stock', 'date'=>false,
+             'desc'=>'Posisi stok seluruh barang di gudang saat ini.', 'roles'=>$all],
+            ['id'=>'opname', 'title'=>'Stok Opname & Adjustment', 'icon'=>'fa-balance-scale', 'color'=>'red', 'xls'=>'laporan.stock-opname', 'date'=>true,
+             'desc'=>'Hasil opname dan penyesuaian stok.', 'roles'=>$all],
+            ['id'=>'pergerakan', 'title'=>'Pergerakan & Kebutuhan Stok', 'icon'=>'fa-line-chart', 'color'=>'purple', 'xls'=>'laporan.export.pergerakan', 'date'=>false,
+             'desc'=>'Pergerakan barang dan perkiraan kebutuhan stok.', 'roles'=>['superadmin', 'owner']],
+            ['id'=>'outlet_minimal_stock', 'title'=>'Minimal Stock & Alokasi PO', 'icon'=>'fa-bar-chart', 'color'=>'amber', 'xls'=>'laporan.outlet.minimal-stock', 'date'=>false,
+             'desc'=>'Stok minimal per produk beserta status dan saran qty PO.', 'roles'=>$all],
+        ],
+        'Distribusi ke Outlet' => [
+            ['id'=>'pr', 'title'=>'PR (Permintaan Outlet)', 'icon'=>'fa-file-text-o', 'color'=>'blue', 'xls'=>'laporan.export.pr', 'date'=>true,
+             'desc'=>'Permintaan barang dari outlet ke gudang.', 'roles'=>$all],
+            ['id'=>'picking', 'title'=>'Picking & Packing', 'icon'=>'fa-list-ol', 'color'=>'purple', 'xls'=>'laporan.export.picking', 'date'=>true,
+             'desc'=>'Proses pengambilan dan pengemasan barang.', 'roles'=>$all],
+            ['id'=>'pengiriman', 'title'=>'Pengiriman Barang', 'icon'=>'fa-truck', 'color'=>'amber', 'xls'=>'laporan.export.pengiriman', 'date'=>true,
+             'desc'=>'Pengiriman barang dari gudang ke outlet.', 'roles'=>$all],
+            ['id'=>'masuk', 'title'=>'Barang Masuk', 'icon'=>'fa-arrow-down', 'color'=>'green', 'xls'=>'laporan.export.barang-masuk', 'date'=>true,
+             'desc'=>'Seluruh mutasi barang yang masuk ke gudang.', 'roles'=>['superadmin', 'owner']],
+            ['id'=>'keluar', 'title'=>'Barang Keluar', 'icon'=>'fa-arrow-up', 'color'=>'amber', 'xls'=>'laporan.export.barang-keluar', 'date'=>true,
+             'desc'=>'Seluruh mutasi barang yang keluar dari gudang.', 'roles'=>['superadmin', 'owner']],
+        ],
+        'Retur' => [
+            ['id'=>'retur_supplier', 'title'=>'Retur ke Supplier', 'icon'=>'fa-undo', 'color'=>'amber', 'xls'=>'laporan.retur-supplier', 'date'=>true,
+             'desc'=>'Barang yang dikembalikan ke supplier.', 'roles'=>$all],
+            ['id'=>'retur_outlet', 'title'=>'Retur Outlet', 'icon'=>'fa-undo', 'color'=>'red', 'xls'=>'laporan.retur-outlet', 'date'=>true,
+             'desc'=>'Barang yang diretur dari outlet ke gudang.', 'roles'=>$all],
+        ],
+        'Aktivitas' => [
+            ['id'=>'aktifitas', 'title'=>'Aktivitas Gudang', 'icon'=>'fa-tasks', 'color'=>'teal', 'xls'=>'laporan.export.aktifitas', 'date'=>true,
+             'desc'=>'Riwayat aktivitas petugas di gudang.', 'roles'=>['superadmin', 'owner']],
+        ],
+    ];
+
+    // Saring berdasarkan role, buang grup yang kosong.
+    $groups = collect($groups)
+        ->map(fn ($items) => collect($items)->filter(fn ($r) => in_array($role, $r['roles']))->values())
+        ->filter(fn ($items) => $items->isNotEmpty());
+@endphp
+
 <section class="content-header">
-    <h1>Laporan Gudang</h1>
+    <h1>Laporan Gudang <small>Pilih laporan, atur periode, lalu unduh Excel</small></h1>
 </section>
 
 <section class="content">
-
-@php $role = auth()->user()->role; @endphp
-
-<div class="row">
-    {{-- Laporan PO --}}
-    @if (in_array($role, ['superadmin', 'admin-gudang']))
-    <div class="col-md-4 col-sm-6">
-        <div class="box box-primary">
-            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-file-text-o"></i> Laporan PO</h3></div>
-            <div class="box-footer">
-                <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_po"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
-            </div>
+    <div class="rpt-toolbar">
+        <p class="rpt-hint">{{ $groups->flatten(1)->count() }} laporan tersedia untuk akun Anda.</p>
+        <div class="rpt-search">
+            <i class="fa fa-search"></i>
+            <input type="text" id="rptSearch" class="form-control" placeholder="Cari laporan..." autocomplete="off">
         </div>
     </div>
-    @endif
 
-    {{-- Laporan Barang Masuk --}}
-    @if (in_array($role, ['superadmin', 'owner']))
-    <div class="col-md-4 col-sm-6">
-        <div class="box box-success">
-            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-arrow-down"></i> Laporan Barang Masuk</h3></div>
-            <div class="box-footer">
-                <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_masuk"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
+    @foreach ($groups as $groupName => $items)
+        <div class="rpt-group">
+            <h3 class="rpt-group-title">{{ $groupName }}</h3>
+            <div class="rpt-grid">
+                @foreach ($items as $r)
+                    <button type="button" class="rpt-card rpt-c-{{ $r['color'] }}" data-toggle="modal" data-target="#modal_{{ $r['id'] }}">
+                        <span class="rpt-icon"><i class="fa {{ $r['icon'] }}"></i></span>
+                        <h4>{{ $r['title'] }}</h4>
+                        <p>{{ $r['desc'] }}</p>
+                        <span class="rpt-open">Buka <i class="fa fa-arrow-right"></i></span>
+                    </button>
+                @endforeach
             </div>
         </div>
-    </div>
-    @endif
+    @endforeach
 
-    {{-- Laporan Barang Keluar --}}
-    @if (in_array($role, ['superadmin', 'owner']))
-    <div class="col-md-4 col-sm-6">
-        <div class="box box-warning">
-            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-arrow-up"></i> Laporan Barang Keluar</h3></div>
-            <div class="box-footer">
-                <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_keluar"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
-            </div>
-        </div>
-    </div>
-    @endif
+    <div class="rpt-empty"><i class="fa fa-search fa-2x"></i><p>Tidak ada laporan yang cocok.</p></div>
 
-    {{-- Laporan Stok Barang --}}
-    @if (in_array($role, ['superadmin', 'admin-gudang', 'owner']))
-    <div class="col-md-4 col-sm-6">
-        <div class="box box-info">
-            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-cubes"></i> Laporan Stok Barang</h3></div>
-            <div class="box-footer">
-                <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_stok"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
-            </div>
-        </div>
-    </div>
-    @endif
-
-    {{-- Laporan Penerimaan Barang --}}
-    @if (in_array($role, ['superadmin', 'admin-gudang', 'owner']))
-    <div class="col-md-4 col-sm-6">
-        <div class="box box-success">
-            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-inbox"></i> Laporan Penerimaan Barang</h3></div>
-            <div class="box-footer">
-                <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_penerimaan"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
-            </div>
-        </div>
-    </div>
-    @endif
-
-    {{-- Laporan Pengiriman Barang --}}
-    @if (in_array($role, ['superadmin', 'admin-gudang', 'owner']))
-    <div class="col-md-4 col-sm-6">
-        <div class="box box-warning">
-            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-truck"></i> Laporan Pengiriman Barang</h3></div>
-            <div class="box-footer">
-                <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_pengiriman"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
-            </div>
-        </div>
-    </div>
-    @endif
-
-    {{-- Laporan Picking & Packing --}}
-    @if (in_array($role, ['superadmin', 'admin-gudang', 'owner']))
-    <div class="col-md-4 col-sm-6">
-        <div class="box box-primary">
-            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-list-ol"></i> Laporan Picking &amp; Packing</h3></div>
-            <div class="box-footer">
-                <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_picking"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
-            </div>
-        </div>
-    </div>
-    @endif
-
-    {{-- Laporan Aktivitas Gudang --}}
-    @if (in_array($role, ['superadmin', 'owner']))
-    <div class="col-md-4 col-sm-6">
-        <div class="box box-info">
-            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-tasks"></i> Laporan Aktivitas Gudang</h3></div>
-            <div class="box-footer">
-                <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_aktifitas"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
-            </div>
-        </div>
-    </div>
-    @endif
-
-    {{-- Laporan Pembelian Barang --}}
-    @if (in_array($role, ['superadmin', 'owner']))
-    <div class="col-md-4 col-sm-6">
-        <div class="box box-primary">
-            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-shopping-cart"></i> Laporan Pembelian Barang</h3></div>
-            <div class="box-footer">
-                <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_pembelian"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
-            </div>
-        </div>
-    </div>
-    @endif
-
-    {{-- Laporan Stok Opname & Adjusment --}}
-    @if (in_array($role, ['superadmin', 'admin-gudang', 'owner']))
-    <div class="col-md-4 col-sm-6">
-        <div class="box box-danger">
-            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-balance-scale"></i> Laporan Stok Opname &amp; Adjusment</h3></div>
-            <div class="box-footer">
-                <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_opname"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
-            </div>
-        </div>
-    </div>
-    @endif
-
-    {{-- Laporan Pergerakan & Kebutuhan Stok --}}
-    @if (in_array($role, ['superadmin', 'owner']))
-    <div class="col-md-4 col-sm-6">
-        <div class="box box-info">
-            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-line-chart"></i> Laporan Pergerakan &amp; Kebutuhan Stok</h3></div>
-            <div class="box-footer">
-                <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_pergerakan"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
-            </div>
-        </div>
-    </div>
-    @endif
-
-    {{-- Laporan Retur Ke Supplier --}}
-    @if (in_array($role, ['superadmin', 'admin-gudang', 'owner']))
-    <div class="col-md-4 col-sm-6">
-        <div class="box box-warning">
-            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-undo"></i> Laporan Retur Ke Supplier</h3></div>
-            <div class="box-footer">
-                <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_retur_supplier"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
-            </div>
-        </div>
-    </div>
-    @endif
-
-    {{-- Laporan PR (Permintaan Outlet) --}}
-    @if (in_array($role, ['superadmin', 'admin-gudang', 'owner']))
-    <div class="col-md-4 col-sm-6">
-        <div class="box box-primary">
-            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-file-text-o"></i> Laporan PR (Permintaan Outlet)</h3></div>
-            <div class="box-footer">
-                <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_pr"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
-            </div>
-        </div>
-    </div>
-    @endif
-
-    {{-- Laporan Retur Outlet --}}
-    @if (in_array($role, ['superadmin', 'admin-gudang', 'owner']))
-    <div class="col-md-4 col-sm-6">
-        <div class="box box-danger">
-            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-undo"></i> Laporan Retur Outlet</h3></div>
-            <div class="box-footer">
-                <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_retur_outlet"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
-            </div>
-        </div>
-    </div>
-    @endif
-
-    {{-- Minimal Stock & Alokasi PO (juga ada di Laporan Toko) --}}
-    @if (in_array($role, ['superadmin', 'admin-gudang', 'owner']))
-    <div class="col-md-4 col-sm-6">
-        <div class="box box-primary">
-            <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-line-chart"></i> Minimal Stock Gudang &amp; Alokasi PO</h3></div>
-            <div class="box-body small">Min stok per produk gudang: hasil 3 bulan (atau default manual) + adjustment aktif. Menampilkan status out_of_stock dan saran qty PO.</div>
-            <div class="box-footer">
-                <button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_outlet_minimal_stock"><i class="fa fa-bar-chart"></i> Lihat Laporan</button>
-            </div>
-        </div>
-    </div>
-    @endif
-</div>
-
-{{-- ============ MODALS ============ --}}
-
-@php
-$modals = [
-    ['id'=>'po',          'title'=>'Laporan PO',                           'pdf'=>'laporan.pdf.po',        'xls'=>'laporan.export.po',        'date'=>true],
-    ['id'=>'masuk',       'title'=>'Laporan Barang Masuk',                 'pdf'=>'laporan.pdf.barang-masuk',  'xls'=>'laporan.export.barang-masuk',  'date'=>true],
-    ['id'=>'keluar',      'title'=>'Laporan Barang Keluar',                'pdf'=>'laporan.pdf.barang-keluar', 'xls'=>'laporan.export.barang-keluar', 'date'=>true],
-    ['id'=>'stok',        'title'=>'Laporan Stok Barang',                  'pdf'=>'laporan.pdf.stok',      'xls'=>'laporan.stock',            'date'=>false],
-    ['id'=>'penerimaan',  'title'=>'Laporan Penerimaan Barang',            'pdf'=>'laporan.pdf.penerimaan','xls'=>'laporan.export.penerimaan','date'=>true],
-    ['id'=>'pengiriman',  'title'=>'Laporan Pengiriman Barang',            'pdf'=>'laporan.pdf.pengiriman','xls'=>'laporan.export.pengiriman','date'=>true],
-    ['id'=>'picking',     'title'=>'Laporan Picking &amp; Packing',        'pdf'=>'laporan.pdf.picking',   'xls'=>'laporan.export.picking',   'date'=>true],
-    ['id'=>'aktifitas',   'title'=>'Laporan Aktivitas Gudang',             'pdf'=>'laporan.pdf.aktifitas', 'xls'=>'laporan.export.aktifitas', 'date'=>true],
-    ['id'=>'pembelian',   'title'=>'Laporan Pembelian Barang',             'pdf'=>'laporan.pdf.pembelian', 'xls'=>'laporan.export.pembelian', 'date'=>true],
-    ['id'=>'opname',      'title'=>'Laporan Stok Opname &amp; Adjusment',  'pdf'=>'laporan.pdf.opname',    'xls'=>'laporan.stock-opname',     'date'=>true],
-    ['id'=>'pergerakan',  'title'=>'Laporan Pergerakan &amp; Kebutuhan Stok','pdf'=>'laporan.pdf.pergerakan','xls'=>'laporan.export.pergerakan','date'=>false],
-    ['id'=>'pr',          'title'=>'Laporan PR (Permintaan Outlet)',        'pdf'=>'laporan.pdf.pr',        'xls'=>'laporan.export.pr',        'date'=>true],
-    ['id'=>'retur_supplier','title'=>'Laporan Retur Ke Supplier',          'pdf'=>'laporan.pdf.retur-supplier','xls'=>'laporan.retur-supplier','date'=>true],
-    ['id'=>'retur_outlet',  'title'=>'Laporan Retur Outlet',               'pdf'=>'laporan.pdf.retur-outlet',  'xls'=>'laporan.retur-outlet',  'date'=>true],
-    ['id'=>'outlet_minimal_stock', 'title'=>'Minimal Stock Gudang &amp; Alokasi PO', 'pdf'=>'laporan.pdf.outlet.minimal-stock', 'xls'=>'laporan.outlet.minimal-stock', 'date'=>false, 'outlet'=>false],
-];
-@endphp
-
-@foreach($modals as $m)
-<div id="modal_{{ $m['id'] }}" class="modal fade" role="dialog">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <button type="button" class="close" data-dismiss="modal">&times;</button>
-                <h4 class="modal-title">{!! $m['title'] !!}</h4>
-            </div>
-            <div class="modal-body">
-                @if($m['date'])
-                <div class="row">
-                    <div class="col-sm-6">
-                        <div class="form-group">
-                            <label>Tanggal Mulai</label>
-                            <input type="date" id="mulai_{{ $m['id'] }}" class="form-control"
-                                value="{{ now()->startOfMonth()->format('Y-m-d') }}">
-                        </div>
-                    </div>
-                    <div class="col-sm-6">
-                        <div class="form-group">
-                            <label>Tanggal Selesai</label>
-                            <input type="date" id="selesai_{{ $m['id'] }}" class="form-control"
-                                value="{{ now()->format('Y-m-d') }}">
-                        </div>
-                    </div>
-                </div>
-                @endif
-                @if(!empty($m['outlet']))
-                <div class="form-group">
-                    <label>Outlet</label>
-                    <select id="outlet_{{ $m['id'] }}" class="form-control">
-                        <option value="">Semua Outlet</option>
-                        @foreach($outlets as $outlet)
-                        <option value="{{ $outlet->id }}">{{ $outlet->name }}</option>
-                        @endforeach
-                    </select>
-                </div>
-                @endif
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-default" data-dismiss="modal">Tutup</button>
-                <button type="button" class="btn btn-success btn-preview-pdf"
-                    data-id="{{ $m['id'] }}"
-                    data-url="{{ route($m['pdf']) }}"
-                    data-date="{{ $m['date'] ? 'true' : 'false' }}">
-                    <i class="fa fa-eye"></i> Preview PDF
-                </button>
-                <a href="{{ route($m['xls']) }}" id="xls_{{ $m['id'] }}" class="btn btn-primary btn-export-xls"
-                    data-id="{{ $m['id'] }}"
-                    data-url="{{ route($m['xls']) }}"
-                    data-date="{{ $m['date'] ? 'true' : 'false' }}">
-                    <i class="fa fa-file-excel-o"></i> Export Excel
-                </a>
-            </div>
-        </div>
-    </div>
-</div>
-@endforeach
-
+    @foreach ($groups->flatten(1) as $r)
+        @include('laporan.partials._modal', ['r' => $r])
+    @endforeach
 </section>
 @endsection
 
 @section('page-script')
-<script>
-$(document).ready(function () {
-
-    function buildUrl(baseUrl, id, hasDate) {
-        var params = {};
-        if (hasDate) {
-            params.tanggal_mulai   = $('#mulai_'   + id).val();
-            params.tanggal_selesai = $('#selesai_' + id).val();
-        }
-        var outlet = $('#outlet_' + id).val();
-        if (outlet) params.outlet_id = outlet;
-        var query = $.param(params);
-        return query ? baseUrl + '?' + query : baseUrl;
-    }
-
-    $(document).on('click', '.btn-preview-pdf', function () {
-        var id      = $(this).data('id');
-        var url     = $(this).data('url');
-        var hasDate = $(this).data('date') === true || $(this).data('date') === 'true';
-        window.open(buildUrl(url, id, hasDate), '_blank');
-    });
-
-    $(document).on('click', '.btn-export-xls', function (e) {
-        e.preventDefault();
-        var id      = $(this).data('id');
-        var url     = $(this).data('url');
-        var hasDate = $(this).data('date') === true || $(this).data('date') === 'true';
-        window.location.href = buildUrl(url, id, hasDate);
-    });
-
-});
-</script>
+    @include('laporan.partials._script')
 @endsection

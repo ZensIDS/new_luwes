@@ -1,144 +1,80 @@
 @extends('layouts.master')
 @section('title', 'Laporan Toko')
 @section('container')
+@include('laporan.partials._style')
+
+@php
+    $groups = [
+        'Penjualan' => [
+            ['id'=>'outlet_penjualan', 'title'=>'Penjualan Outlet', 'icon'=>'fa-shopping-cart', 'color'=>'green', 'xls'=>'laporan.outlet.penjualan',
+             'date'=>true, 'outlet'=>true, 'cashier'=>true, 'rafaksi'=>false,
+             'desc'=>'Penjualan per kasir lengkap dengan rekap metode pembayaran, bon, dan setoran akhir.'],
+            ['id'=>'outlet_rafaksi', 'title'=>'Rafaksi Outlet', 'icon'=>'fa-tags', 'color'=>'amber', 'xls'=>'laporan.outlet.rafaksi',
+             'date'=>true, 'outlet'=>true, 'cashier'=>false, 'rafaksi'=>true,
+             'desc'=>'Penjualan produk pada periode rafaksi beserta diskon per unit dan total diskon.'],
+            ['id'=>'outlet_retur', 'title'=>'Retur Penjualan', 'icon'=>'fa-exchange', 'color'=>'red', 'xls'=>'laporan.outlet.retur',
+             'date'=>true, 'outlet'=>true, 'cashier'=>false, 'rafaksi'=>false,
+             'desc'=>'Transaksi retur, barang yang diretur, dan barang penggantinya.'],
+        ],
+        'Stok' => [
+            ['id'=>'outlet_all_stock', 'title'=>'All Stock Outlet', 'icon'=>'fa-cubes', 'color'=>'teal', 'xls'=>'laporan.outlet.all-stock',
+             'date'=>false, 'outlet'=>true, 'cashier'=>false, 'rafaksi'=>false,
+             'desc'=>'Stok per barcode produk, termasuk HPP, HPP + pajak, dan rekap persediaan.'],
+            ['id'=>'outlet_minimal_stock', 'title'=>'Minimal Stock & Alokasi PO', 'icon'=>'fa-bar-chart', 'color'=>'purple', 'xls'=>'laporan.outlet.minimal-stock',
+             'date'=>false, 'outlet'=>false, 'cashier'=>false, 'rafaksi'=>false,
+             'desc'=>'Stok minimal per produk gudang, status out of stock, dan saran qty PO.'],
+        ],
+        'Permintaan ke Gudang' => [
+            ['id'=>'pr', 'title'=>'PR (Permintaan ke Gudang)', 'icon'=>'fa-file-text-o', 'color'=>'blue', 'xls'=>'laporan.export.pr',
+             'date'=>true, 'outlet'=>false, 'cashier'=>false, 'rafaksi'=>false,
+             'desc'=>'Rekap permintaan barang dari toko ke gudang.'],
+            ['id'=>'retur_outlet', 'title'=>'Retur Toko ke Gudang', 'icon'=>'fa-undo', 'color'=>'red', 'xls'=>'laporan.retur-outlet',
+             'date'=>true, 'outlet'=>false, 'cashier'=>false, 'rafaksi'=>false,
+             'desc'=>'Retur barang dari toko ke gudang.'],
+        ],
+    ];
+@endphp
+
 <section class="content-header">
-    <h1>Laporan Toko</h1>
+    <h1>Laporan Toko <small>Pilih laporan, atur filter, lalu unduh Excel</small></h1>
 </section>
+
 <section class="content">
-    <div class="alert alert-info">
-        <i class="fa fa-info-circle"></i>
-        Penjualan yang diretur tidak dihitung sebagai penjualan; barang pengganti tetap dihitung sebagai penjualan.
-        Semua laporan dapat dicetak/preview PDF atau diunduh sebagai XLSX.
-    </div>
-
-    @php $role = auth()->user()->role; @endphp
-    <div class="row">
-        <div class="col-md-4 col-sm-6">
-            <div class="box box-primary">
-                <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-line-chart"></i> Minimal Stock Gudang &amp; Alokasi PO</h3></div>
-                <div class="box-body small">Min stok per produk gudang: hasil 3 bulan (atau default manual) + adjustment aktif. Menampilkan status out_of_stock dan saran qty PO.</div>
-                <div class="box-footer"><button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_outlet_minimal_stock"><i class="fa fa-bar-chart"></i> Lihat Laporan</button></div>
-            </div>
-        </div>
-        <div class="col-md-4 col-sm-6">
-            <div class="box box-success">
-                <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-shopping-cart"></i> Laporan Penjualan</h3></div>
-                <div class="box-body small">Filter daterange dan akun kasir, dengan rekap payment method, bon, dan setoran akhir.</div>
-                <div class="box-footer"><button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_outlet_penjualan"><i class="fa fa-bar-chart"></i> Lihat Laporan</button></div>
-            </div>
-        </div>
-        <div class="col-md-4 col-sm-6">
-            <div class="box box-warning">
-                <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-tags"></i> Laporan Rafaksi</h3></div>
-                <div class="box-body small">Penjualan produk pada periode rafaksi dengan diskon per unit dan total diskon.</div>
-                <div class="box-footer"><button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_outlet_rafaksi"><i class="fa fa-bar-chart"></i> Lihat Laporan</button></div>
-            </div>
-        </div>
-        <div class="col-md-4 col-sm-6">
-            <div class="box box-danger">
-                <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-exchange"></i> Laporan Retur</h3></div>
-                <div class="box-body small">Menampilkan transaksi retur serta barang yang diretur dan barang penggantinya.</div>
-                <div class="box-footer"><button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_outlet_retur"><i class="fa fa-bar-chart"></i> Lihat Laporan</button></div>
-            </div>
-        </div>
-        <div class="col-md-4 col-sm-6">
-            <div class="box box-info">
-                <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-cubes"></i> Laporan All Stock</h3></div>
-                <div class="box-body small">Stock berdasarkan barcode produk, bukan SKU, termasuk HPP, HPP + Pajak, dan rekap persediaan.</div>
-                <div class="box-footer"><button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_outlet_all_stock"><i class="fa fa-bar-chart"></i> Lihat Laporan</button></div>
-            </div>
-        </div>
-        <div class="col-md-4 col-sm-6">
-            <div class="box box-primary">
-                <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-file-text-o"></i> Laporan PR (Permintaan ke Gudang)</h3></div>
-                <div class="box-body small">Rekap permintaan barang (PR) dari toko ke gudang pada periode terpilih.</div>
-                <div class="box-footer"><button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_pr"><i class="fa fa-bar-chart"></i> Lihat Laporan</button></div>
-            </div>
-        </div>
-        <div class="col-md-4 col-sm-6">
-            <div class="box box-danger">
-                <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-undo"></i> Laporan Retur Toko ke Gudang</h3></div>
-                <div class="box-body small">Retur barang dari toko ke gudang pada periode terpilih.</div>
-                <div class="box-footer"><button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_retur_outlet"><i class="fa fa-bar-chart"></i> Lihat Laporan</button></div>
-            </div>
+    <div class="rpt-toolbar">
+        <p class="rpt-hint">
+            <i class="fa fa-info-circle"></i>
+            Penjualan yang diretur tidak dihitung sebagai penjualan; barang pengganti tetap dihitung.
+        </p>
+        <div class="rpt-search">
+            <i class="fa fa-search"></i>
+            <input type="text" id="rptSearch" class="form-control" placeholder="Cari laporan..." autocomplete="off">
         </div>
     </div>
 
-    @php
-        $reports = [
-            ['id' => 'outlet_minimal_stock', 'title' => 'Minimal Stock Gudang & Alokasi PO', 'pdf' => 'laporan.pdf.outlet.minimal-stock', 'xls' => 'laporan.outlet.minimal-stock', 'date' => false, 'outlet' => false, 'cashier' => false, 'rafaksi' => false],
-            ['id' => 'outlet_penjualan', 'title' => 'Penjualan Outlet', 'pdf' => 'laporan.pdf.outlet.penjualan', 'xls' => 'laporan.outlet.penjualan', 'date' => true, 'outlet' => true, 'cashier' => true, 'rafaksi' => false],
-            ['id' => 'outlet_rafaksi', 'title' => 'Rafaksi Outlet', 'pdf' => 'laporan.pdf.outlet.rafaksi', 'xls' => 'laporan.outlet.rafaksi', 'date' => true, 'outlet' => true, 'cashier' => false, 'rafaksi' => true],
-            ['id' => 'outlet_retur', 'title' => 'Retur Outlet', 'pdf' => 'laporan.pdf.outlet.retur', 'xls' => 'laporan.outlet.retur', 'date' => true, 'outlet' => true, 'cashier' => false, 'rafaksi' => false],
-            ['id' => 'outlet_all_stock', 'title' => 'All Stock Outlet', 'pdf' => 'laporan.pdf.outlet.all-stock', 'xls' => 'laporan.outlet.all-stock', 'date' => false, 'outlet' => true, 'cashier' => false, 'rafaksi' => false],
-            ['id' => 'pr', 'title' => 'PR (Permintaan ke Gudang)', 'pdf' => 'laporan.pdf.pr', 'xls' => 'laporan.export.pr', 'date' => true, 'outlet' => false, 'cashier' => false, 'rafaksi' => false],
-            ['id' => 'retur_outlet', 'title' => 'Retur Toko ke Gudang', 'pdf' => 'laporan.pdf.retur-outlet', 'xls' => 'laporan.retur-outlet', 'date' => true, 'outlet' => false, 'cashier' => false, 'rafaksi' => false],
-        ];
-    @endphp
-
-    @foreach ($reports as $report)
-        <div id="modal_{{ $report['id'] }}" class="modal fade" role="dialog">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <button type="button" class="close" data-dismiss="modal">&times;</button>
-                        <h4 class="modal-title">{{ $report['title'] }}</h4>
-                    </div>
-                    <div class="modal-body">
-                        @if ($report['date'])
-                            <div class="row">
-                                <div class="col-sm-6 form-group"><label>Tanggal Mulai</label><input type="date" id="mulai_{{ $report['id'] }}" class="form-control" value="{{ now()->startOfMonth()->format('Y-m-d') }}"></div>
-                                <div class="col-sm-6 form-group"><label>Tanggal Selesai</label><input type="date" id="selesai_{{ $report['id'] }}" class="form-control" value="{{ now()->format('Y-m-d') }}"></div>
-                            </div>
-                        @endif
-                        @if ($report['outlet'])
-                            <div class="form-group"><label>Outlet</label><select id="outlet_{{ $report['id'] }}" class="form-control"><option value="">Semua Outlet</option>@foreach ($outlets as $outlet)<option value="{{ $outlet->id }}">{{ $outlet->name }}</option>@endforeach</select></div>
-                        @endif
-                        @if ($report['cashier'])
-                            <div class="form-group"><label>Akun Kasir</label><select id="kasir_{{ $report['id'] }}" class="form-control"><option value="">Semua Kasir</option>@foreach ($cashiers as $cashier)<option value="{{ $cashier->id }}">{{ $cashier->name }}</option>@endforeach</select></div>
-                        @endif
-                        @if ($report['rafaksi'])
-                            <div class="form-group"><label>Periode Rafaksi</label><select id="promotion_{{ $report['id'] }}" class="form-control"><option value="">Semua Rafaksi</option>@foreach ($rafaksis as $rafaksi)<option value="{{ $rafaksi->id }}">{{ $rafaksi->name }} ({{ optional($rafaksi->start_at)->format('d/m/Y') ?? '-' }} - {{ optional($rafaksi->end_at)->format('d/m/Y') ?? '-' }})</option>@endforeach</select></div>
-                        @endif
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-default" data-dismiss="modal">Tutup</button>
-                        <button type="button" class="btn btn-success btn-preview-outlet-pdf" data-id="{{ $report['id'] }}" data-url="{{ route($report['pdf']) }}"><i class="fa fa-print"></i> Cetak / Preview PDF</button>
-                        <a href="{{ route($report['xls']) }}" class="btn btn-primary btn-export-outlet-xls" data-id="{{ $report['id'] }}" data-url="{{ route($report['xls']) }}"><i class="fa fa-file-excel-o"></i> Export XLSX</a>
-                    </div>
-                </div>
+    @foreach ($groups as $groupName => $items)
+        <div class="rpt-group">
+            <h3 class="rpt-group-title">{{ $groupName }}</h3>
+            <div class="rpt-grid">
+                @foreach ($items as $r)
+                    <button type="button" class="rpt-card rpt-c-{{ $r['color'] }}" data-toggle="modal" data-target="#modal_{{ $r['id'] }}">
+                        <span class="rpt-icon"><i class="fa {{ $r['icon'] }}"></i></span>
+                        <h4>{{ $r['title'] }}</h4>
+                        <p>{{ $r['desc'] }}</p>
+                        <span class="rpt-open">Buka <i class="fa fa-arrow-right"></i></span>
+                    </button>
+                @endforeach
             </div>
         </div>
+    @endforeach
+
+    <div class="rpt-empty"><i class="fa fa-search fa-2x"></i><p>Tidak ada laporan yang cocok.</p></div>
+
+    @foreach (collect($groups)->flatten(1) as $r)
+        @include('laporan.partials._modal', ['r' => $r])
     @endforeach
 </section>
 @endsection
 
 @section('page-script')
-<script>
-$(function () {
-    function buildUrl(baseUrl, id) {
-        var params = {};
-        var mulai = $('#mulai_' + id).val();
-        var selesai = $('#selesai_' + id).val();
-        var outlet = $('#outlet_' + id).val();
-        var kasir = $('#kasir_' + id).val();
-        var promotion = $('#promotion_' + id).val();
-        if (mulai) params.tanggal_mulai = mulai;
-        if (selesai) params.tanggal_selesai = selesai;
-        if (outlet) params.outlet_id = outlet;
-        if (kasir) params.kasir_id = kasir;
-        if (promotion) params.promotion_id = promotion;
-        var query = $.param(params);
-        return query ? baseUrl + '?' + query : baseUrl;
-    }
-
-    $(document).on('click', '.btn-preview-outlet-pdf', function () {
-        window.open(buildUrl($(this).data('url'), $(this).data('id')), '_blank');
-    });
-    $(document).on('click', '.btn-export-outlet-xls', function (event) {
-        event.preventDefault();
-        window.location.href = buildUrl($(this).data('url'), $(this).data('id'));
-    });
-});
-</script>
+    @include('laporan.partials._script')
 @endsection
