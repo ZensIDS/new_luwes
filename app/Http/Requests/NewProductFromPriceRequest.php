@@ -7,8 +7,9 @@ namespace App\Http\Requests;
  *
  * - Aturan dasar sama dengan menu Product (ProductRequest), tetapi error-nya disimpan di
  *   error bag terpisah ("newProduct") agar tidak bercampur dengan error form aturan harga.
- * - Harga beli boleh diisi per SATUAN BESAR (kebiasaan nota supplier). Nilai yang disimpan
- *   ke products.harga_beli tetap per SATUAN KECIL: harga besar / isi konversi.
+ * - Harga beli diisi di salah satu kolom: SATUAN KECIL atau SATUAN BESAR (kebiasaan nota supplier).
+ *   Pasangannya dihitung otomatis lewat isi konversi (lihat ProductRequest::productData()); products.harga_beli
+ *   tetap per SATUAN KECIL dan jadi acuan hitung laba.
  * - Minimum stock tidak wajib (default 0).
  */
 class NewProductFromPriceRequest extends ProductRequest
@@ -28,8 +29,7 @@ class NewProductFromPriceRequest extends ProductRequest
     public function rules()
     {
         return array_merge(parent::rules(), [
-            'harga_beli' => 'required|numeric|min:0',
-            'harga_beli_per' => 'required|in:besar,kecil',
+            // harga_beli / harga_beli_besar / harga_beli_per memakai aturan dari ProductRequest.
             'satuan' => ['nullable', 'string', 'required_with:satuan_besar'],
             'satuan_besar' => ['nullable', 'string', 'max:255', 'required_if:harga_beli_per,besar', 'required_with:konversi_qty'],
             'konversi_qty' => ['nullable', 'numeric', 'min:1', 'required_if:harga_beli_per,besar', 'required_with:satuan_besar'],
@@ -54,21 +54,11 @@ class NewProductFromPriceRequest extends ProductRequest
     }
 
     /**
-     * Data siap simpan ke tabel products.
-     * Bila harga beli dimasukkan per satuan besar, HPP otomatis dibagi isi konversi
-     * sehingga products.harga_beli selalu per satuan kecil.
+     * Data siap simpan ke tabel products (harga kecil/besar dihitung di ProductRequest::productData()).
      */
     public function productData(): array
     {
-        $data = $this->validated();
-
-        $per = $data['harga_beli_per'] ?? 'kecil';
-        unset($data['harga_beli_per']);
-
-        if ($per === 'besar') {
-            $data['harga_beli'] = round(((float) $data['harga_beli']) / (float) $data['konversi_qty'], 2);
-        }
-
+        $data = parent::productData();
         $data['min_stock'] = (int) ($data['min_stock'] ?? 0);
 
         return $data;

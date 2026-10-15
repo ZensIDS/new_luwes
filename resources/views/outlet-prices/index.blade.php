@@ -106,6 +106,18 @@
                                         title="Klik untuk melihat riwayat HPP">
                                         @currency($price->print_hpp ?? 0)
                                     </button>
+                                    @php
+                                        $hppKonversi = (float) ($price->product?->konversi_qty ?? 0);
+                                    @endphp
+                                    <div><small class="text-muted">/ {{ $price->product?->satuan ?? 'satuan kecil' }}</small></div>
+                                    @if ($hppKonversi >= 1)
+                                        <div>
+                                            <small class="text-muted">
+                                                @currency(round(($price->print_hpp ?? 0) * $hppKonversi, 2))
+                                                / {{ $price->product?->satuan_besar ?? 'satuan besar' }}
+                                            </small>
+                                        </div>
+                                    @endif
                                 </td>
                                 <td>
                                     <del>@currency($price->print_price_strike ?? 0)</del>

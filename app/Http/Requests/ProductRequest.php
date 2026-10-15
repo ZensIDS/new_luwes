@@ -25,6 +25,7 @@ class ProductRequest extends FormRequest
                 ? round((float) $this->input('konversi_qty'), 2)
                 : null,
             'harga_beli' => IndonesianNumber::parse($this->input('harga_beli')),
+            'harga_beli_besar' => IndonesianNumber::parse($this->input('harga_beli_besar')),
             'harga_jual' => IndonesianNumber::parse($this->input('harga_jual')),
             'diskon' => IndonesianNumber::parse($this->input('diskon')),
         ]);
@@ -53,7 +54,10 @@ class ProductRequest extends FormRequest
             'brand' => 'nullable|string',
             'model' => 'nullable',
             'is_serialized' => 'nullable',
-            'harga_beli' => 'required|numeric|min:0',
+            // Yang DIINPUT user (harga_beli_per): kecil -> harga_beli wajib; besar -> harga_beli_besar wajib.
+            // Pasangannya dihitung otomatis di productData().
+            'harga_beli' => [$this->hargaBeliPer() === 'kecil' ? 'required' : 'nullable', 'numeric', 'min:0'],
+            'harga_beli_besar' => [$this->hargaBeliPer() === 'besar' ? 'required' : 'nullable', 'numeric', 'min:0'],
             'harga_beli_per' => 'required|in:besar,kecil',
             'harga_jual' => 'nullable',
             'diskon' => 'nullable',
@@ -70,10 +74,17 @@ class ProductRequest extends FormRequest
         ];
     }
 
+    /** Harga beli yang diinput user per satuan apa ('kecil' | 'besar'). */
+    protected function hargaBeliPer(): string
+    {
+        return $this->input('harga_beli_per') === 'besar' ? 'besar' : 'kecil';
+    }
+
     /**
      * Data siap simpan ke tabel products.
-     * Bila harga beli dimasukkan per satuan besar, HPP otomatis dibagi isi konversi
-     * sehingga products.harga_beli selalu per satuan kecil (pcs).
+     *  - input per satuan BESAR : harga_beli (kecil) = harga besar / konversi_qty
+     *  - input per satuan KECIL : harga_beli_besar   = harga kecil x konversi_qty (kosong bila konversi belum diisi)
+     * products.harga_beli selalu per satuan kecil dan jadi acuan hitung laba.
      */
     public function productData(): array
     {
@@ -82,8 +93,27 @@ class ProductRequest extends FormRequest
         $per = $data['harga_beli_per'] ?? 'kecil';
         unset($data['harga_beli_per']);
 
+        return $this->applyHargaBeli(
+            $data,
+            $per,
+            $per === 'besar' ? null : ($data['harga_beli'] ?? null),
+            $per === 'besar' ? ($data['harga_beli_besar'] ?? null) : null
+        );
+    }
+
+    /** Hitung pasangan harga kecil/besar dari salah satu yang diinput. */
+    protected function applyHargaBeli(array $data, string $per, $kecilInput, $besarInput): array
+    {
+        $konversi = (float) ($data['konversi_qty'] ?? 0);
+
         if ($per === 'besar') {
-            $data['harga_beli'] = round(((float) $data['harga_beli']) / (float) $data['konversi_qty'], 2);
+            $besar = round((float) $besarInput, 2);
+            $data['harga_beli_besar'] = $besar;
+            $data['harga_beli'] = $konversi >= 1 ? round($besar / $konversi, 2) : 0;
+        } else {
+            $kecil = round((float) $kecilInput, 2);
+            $data['harga_beli'] = $kecil;
+            $data['harga_beli_besar'] = $konversi >= 1 ? round($kecil * $konversi, 2) : null;
         }
 
         return $data;
@@ -102,6 +132,9 @@ class ProductRequest extends FormRequest
             'harga_beli.required' => 'Harga beli wajib diisi.',
             'harga_beli.numeric' => 'Harga beli harus berupa angka.',
             'harga_beli.min' => 'Harga beli tidak boleh kurang dari 0.',
+            'harga_beli_besar.required' => 'Harga beli satuan besar wajib diisi.',
+            'harga_beli_besar.numeric' => 'Harga beli satuan besar harus berupa angka.',
+            'harga_beli_besar.min' => 'Harga beli satuan besar tidak boleh kurang dari 0.',
             'harga_beli_per.in' => 'Pilihan harga beli per satuan tidak valid.',
             'satuan_besar.required_if' => 'Satuan besar wajib diisi jika harga beli dimasukkan per satuan besar.',
             'konversi_qty.required_if' => 'Isi konversi wajib diisi jika harga beli dimasukkan per satuan besar.',

@@ -41,7 +41,8 @@ class Product extends Model
         'status_produk_note',
         'model', // Add for specific model info
         'is_serialized', // Boolean: true for unique items, false for bulk => now always false
-        'harga_beli',
+        'harga_beli', // per SATUAN KECIL - acuan hitung HPP / laba
+        'harga_beli_besar', // per SATUAN BESAR - tampilan saja, boleh kosong
         'harga_jual',
         'diskon',
         'berat',
@@ -52,7 +53,31 @@ class Product extends Model
     protected $casts = [
         'is_serialized' => 'boolean',
         'harga_beli' => 'float',
+        'harga_beli_besar' => 'float',
     ];
+
+    /**
+     * Jaga harga_beli_besar tetap sinkron dengan harga_beli (satuan kecil) lewat jalur MANA PUN yang menyimpan
+     * lewat model (form Product, penerimaan pembelian / HPP rata-rata, dll).
+     * Bila pasangan kecil/besar sudah konsisten (besar / konversi = kecil) tidak diubah; bila basi / kosong, besar = kecil x konversi.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (Product $product) {
+            $konversi = (float) $product->konversi_qty;
+            if ($konversi < 1 || $product->harga_beli === null) {
+                return;
+            }
+
+            $kecil = (float) $product->harga_beli;
+            $besar = $product->harga_beli_besar;
+            $konsisten = $besar !== null && abs(round(((float) $besar) / $konversi, 2) - $kecil) < 0.01;
+
+            if (! $konsisten) {
+                $product->harga_beli_besar = round($kecil * $konversi, 2);
+            }
+        });
+    }
 
     /**
      * Nama produk selalu disimpan HURUF BESAR, apa pun cara input / import-nya.

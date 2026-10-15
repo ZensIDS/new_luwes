@@ -1,10 +1,16 @@
-{{-- Hitung otomatis Harga Beli per satuan kecil / besar (dipakai form Product create & edit). --}}
+{{--
+    Hitung otomatis Harga Beli satuan kecil <-> satuan besar (dipakai form Product create & edit).
+    - Isi harga BESAR  -> harga KECIL = besar / konversi
+    - Isi harga KECIL  -> harga BESAR = kecil x konversi (kosong bila Isi Konversi belum diisi)
+    Kolom yang terakhir diketik user disimpan di input hidden #harga-beli-per sebagai sumber perhitungan.
+--}}
 <script>
     $(function () {
-        var $price = $('#harga-beli-input');
+        var $kecil = $('#harga-beli-input');
+        var $besar = $('#harga-beli-besar-input');
         var $per = $('#harga-beli-per');
         var $hint = $('#harga-beli-hint');
-        if (!$price.length) { return; }
+        if (!$kecil.length || !$besar.length) { return; }
 
         // Parser angka format Indonesia (sama dengan parseIdNumber di currency-input.js)
         function parseId(value) {
@@ -25,45 +31,67 @@
             return Number(number).toLocaleString('id-ID', { maximumFractionDigits: 2 });
         }
 
-        function refresh() {
-            var besar = $.trim($('input[name="satuan_besar"]').val());
-            var kecil = $.trim($('input[name="satuan"]').val());
+        function round2(number) {
+            return Math.round(number * 100) / 100;
+        }
+
+        function setValue($input, number) {
+            // Tanpa trigger event, supaya tidak memicu perhitungan berulang.
+            $input.val(number > 0 ? fmt(round2(number)) : '');
+        }
+
+        function sync() {
+            var besarLabel = $.trim($('input[name="satuan_besar"]').val());
+            var kecilLabel = $.trim($('input[name="satuan"]').val());
             var konversi = parseId($('input[name="konversi_qty"]').val());
-            var harga = parseId($price.val());
-            var kecilLabel = kecil || 'satuan kecil';
 
-            $per.find('option[value="besar"]').text('Satuan Besar' + (besar ? ' (' + besar + ')' : ''));
-            $per.find('option[value="kecil"]').text('Satuan Kecil' + (kecil ? ' (' + kecil + ')' : ''));
+            $('#harga-beli-kecil-label').text(kecilLabel ? '(per ' + kecilLabel + ')' : '');
+            $('#harga-beli-besar-label').text(besarLabel ? '(per ' + besarLabel + ')' : '');
 
-            if ($per.val() === 'besar') {
-                if (!besar || konversi < 1) {
+            var per = $per.val() === 'besar' ? 'besar' : 'kecil';
+            var kecilText = kecilLabel || 'satuan kecil';
+            var besarText = besarLabel || 'satuan besar';
+
+            if (per === 'besar') {
+                var besar = parseId($besar.val());
+                if (konversi < 1) {
                     $hint.attr('class', 'help-block text-warning')
-                        .text('Isi Satuan Besar dan Isi Konversi supaya harga per ' + kecilLabel + ' bisa dihitung otomatis.');
-                } else if (harga > 0) {
+                        .text('Isi Satuan Besar dan Isi Konversi supaya harga per ' + kecilText + ' terisi otomatis.');
+                    return;
+                }
+                setValue($kecil, besar / konversi);
+                if (besar > 0) {
                     $hint.attr('class', 'help-block text-success')
-                        .text('Harga beli per ' + kecilLabel + ' = Rp' + fmt(Math.round(harga / konversi * 100) / 100)
-                            + ' (Rp' + fmt(harga) + ' ÷ ' + fmt(konversi) + '). Nilai ini yang disimpan.');
+                        .text('Harga per ' + kecilText + ' = Rp' + fmt(round2(besar / konversi))
+                            + ' (Rp' + fmt(besar) + ' ÷ ' + fmt(konversi) + '). Nilai ini yang dipakai untuk hitung laba.');
                 } else {
                     $hint.attr('class', 'help-block').text('');
                 }
                 return;
             }
 
-            if (harga > 0) {
-                var text = 'Harga beli disimpan sebagai harga per ' + kecilLabel + '.';
-                if (besar && konversi >= 1) {
-                    text += ' Setara Rp' + fmt(Math.round(harga * konversi * 100) / 100) + ' per ' + besar + '.';
+            var kecil = parseId($kecil.val());
+            if (konversi >= 1) {
+                setValue($besar, kecil * konversi);
+                if (kecil > 0) {
+                    $hint.attr('class', 'help-block text-muted')
+                        .text('Terisi otomatis: Rp' + fmt(round2(kecil)) + ' × ' + fmt(konversi) + ' per ' + besarText + '.');
+                } else {
+                    $hint.attr('class', 'help-block').text('');
                 }
-                $hint.attr('class', 'help-block text-muted').text(text);
             } else {
-                $hint.attr('class', 'help-block').text('');
+                $besar.val('');
+                $hint.attr('class', 'help-block text-muted')
+                    .text('Opsional. Terisi otomatis bila Satuan Besar dan Isi Konversi diisi.');
             }
         }
 
-        $('input[name="satuan_besar"], input[name="satuan"], input[name="konversi_qty"], #harga-beli-input')
-            .on('input change keyup', refresh);
-        $per.on('change', refresh);
-        refresh();
-        $(window).on('load', refresh);
+        $kecil.on('input change keyup', function () { $per.val('kecil'); sync(); });
+        $besar.on('input change keyup', function () { $per.val('besar'); sync(); });
+        $('input[name="satuan_besar"], input[name="satuan"], input[name="konversi_qty"]')
+            .on('input change keyup', sync);
+
+        sync();
+        $(window).on('load', sync);
     });
 </script>

@@ -119,22 +119,29 @@
                             <span class="help-block" id="np-konversi-hint">Contoh: 1 karton = 12 pcs, isi 12.</span>
                             @error('konversi_qty', 'newProduct')<span class="help-block text-danger">{{ $message }}</span>@enderror
                         </div>
-                        <div class="col-md-5 form-group {{ $errors->newProduct->has('harga_beli') ? 'has-error' : '' }}">
-                            <label>Harga Beli <span class="text-danger">*</span></label>
+                        {{-- Harga beli: isi SALAH SATU, pasangannya terisi otomatis lewat Isi Konversi.
+                             harga_beli_per (hidden) = kolom yang terakhir diisi user. --}}
+                        <input type="hidden" name="harga_beli_per" id="np-harga-per"
+                            value="{{ old('harga_beli_per', 'besar') === 'kecil' ? 'kecil' : 'besar' }}">
+                        <div class="col-md-4 form-group {{ $errors->newProduct->has('harga_beli') ? 'has-error' : '' }}">
+                            <label>Harga Beli Satuan Kecil <span id="np-harga-kecil-label"></span></label>
                             <div class="input-group">
                                 <span class="input-group-addon">Rp</span>
-                                <input type="text" inputmode="numeric" data-currency-input data-currency-decimals="2"
+                                <input type="text" inputmode="decimal" data-currency-input data-currency-decimals="2"
                                     class="form-control" id="np-harga-beli" name="harga_beli"
-                                    value="{{ old('harga_beli', 0) }}" placeholder="Harga sesuai nota supplier">
+                                    value="{{ old('harga_beli') }}" placeholder="Harga per satuan kecil" autocomplete="off">
                             </div>
                             @error('harga_beli', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
                         </div>
-                        <div class="col-md-3 form-group {{ $errors->newProduct->has('harga_beli_per') ? 'has-error' : '' }}">
-                            <label>Harga beli per</label>
-                            <select class="form-control" id="np-harga-per" name="harga_beli_per">
-                                <option value="besar" {{ old('harga_beli_per', 'besar') === 'besar' ? 'selected' : '' }}>Satuan Besar</option>
-                                <option value="kecil" {{ old('harga_beli_per', 'besar') === 'kecil' ? 'selected' : '' }}>Satuan Kecil</option>
-                            </select>
+                        <div class="col-md-4 form-group {{ $errors->newProduct->has('harga_beli_besar') || $errors->newProduct->has('harga_beli_per') ? 'has-error' : '' }}">
+                            <label>Harga Beli Satuan Besar <span id="np-harga-besar-label"></span></label>
+                            <div class="input-group">
+                                <span class="input-group-addon">Rp</span>
+                                <input type="text" inputmode="decimal" data-currency-input data-currency-decimals="2"
+                                    class="form-control" id="np-harga-beli-besar" name="harga_beli_besar"
+                                    value="{{ old('harga_beli_besar') }}" placeholder="Harga sesuai nota supplier" autocomplete="off">
+                            </div>
+                            @error('harga_beli_besar', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
                             @error('harga_beli_per', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
                         </div>
                         <div class="col-md-12">
@@ -623,39 +630,59 @@
             function fmt(n) {
                 return Number(n).toLocaleString('id-ID', { maximumFractionDigits: 2 });
             }
+            function round2(n) { return Math.round(n * 100) / 100; }
+            function setHarga($input, n) {
+                // Tanpa trigger event, supaya tidak memicu perhitungan berulang.
+                $input.val(n > 0 ? fmt(round2(n)) : '');
+            }
+            // Isi harga BESAR -> kecil = besar / konversi. Isi harga KECIL -> besar = kecil x konversi.
             function refreshHarga() {
                 var besar = $.trim($('#np-satuan-besar').val());
                 var kecil = $.trim($('#np-satuan').val());
                 var konv = parseId($('#np-konversi').val());
-                var harga = parseId($('#np-harga-beli').val());
-                var per = $('#np-harga-per').val();
+                var per = $('#np-harga-per').val() === 'kecil' ? 'kecil' : 'besar';
                 var $hint = $('#np-hpp-hint');
+                var kecilText = kecil || 'satuan kecil';
 
-                $('#np-harga-per option[value="besar"]').text('Satuan Besar' + (besar ? ' (' + besar + ')' : ''));
-                $('#np-harga-per option[value="kecil"]').text('Satuan Kecil' + (kecil ? ' (' + kecil + ')' : ''));
+                $('#np-harga-kecil-label').text(kecil ? '(per ' + kecil + ')' : '');
+                $('#np-harga-besar-label').text(besar ? '(per ' + besar + ')' : '');
                 $('#np-konversi-hint').text(besar && konv > 0
-                    ? '1 ' + besar + ' = ' + konv + ' ' + (kecil || 'satuan kecil')
+                    ? '1 ' + besar + ' = ' + konv + ' ' + kecilText
                     : 'Contoh: 1 karton = 12 pcs, isi 12.');
 
                 if (per === 'besar') {
-                    if (!besar || konv < 1) {
+                    var hargaBesar = parseId($('#np-harga-beli-besar').val());
+                    if (konv < 1) {
                         $hint.attr('class', 'help-block text-warning')
                             .text('Isi Satuan Besar dan Isi Konversi supaya HPP per satuan kecil bisa dihitung otomatis.');
-                    } else if (harga > 0) {
-                        $hint.attr('class', 'help-block text-success')
-                            .text('HPP per ' + (kecil || 'satuan kecil') + ' = Rp' + fmt(harga / konv)
-                                + ' (Rp' + fmt(harga) + ' ÷ ' + fmt(konv) + ')');
-                    } else {
-                        $hint.attr('class', 'help-block').text('');
+                        return;
                     }
+                    setHarga($('#np-harga-beli'), hargaBesar / konv);
+                    $hint.attr('class', hargaBesar > 0 ? 'help-block text-success' : 'help-block')
+                        .text(hargaBesar > 0
+                            ? 'HPP per ' + kecilText + ' = Rp' + fmt(round2(hargaBesar / konv))
+                                + ' (Rp' + fmt(hargaBesar) + ' ÷ ' + fmt(konv) + ')'
+                            : '');
                 } else {
-                    $hint.attr('class', 'help-block').text(harga > 0
-                        ? 'Harga beli disimpan apa adanya sebagai HPP per ' + (kecil || 'satuan kecil') + '.'
-                        : '');
+                    var hargaKecil = parseId($('#np-harga-beli').val());
+                    if (konv >= 1) {
+                        setHarga($('#np-harga-beli-besar'), hargaKecil * konv);
+                        $hint.attr('class', hargaKecil > 0 ? 'help-block text-muted' : 'help-block')
+                            .text(hargaKecil > 0
+                                ? 'Harga satuan besar terisi otomatis: Rp' + fmt(round2(hargaKecil)) + ' × ' + fmt(konv) + '.'
+                                : '');
+                    } else {
+                        $('#np-harga-beli-besar').val('');
+                        $hint.attr('class', 'help-block text-muted')
+                            .text(hargaKecil > 0
+                                ? 'Harga satuan besar opsional, terisi otomatis bila Satuan Besar dan Isi Konversi diisi.'
+                                : '');
+                    }
                 }
             }
-            $('#np-satuan-besar, #np-satuan, #np-konversi, #np-harga-beli, #np-harga-per')
-                .on('input change keyup', refreshHarga);
+            $('#np-harga-beli').on('input change keyup', function () { $('#np-harga-per').val('kecil'); refreshHarga(); });
+            $('#np-harga-beli-besar').on('input change keyup', function () { $('#np-harga-per').val('besar'); refreshHarga(); });
+            $('#np-satuan-besar, #np-satuan, #np-konversi').on('input change keyup', refreshHarga);
             refreshHarga();
 
             // Catatan Tambahan Diskon: isian langsung (tanpa modal), hanya tampil untuk status Tambahan diskon

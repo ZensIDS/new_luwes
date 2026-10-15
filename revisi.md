@@ -8,6 +8,9 @@ Revisi Luwes
     [x] Check sidebar active bug
     [x] Check Bug on request-order
     [x] Check Bug on picking-list
+    [ ] Update database GLAD2GLOW
+    [ ] Update database all product lama yang belum ada harga margin dll
+    [ ] Update Aturan Min Stock
 [x] Master Harga
     [x] Tambah data terakhir di check
     [x] Tambah note di master

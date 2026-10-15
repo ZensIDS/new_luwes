@@ -88,7 +88,8 @@
                                     <td>Satuan</td>
                                     <td>Satuan Besar</td>
                                     <td>Konversi</td>
-                                    <td>Harga Beli</td>
+                                    <td>Harga Beli (Kecil)</td>
+                                    <td>Harga Beli (Besar)</td>
                                     {{-- <td>Harga Jual</td> --}}
                                     <td>Notif</td>
                                     {{-- <td>Serialized</td> --}}
@@ -133,6 +134,13 @@
                                                 data-id="{{ $value->id }}">
                                                 @currency($value->harga_beli)
                                             </button>
+                                        </td>
+                                        <td>
+                                            @if ($value->harga_beli_besar !== null)
+                                                @currency($value->harga_beli_besar)
+                                            @else
+                                                -
+                                            @endif
                                         </td>
                                         {{-- <td>@currency($value->harga_jual)</td> --}}
                                         <td>
