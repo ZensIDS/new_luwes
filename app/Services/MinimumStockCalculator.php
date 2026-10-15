@@ -18,7 +18,8 @@ use Illuminate\Support\Facades\DB;
  *  - Jendela  = 3 bulan penuh SEBELUM bulan berjalan (bulan ke-4 memakai bulan 1-3, bulan ke-5 memakai 2-4, ...).
  *  - Penjualan = qty item penjualan (status paid / null) di jendela, dikurangi retur per item,
  *                ditambah qty replacement di jendela.
- *  - Frekuensi = jumlah PO outlet (OutletPurchase) di jendela / 3, dibulatkan ke atas, dibatasi 1..4.
+ *  - Frekuensi = jumlah PO outlet (OutletPurchase berstatus pending/received, DRAFT tidak dihitung) di jendela / 3,
+ *                dibulatkan ke atas, dibatasi 1..4.
  *  - Faktor    = 1 => 2,5 | 2 => 1,875 | 3 => 1,25 | 4 => 0,625.
  *  - Eligible  = penjualan pertama ada di bulan awal jendela atau lebih lama.
  *  - Min stok  = eligible ? CEIL(rata-rata terjual per bulan x faktor) : products.min_stock (default manual).
@@ -143,10 +144,11 @@ class MinimumStockCalculator
         return ['sales' => $sales, 'first_sales' => $firstSales];
     }
 
-    /** Jumlah PO outlet (OutletPurchase) di jendela: outlet_id => total. */
+    /** Jumlah PO outlet (OutletPurchase pending/received, tanpa draft) di jendela: outlet_id => total. */
     public function poCounts(Carbon $windowStart, Carbon $windowEnd, ?int $outletId = null): Collection
     {
         return OutletPurchase::query()
+            ->whereIn('status', [OutletPurchase::STATUS_PENDING, OutletPurchase::STATUS_RECEIVED])
             ->select('outlet_id', DB::raw('COUNT(*) as total'))
             ->tap(fn ($q) => ReportQuery::betweenDates($q, 'purchase_date', $windowStart->toDateString(), $windowEnd->toDateString()))
             ->when($outletId, fn ($query) => $query->where('outlet_id', $outletId))
@@ -223,6 +225,71 @@ class MinimumStockCalculator
                 'average_sold' => (float) (($sold[$productId] ?? 0) / self::MONTHS),
                 'manual_min' => $manualMin,
                 'first_sale' => $firstSaleByProduct[$productId] ?? null,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Min stok untuk SATU OUTLET per produk (dipakai Cek Barang Belanja Langsung / POUT toko).
+     *
+     * Memakai ulang rule(), salesAggregates() dan poCounts() dengan filter outlet, jadi rumus gudang tidak berubah:
+     *  - Eligible per outlet x produk: penjualan pertama DI OUTLET ITU ada di bulan awal jendela atau lebih lama.
+     *  - Eligible  : min_dasar = CEIL(rata-rata terjual/bulan x faktor), faktor dari jumlah POUT outlet itu
+     *                (pending + received, tanpa draft) di jendela.
+     *  - Tidak eligible: min 0, source "insufficient" (badge "data belum cukup"). products.min_stock TIDAK dipakai.
+     *  - Adjustment aktif per produk (sama dengan gudang): min_final = CEIL(min_dasar x (1 + persen / 100)).
+     *
+     * @param  array<int>  $productIds
+     * @return array<int, array{
+     *     source: string, min_dasar: int, min_final: int, adjustment_pct: float, average_sold: float,
+     *     po_per_month: float, frequency: int, factor: float, first_sale: ?Carbon
+     * }>  key = product_id; source: "auto" (3 bulan) | "insufficient" (data belum cukup)
+     */
+    public function forOutlet(int $outletId, array $productIds, ?Carbon $asOf = null): array
+    {
+        $productIds = array_values(array_unique(array_map('intval', array_filter($productIds))));
+        if ($productIds === []) {
+            return [];
+        }
+
+        $asOf = $asOf ? $asOf->copy() : now();
+        [$windowStart, $windowEnd] = $this->window($asOf);
+
+        $aggregate = $this->salesAggregates($windowStart, $windowEnd, $outletId, $productIds);
+        $poCount = (int) ($this->poCounts($windowStart, $windowEnd, $outletId)[$outletId] ?? 0);
+
+        $adjustments = ProductMinimumAdjustment::query()
+            ->activeOn($asOf->toDateString())
+            ->whereIn('product_id', $productIds)
+            ->orderByDesc('active_from')
+            ->orderByDesc('id')
+            ->get(['product_id', 'adjustment_percentage'])
+            ->unique('product_id')
+            ->pluck('adjustment_percentage', 'product_id');
+
+        $result = [];
+        foreach ($productIds as $productId) {
+            $key = $outletId.'-'.$productId;
+            $firstSale = $aggregate['first_sales'][$key] ?? null;
+            $eligible = $this->isEligible($firstSale, $windowStart);
+            $sold = max(0.0, (float) ($aggregate['sales'][$key] ?? 0));
+
+            $rule = $this->rule($sold, $poCount, $eligible, 0);
+            $base = $eligible ? (int) $rule['min_stock'] : 0;
+            $pct = (float) ($adjustments[$productId] ?? 0);
+
+            $result[$productId] = [
+                'source' => $eligible ? 'auto' : 'insufficient',
+                'min_dasar' => $base,
+                'min_final' => $pct > 0 ? (int) ceil($base * (1 + $pct / 100)) : $base,
+                'adjustment_pct' => $pct,
+                'average_sold' => (float) $rule['average_sold'],
+                'po_per_month' => (float) $rule['po_per_month'],
+                'frequency' => (int) $rule['frequency'],
+                'factor' => (float) $rule['factor'],
+                'first_sale' => $firstSale,
             ];
         }
 

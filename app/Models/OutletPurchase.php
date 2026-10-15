@@ -9,6 +9,9 @@ class OutletPurchase extends Model
 {
     use SoftDeletes;
 
+    /** Baru dibuat / belum selesai diisi (supplier dan item boleh kosong). Belum berpengaruh ke stok, laporan, maupun hitungan min stok. */
+    public const STATUS_DRAFT = 'draft';
+
     /** Sudah disimpan, barang belum diterima (stok toko belum bertambah, masih bisa diedit). */
     public const STATUS_PENDING = 'pending';
 
@@ -38,9 +41,20 @@ class OutletPurchase extends Model
         'received_at' => 'datetime',
     ];
 
+    public function isDraft(): bool
+    {
+        return $this->status === self::STATUS_DRAFT;
+    }
+
     public function isPending(): bool
     {
         return $this->status === self::STATUS_PENDING;
+    }
+
+    /** Draft dan pending masih boleh diedit; received (completed) read-only. */
+    public function isEditable(): bool
+    {
+        return $this->isDraft() || $this->isPending();
     }
 
     public function outlet()

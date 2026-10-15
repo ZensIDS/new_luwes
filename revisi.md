@@ -11,7 +11,6 @@ Revisi Luwes
     [x] Update database GLAD2GLOW
     [x] Update database all product lama yang belum ada harga margin dll
     [x] Update Aturan Min Stock
-    [ ] Check
 [x] Master Harga
     [x] Tambah data terakhir di check
     [x] Tambah note di master
@@ -20,8 +19,8 @@ Revisi Luwes
     [x] Bisa tambah barang sekalian, bisa edit barang sekalian, setting harga sekalian tanpa bolak balik
 [x] Belanja Langsung Toko
     [x] tidak langsung masuk stock toko
-    [ ] Tambahkan check product seperti di PO
-    [ ] tambahkan autosave system seperti di PO
+    [x] Tambahkan check product seperti di PO
+    [x] tambahkan autosave system seperti di PO
 [x] Voucher
     [x] Check Desain voucher
     [x] opsi rafaksi tanpa batas kuota

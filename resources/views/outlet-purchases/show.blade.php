@@ -43,7 +43,7 @@
 
                 @if ($purchase->isPending())
                     <div class="alert alert-warning">
-                        Periksa barang yang datang dan sesuaikan <strong>Qty Diterima</strong>. Stock toko baru bertambah setelah penerimaan diselesaikan
+                        Periksa barang yang datang, sesuaikan <strong>Qty Diterima</strong>, dan isi <strong>Expired</strong> bila barang punya tanggal kadaluarsa. Stock toko baru bertambah setelah penerimaan diselesaikan
                         dan transaksi tidak bisa diedit lagi.
                     </div>
                 @endif
@@ -59,7 +59,7 @@
                                     <th class="text-center" style="width:130px">Qty Diterima</th>
                                     <th>HPP</th>
                                     <th>Batch</th>
-                                    <th>Expired</th>
+                                    <th{!! $purchase->isPending() ? ' style="width:160px"' : '' !!}>Expired{{ $purchase->isPending() ? ' (opsional)' : '' }}</th>
                                     <th>Subtotal</th>
                                 </tr>
                             </thead>
@@ -89,7 +89,15 @@
                                         </td>
                                         <td>@currency($item->harga_beli)</td>
                                         <td>{{ $item->batch_number }}</td>
-                                        <td>{{ $item->expired_at ? $item->expired_at->format('d-m-Y') : '-' }}</td>
+                                        <td>
+                                            @if ($purchase->isPending())
+                                                <input type="date" name="items[{{ $item->id }}][expired_at]"
+                                                    class="form-control input-sm"
+                                                    value="{{ old('items.' . $item->id . '.expired_at', $item->expired_at?->format('Y-m-d')) }}">
+                                            @else
+                                                {{ $item->expired_at ? $item->expired_at->format('d-m-Y') : '-' }}
+                                            @endif
+                                        </td>
                                         <td>@currency($item->subtotal)</td>
                                     </tr>
                                 @endforeach
@@ -108,6 +116,7 @@
             </div>
             <div class="box-footer">
                 <a class="btn btn-default" href="{{ route('outlet-purchases.index') }}">Kembali</a>
+                <a class="btn btn-success" href="{{ route('outlet-purchases.print', $purchase) }}"><i class="fa fa-print"></i> Print</a>
                 @if ($purchase->isPending())
                     <a class="btn btn-warning" href="{{ route('outlet-purchases.edit', $purchase) }}"><i class="fa fa-pencil"></i> Edit</a>
                     <button type="button" class="btn btn-success pull-right" id="btn-confirm-receive">

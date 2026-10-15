@@ -9,12 +9,16 @@
         <div class="alert alert-info">
             Gunakan halaman ini hanya jika outlet membeli barang langsung dari supplier.
             Barang dari Gudang tidak diinput di sini; gunakan <strong>Delivery Order (Outbound)</strong>.
-            Setelah disimpan, transaksi berstatus <strong>Menunggu Penerimaan</strong> dan masih bisa diedit.
-            <strong>Stock Toko</strong> dan kartu stok baru bertambah setelah penerimaan barang diselesaikan
-            (klik <em>Lihat</em>, isi qty yang datang, lalu simpan).
+            Alurnya: <strong>Tambah</strong> (langsung jadi <strong>Draft</strong>, semua isian tersimpan otomatis)
+            &rarr; <strong>Selesai</strong> (status <strong>Menunggu Penerimaan</strong>, masih bisa diedit)
+            &rarr; <strong>Lihat</strong>, isi qty yang datang dan tanggal kadaluarsa, lalu selesaikan penerimaan
+            (status <strong>Completed</strong>).
+            Tombol <em>Cek Barang</em> di halaman isian membantu memilih produk yang stoknya kurang,
+            dan tombol <em>Print</em> mencetak dokumen PO outlet.
+            <strong>Stock Toko</strong> dan kartu stok baru bertambah setelah penerimaan barang diselesaikan.
         </div>
         <a href="{{ route('owner-stocks.index') }}" class="btn btn-default"><i class="fa fa-cubes"></i> Lihat Stock Toko</a>
-        <a href="{{ route('outlet-purchases.create', ['outlet_id' => $selectedOutletId]) }}" class="btn btn-success"><i class="fa fa-plus"></i> Tambah Belanja Langsung</a>
+        <a href="{{ route('outlet-purchases.create') }}" id="btn-add-purchase" class="btn btn-success"><i class="fa fa-plus"></i> Tambah Belanja Langsung</a>
     </div>
     <div class="box-body">
         <div class="row" style="margin-bottom:10px">
@@ -28,6 +32,15 @@
                     @endforeach
                 </select>
             </div>
+            <div class="col-md-2 col-sm-6">
+                <label for="filterStatus">Status</label>
+                <select id="filterStatus" class="form-control input-sm">
+                    <option value="">Semua Status</option>
+                    <option value="draft">Draft</option>
+                    <option value="pending">Menunggu Penerimaan</option>
+                    <option value="received">Completed</option>
+                </select>
+            </div>
             <div class="col-md-3 col-sm-6">
                 <label for="filterSearch">Cari</label>
                 <input type="text" id="filterSearch" class="form-control input-sm" autocomplete="off"
@@ -39,12 +52,34 @@
         <table id="outlet-purchases-table" class="table table-bordered table-striped" style="width:100%">
             <thead><tr>
                 <th width="40">No</th><th>Kode</th><th>Tanggal</th><th>Outlet</th><th>Supplier</th>
-                <th>Produk</th><th>Subtotal</th><th>Status</th><th width="110">Aksi</th>
+                <th>Produk</th><th>Subtotal</th><th>Status</th><th width="200">Aksi</th>
             </tr></thead>
             <tbody></tbody>
         </table>
     </div>
 </div></section>
+
+<div class="modal fade" id="modalPilihOutlet" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-sm" role="document"><div class="modal-content">
+        <div class="modal-header">
+            <button type="button" class="close" data-dismiss="modal">&times;</button>
+            <h4 class="modal-title">Pilih Outlet</h4>
+        </div>
+        <div class="modal-body">
+            <p class="text-muted">Outlet tidak bisa diganti setelah draft dibuat. Jika salah pilih, hapus draft lalu tambah lagi.</p>
+            <select id="modalOutlet" class="form-control">
+                <option value="">Pilih outlet</option>
+                @foreach ($outlets as $outlet)
+                    <option value="{{ $outlet->id }}">{{ $outlet->name }}</option>
+                @endforeach
+            </select>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-default" data-dismiss="modal">Batal</button>
+            <button type="button" class="btn btn-success" id="btnLanjutOutlet">Lanjut</button>
+        </div>
+    </div></div>
+</div>
 @endsection
 @section('page-script')
 <script>
@@ -59,7 +94,10 @@
             dom: 'lrtip', // kotak search bawaan disembunyikan, diganti #filterSearch
             ajax: {
                 url: '{{ route('outlet-purchases.index.data') }}',
-                data: function (d) { d.outlet_id = $('#filterOutlet').val() || ''; }
+                data: function (d) {
+                    d.outlet_id = $('#filterOutlet').val() || '';
+                    d.status = $('#filterStatus').val() || '';
+                }
             },
             order: [[2, 'desc']], // tanggal, terbaru dulu
             pageLength: 25,
@@ -78,7 +116,36 @@
             ]
         });
 
-        $('#filterOutlet').on('change', function () { table.ajax.reload(); });
+        $('#filterOutlet, #filterStatus').on('change', function () { table.ajax.reload(); });
+
+        // Tambah: outlet mengikuti filter outlet; bila filter "Semua Outlet" (admin/owner) pilih outlet dulu.
+        var createUrl = '{{ route('outlet-purchases.create') }}';
+        $('#btn-add-purchase').on('click', function (e) {
+            e.preventDefault();
+            var outletId = $('#filterOutlet').val();
+            if (outletId) {
+                window.location.href = createUrl + '?outlet_id=' + encodeURIComponent(outletId);
+                return;
+            }
+            $('#modalOutlet').val('');
+            $('#modalPilihOutlet').modal('show');
+        });
+        $('#btnLanjutOutlet').on('click', function () {
+            var outletId = $('#modalOutlet').val();
+            if (!outletId) { alert('Pilih outlet terlebih dahulu.'); return; }
+            window.location.href = createUrl + '?outlet_id=' + encodeURIComponent(outletId);
+        });
+
+        // Hapus draft (hanya draft yang punya tombol ini; server menolak status lain).
+        $(document).on('click', '.btn-delete-draft', function () {
+            var code = $(this).data('code');
+            if (!confirm('Hapus draft ' + code + '? Tindakan ini tidak bisa dibatalkan.')) { return; }
+            var $form = $('<form method="POST" style="display:none"></form>').attr('action', $(this).data('url'));
+            $form.append($('<input type="hidden" name="_token">').val('{{ csrf_token() }}'));
+            $form.append('<input type="hidden" name="_method" value="DELETE">');
+            $('body').append($form);
+            $form.trigger('submit');
+        });
 
         var searchTimer = null;
         $('#filterSearch').on('input', function () {

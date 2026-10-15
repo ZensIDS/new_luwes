@@ -126,7 +126,13 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::post('/outlet-prices/{outletPrice}/touch', [App\Http\Controllers\OutletPriceController::class, 'touch'])->name('outlet-prices.touch');
     Route::get('/outlet-purchases/data', [App\Http\Controllers\OutletPurchaseController::class, 'getIndexData'])->name('outlet-purchases.index.data');
     Route::post('/outlet-purchases/{outletPurchase}/receive', [App\Http\Controllers\OutletPurchaseController::class, 'receive'])->name('outlet-purchases.receive');
-    Route::resource('/outlet-purchases', App\Http\Controllers\OutletPurchaseController::class)->only(['index', 'create', 'store', 'show', 'edit', 'update']);
+    Route::get('/outlet-purchases/{outletPurchase}/cek-barang', [App\Http\Controllers\OutletPurchaseController::class, 'cekBarang'])->name('outlet-purchases.cek-barang');
+    Route::post('/outlet-purchases/{outletPurchase}/autosave-header', [App\Http\Controllers\OutletPurchaseController::class, 'autosaveHeader'])->name('outlet-purchases.autosave-header');
+    Route::post('/outlet-purchases/{outletPurchase}/items', [App\Http\Controllers\OutletPurchaseController::class, 'autosaveItem'])->name('outlet-purchases.autosave-item');
+    Route::delete('/outlet-purchases/{outletPurchase}/items/{item}', [App\Http\Controllers\OutletPurchaseController::class, 'destroyItem'])->name('outlet-purchases.destroy-item');
+    Route::get('/outlet-purchases/{outletPurchase}/print', [App\Http\Controllers\OutletPurchaseController::class, 'print'])->name('outlet-purchases.print');
+    Route::post('/outlet-purchases/{outletPurchase}/finish', [App\Http\Controllers\OutletPurchaseController::class, 'finish'])->name('outlet-purchases.finish');
+    Route::resource('/outlet-purchases', App\Http\Controllers\OutletPurchaseController::class)->only(['index', 'create', 'show', 'edit', 'destroy']);
     Route::get('/owner-stock-kartu', [App\Http\Controllers\OwnerStockController::class, 'kartu'])->name('owner-stocks.kartu');
     Route::get('/owner-stock-kartu/data', [App\Http\Controllers\OwnerStockController::class, 'getKartuData'])->name('owner-stocks.kartu.data');
     Route::get('/owner-stock-kartu/search', [App\Http\Controllers\OwnerStockController::class, 'searchKartuProducts'])->middleware('throttle:120,1,search')->name('owner-stocks.kartu.search');
