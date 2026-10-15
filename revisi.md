@@ -38,5 +38,5 @@ Revisi Luwes
     [x] Pemisahan Laporan Gudang & Toko
     [x] Check format all laporan Toko
     [x] Check format all laporan Gudang
-    [ ] Rapikan halaman index laporan toko
-    [ ] Rapikan halaman index laporan gudang
+    [x] Rapikan halaman index laporan toko
+    [x] Rapikan halaman index laporan gudang
