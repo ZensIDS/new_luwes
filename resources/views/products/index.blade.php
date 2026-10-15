@@ -84,7 +84,7 @@
                                     <td>Stock Reserverd</td>
                                     <td>Stock Warehouse</td>
                                     <td>Stock INBOUND</td>
-                                    <td>Stock Minimum</td>
+                                    <td>Stock Minimum (Final)</td>
                                     <td>Satuan</td>
                                     <td>Satuan Besar</td>
                                     <td>Konversi</td>
@@ -110,6 +110,10 @@
                                             $reservedQty = (int) ($value->reserved_stock_qty ?? 0);
                                             $stockQty = (int) ($value->stock_qty ?? 0); // stok fisik gudang = SUM(stocks.qty)
                                             $pembelianQty = (int) ($value->approved_stock_pembelians_qty ?? 0);
+                                            $minInfo = $minimums[$value->id] ?? null;
+                                            $minFinal = (int) ($minInfo['min_final'] ?? $value->min_stock ?? 0);
+                                            $minSource = $minInfo['source'] ?? 'manual';
+                                            $minAdj = (float) ($minInfo['adjustment_pct'] ?? 0);
                                         @endphp
 
                                         <td>
@@ -124,7 +128,13 @@
                                         <td>
                                             {{ $pembelianQty }} {{ $value->satuan ?? '-' }}/<span class="label label-info">{{ $pembelianQty > 0 ? $value->konversiDisplay($pembelianQty) : '-' }}</span>
                                         </td>
-                                        <td>{{ $value->min_stock }}</td>
+                                        <td>
+                                            {{ $minFinal }}
+                                            <span class="label label-{{ $minSource === 'auto' ? 'primary' : 'default' }}" title="{{ $minSource === 'auto' ? 'Hasil hitung penjualan 3 bulan' : 'Default manual (belum 3 bulan data penjualan)' }}">{{ $minSource }}</span>
+                                            @if ($minAdj > 0)
+                                                <span class="label label-warning" title="Adjustment aktif">+adj {{ rtrim(rtrim(number_format($minAdj, 2, '.', ''), '0'), '.') }}%</span>
+                                            @endif
+                                        </td>
                                         <td>{{ $value->satuan ?? '-' }}</td>
                                         <td>{{ $value->satuan_besar ?? '-' }}</td>
                                         <td>{{ $value->konversi_string }}</td>
@@ -144,7 +154,7 @@
                                         </td>
                                         {{-- <td>@currency($value->harga_jual)</td> --}}
                                         <td>
-                                            @if ($value->min_stock > 0 && $stockQty <= $value->effective_min_stock)
+                                            @if ($minFinal > 0 && $stockQty < $minFinal)
                                             habis, stock tinggal {{ $stockQty }}
                                             @else
                                             aman

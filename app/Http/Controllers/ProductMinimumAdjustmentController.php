@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Models\Product;
 use App\Models\ProductMinimumAdjustment;
+use App\Services\LowStockService;
+use App\Services\MinimumStockCalculator;
 use Illuminate\Http\Request;
 
 class ProductMinimumAdjustmentController extends Controller
@@ -23,23 +25,26 @@ class ProductMinimumAdjustmentController extends Controller
             ->get()
             ->groupBy('product_id');
 
+        // Min final = hasil 3 bulan (atau default manual) + adjustment aktif (sumber sama dengan PO dan laporan).
+        $minimums = app(MinimumStockCalculator::class)->forWarehouse();
+
         $rows = Product::select('id', 'code', 'name', 'min_stock')
             ->withSum('stocks', 'qty')
             ->orderBy('name')
             ->get()
-            ->map(function ($p) use ($activeAdjustments) {
+            ->map(function ($p) use ($activeAdjustments, $minimums) {
                 $adj = $activeAdjustments->get($p->id)?->first();
-                $effectiveMin = $adj
-                    ? (int) ceil($p->min_stock * (1 + $adj->adjustment_percentage / 100))
-                    : (int) $p->min_stock;
+                $min = $minimums[$p->id] ?? null;
 
                 return [
                     'id'            => $p->id,
                     'code'          => $p->code,
                     'name'          => $p->name,
                     'current_stock' => (int) ($p->stocks_sum_qty ?? 0),
-                    'min_stock'     => $p->min_stock,
-                    'effective_min' => $effectiveMin,
+                    'min_stock'     => $p->min_stock,                              // default manual
+                    'min_dasar'     => $min['min_dasar'] ?? (int) $p->min_stock,
+                    'effective_min' => $min['min_final'] ?? (int) $p->min_stock,   // min final
+                    'min_source'    => $min['source'] ?? 'manual',
                     'active_from'   => $adj?->active_from?->format('d M Y'),
                     'active_until'  => $adj?->active_until?->format('d M Y'),
                 ];
@@ -109,6 +114,8 @@ class ProductMinimumAdjustmentController extends Controller
             ]);
             $saved++;
         }
+
+        LowStockService::forgetCache();
 
         return response()->json([
             'success'     => true,

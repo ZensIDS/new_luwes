@@ -62,7 +62,7 @@ class AppServiceProvider extends ServiceProvider
             }
 
             // Notifikasi stok minimum hanya untuk admin-gudang (keputusan #1).
-            // Dihitung di SQL & realtime (tanpa cache), dan hanya saat render halaman penuh.
+            // Stok realtime; peta min stok (hasil 3 bulan + adjustment) di-cache pendek. Hanya saat render halaman penuh.
             if (Auth::check() && Auth::user()->role === 'admin-gudang') {
                 $lowStock = app(LowStockService::class)->summary(20);
 

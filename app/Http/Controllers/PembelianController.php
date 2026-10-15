@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\MinimumStockCalculator;
 use App\Http\Requests\PembelianRequest;
 use App\Models\Kas;
 use App\Models\Outlet;
@@ -59,24 +60,34 @@ class PembelianController extends Controller
     {
         $products = Product::select('id', 'code', 'name', 'is_serialized', 'harga_beli', 'min_stock', 'konversi_qty', 'satuan_besar', 'satuan')
             ->withSum('stocks', 'qty')
-            ->withEffectiveMin() // min efektif dihitung di query, bukan 1 query adjustment per produk
             ->orderBy('name');
 
-        if (request()->filled('supplier_id')) {
+        $supplierFiltered = request()->filled('supplier_id');
+        if ($supplierFiltered) {
             $supplierId = request()->integer('supplier_id');
             $products->whereHas('suppliers', fn($query) => $query->where('suppliers.id', $supplierId));
         }
 
-        $products = $products->get()
-            ->map(function ($product) {
-                $currentStock = (int) ($product->stocks_sum_qty ?? 0);
-                $effectiveMin = $product->effective_min_stock;   // dari withEffectiveMin(), tanpa query tambahan
-                $product->stock_count      = $currentStock;
-                $product->effective_min    = $effectiveMin;      // ← expose as 'effective_min'
-                $product->is_under_minimum = $currentStock < $effectiveMin;
+        $products = $products->get();
 
-                return $product;
-            });
+        // Min stok gudang: hasil 3 bulan (atau default manual) + adjustment aktif, dihitung SEKALI
+        // untuk seluruh produk yang tampil (agregasi SQL, tanpa query per produk).
+        $minimums = app(MinimumStockCalculator::class)
+            ->forWarehouse($supplierFiltered ? $products->pluck('id')->all() : null);
+
+        $products = $products->map(function ($product) use ($minimums) {
+            $currentStock = (int) ($product->stocks_sum_qty ?? 0);
+            $min = $minimums[$product->id] ?? null;
+            $effectiveMin = $min['min_final'] ?? (int) ($product->min_stock ?? 0);
+
+            $product->stock_count        = $currentStock;
+            $product->effective_min      = $effectiveMin;                       // min final (dipakai form PO)
+            $product->min_source         = $min['source'] ?? 'manual';          // auto | manual
+            $product->min_adjustment_pct = (float) ($min['adjustment_pct'] ?? 0);
+            $product->is_under_minimum   = $currentStock < $effectiveMin;       // K5: stok < min
+
+            return $product;
+        });
 
         return response()->json($products);
     }

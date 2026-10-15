@@ -168,6 +168,17 @@
             if (boxes > 0) return boxes + ' ' + satuanBesar + ' ' + rem + ' ' + satuan;
             return qty + ' ' + satuan;
         }
+        function minBadge(p) {
+            if (!p) return '';
+            var h = p.min_source === 'auto'
+                ? ' <span class="label label-primary" title="Hasil hitung penjualan 3 bulan">auto</span>'
+                : ' <span class="label label-default" title="Default manual (belum 3 bulan data penjualan)">manual</span>';
+            if (Number(p.min_adjustment_pct) > 0) {
+                h += ' <span class="label label-warning" title="Adjustment aktif">+adj ' + Number(p.min_adjustment_pct) + '%</span>';
+            }
+            return h;
+        }
+
         function fmtQtyK(qty, p) {
             if (!p) return qty;
             var k = konversiDisplay(qty, p.konversi_qty, p.satuan_besar, p.satuan);
@@ -500,7 +511,7 @@
                     $('<td>').text(p.code),
                     $('<td>').text(p.name),
                     $('<td>').addClass('text-center').html(fmtQtyK(p.stock_count || 0, p)),
-                    $('<td>').addClass('text-center').html(fmtQtyK(p.effective_min || p.min_stock || 0, p)),
+                    $('<td>').addClass('text-center').html(fmtQtyK(Number(p.effective_min ?? p.min_stock ?? 0), p) + minBadge(p)),
                     $('<td>').addClass('text-center').html(fmtKonversiRatio(p)),
                     $('<td>').addClass('text-center').append($statusBadge),
                     $('<td>').append($qtyInput)

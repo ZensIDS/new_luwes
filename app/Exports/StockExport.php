@@ -8,7 +8,7 @@ use App\Exports\LaporanToko\BaseLaporanTokoExport;
 use App\Exports\LaporanToko\ReportMeta;
 use App\Exports\LaporanToko\SheetWriter;
 use App\Exports\LaporanToko\Theme;
-use App\Models\ProductMinimumAdjustment;
+use App\Services\MinimumStockCalculator;
 use App\Models\Stock;
 use Illuminate\Http\Request;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
@@ -49,9 +49,8 @@ class StockExport extends BaseLaporanTokoExport
 
         // Dimuat sekali. Total stok produk = SUM(stocks.qty) semua batch (sama dengan menu Stok/Produk);
         // Min Stok, Selisih, dan Status Stok dinilai terhadap total ini, bukan qty satu batch.
-        $adjustments = ProductMinimumAdjustment::activeOn(now()->toDateString())
-            ->orderByDesc('active_from')->orderByDesc('id')
-            ->get()->keyBy('product_id');
+        // Min stok gudang: hasil 3 bulan (atau default manual) + adjustment aktif (sumber sama dengan PO).
+        $minimums = app(MinimumStockCalculator::class)->forWarehouse();
 
         $totals = Stock::selectRaw('product_id, SUM(qty) as total_qty')
             ->groupBy('product_id')->pluck('total_qty', 'product_id');
@@ -64,9 +63,7 @@ class StockExport extends BaseLaporanTokoExport
         foreach ($stocks as $s) {
             $r = $w->currentRow();
             $product = $s->product;
-            $baseMin = (float) ($product?->min_stock ?? 0);
-            $adj = $adjustments->get($s->product_id);
-            $min = $adj ? (int) ceil($baseMin * (1 + $adj->adjustment_percentage / 100)) : (int) $baseMin;
+            $min = (int) ($minimums[$s->product_id]['min_final'] ?? ($product?->min_stock ?? 0));
             $total = (int) ($totals[$s->product_id] ?? 0);
             $diff = $total - $min;
 

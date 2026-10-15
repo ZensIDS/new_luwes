@@ -495,11 +495,9 @@ class LaporanController extends Controller
     {
         $settings  = $this->getSettings();
         $stocks    = Stock::with(['product.category', 'pembelian'])->orderBy('product_id')->get();
-        $activeAdjs = ProductMinimumAdjustment::activeOn(now()->toDateString())
-            ->orderByDesc('active_from')->orderByDesc('id')
-            ->get()->keyBy('product_id');
+        $minimums = app(\App\Services\MinimumStockCalculator::class)->forWarehouse();
 
-        return Pdf::loadView('exports.pdf.laporan-stok', compact('stocks', 'settings', 'activeAdjs'))
+        return Pdf::loadView('exports.pdf.laporan-stok', compact('stocks', 'settings', 'minimums'))
             ->setPaper('a4', 'landscape')->stream('Laporan_Stok_Barang.pdf');
     }
 
@@ -726,12 +724,8 @@ class LaporanController extends Controller
     {
         $settings = $this->getSettings();
 
-        $today = now()->toDateString();
-        $activeAdjs = ProductMinimumAdjustment::activeOn($today)
-            ->orderByDesc('active_from')
-            ->orderByDesc('id')
-            ->get()
-            ->keyBy('product_id');
+        // Min stok gudang: hasil 3 bulan (atau default manual) + adjustment aktif (sumber sama dengan PO).
+        $minimums = app(\App\Services\MinimumStockCalculator::class)->forWarehouse();
 
         $movementStats = StockMovement::selectRaw('product_id, SUM(qty_out) as total_out, MIN(created_at) as first_date, MAX(created_at) as last_date')
             ->groupBy('product_id')->get()->keyBy('product_id');
@@ -742,18 +736,14 @@ class LaporanController extends Controller
             ->whereHas('stocks')
             ->orderBy('code')
             ->get()
-            ->map(function ($p) use ($movementStats, $activeAdjs) {
+            ->map(function ($p) use ($movementStats, $minimums) {
             $s = (object) ['product_id' => $p->id, 'product' => $p, 'qty' => (int) ($p->stock_qty ?? 0)];
             $stat       = $movementStats[$s->product_id] ?? null;
             $totalOut   = (int) ($stat?->total_out ?? 0);
             $months     = max(1, (int) \Carbon\Carbon::parse($stat?->first_date ?? now())->diffInMonths(now()) + 1);
             $avgKeluar  = round($totalOut / $months, 1);
             $hariTanpa  = $stat ? now()->diffInDays(\Carbon\Carbon::parse($stat->last_date)) : 0;
-            $baseMin    = $s->product?->min_stock ?? 0;
-            $adj        = $activeAdjs->get($s->product_id);
-            $minStok    = $adj
-                ? (int) ceil($baseMin * (1 + $adj->adjustment_percentage / 100))
-                : (int) $baseMin;
+            $minStok    = (int) ($minimums[$s->product_id]['min_final'] ?? ($s->product?->min_stock ?? 0));
             $qty        = $s->qty ?? 0;
             $qtyReorder = $qty <= $minStok ? max(0, $minStok * 2 - $qty) : 0;
             $kStok      = $s->product?->konversiDisplay($qty) ?? '-';

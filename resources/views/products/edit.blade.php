@@ -174,7 +174,7 @@
                             </div>
                             <!-- Minimum Stock -->
                             <div class="col-md-6 form-group">
-                                <label for="">Minimum Stock</label>
+                                <label for="">Min Stok Default (sebelum ada 3 bulan data penjualan)</label>
                                 <input type="text" class="form-control integer-only-input" name="min_stock"
                                     value="{{ old('min_stock', $product->min_stock ?? 0) }}" min="0"
                                     placeholder="0">

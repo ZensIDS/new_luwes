@@ -1,24 +1,70 @@
-<table>
-    <thead>
-        <tr>
-            <th>Pembelian</th>
-            <th>Product</th>
-            <th>Subtotal</th>
-            <th>Harga Beli</th>
-            <th>Qty</th>
-            {{-- <th>Expired At</th> --}}
-        </tr>
-    </thead>
-    <tbody>
-        @foreach ($stocks as $stock)
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+</head>
+
+<body>
+    @include('exports.pdf._header')
+    <div class="report-title">LAPORAN STOK BARANG</div>
+    <div class="report-periode">Per Tanggal: {{ now()->isoFormat('DD MMMM YYYY') }}</div>
+    <table>
+        <thead>
             <tr>
-                <td>{{ $stock->pembelian->code }}</td>
-                <td>{{ $stock->product->name }}</td>
-                <td>@currency($stock->subtotal)</td>
-                <td>@currency($stock->harga_beli)</td>
-                <td>{{ $stock->qty }}</td>
-                {{-- <td>{{ $stock->expired_at->format('h:i a / d-M-Y') }}</td> --}}
+                <th style="width:3%">No</th>
+                <th style="width:8%">Kode Barang</th>
+                <th style="width:14%">Nama Barang</th>
+                <th style="width:10%">Batch</th>
+                <th style="width:8%">Expired Date</th>
+                <th style="width:7%">Kategori</th>
+                <th style="width:5%">Satuan</th>
+                <th style="width:8%">Stok Batch</th>
+                <th style="width:8%">Total Stok Produk</th>
+                <th style="width:5%">Min Stok</th>
+                <th style="width:5%">Selisih</th>
+                <th style="width:6%">Status Stok</th>
+                <th style="width:6%">Status Expired</th>
+                <th style="width:8%">Lokasi</th>
             </tr>
-        @endforeach
-    </tbody>
-</table>
+        </thead>
+        <tbody>
+            @forelse($stocks as $i => $s)
+                @php
+                    $minStok    = (int) ($minimums[$s->product_id]['min_final'] ?? ($s->product?->min_stock ?? 0));
+                    $totalQty   = (int) ($productTotals[$s->product_id] ?? 0);
+                    $selisih    = $totalQty - $minStok;
+                    $statusStok = $totalQty > $minStok ? 'Aman' : ($totalQty > 0 ? 'Kritis' : 'Habis');
+                    $statusExp =
+                        $s->expired_at && \Carbon\Carbon::parse($s->expired_at)->isPast() ? 'Expired' : 'Belum Expired';
+                @endphp
+                <tr class="{{ $i % 2 == 1 ? 'alt' : '' }}">
+                    <td class="tc">{{ $i + 1 }}</td>
+                    <td>{{ $s->product?->code ?? '-' }}</td>
+                    <td>{{ $s->product?->name ?? '-' }}</td>
+                    <td>{{ $s->sku ?? '-' }}</td>
+                    <td class="tc">
+                        {{ $s->expired_at ? \Carbon\Carbon::parse($s->expired_at)->format('d/m/Y') : '-' }}
+                    </td>
+                    <td>{{ $s->product?->category?->name ?? '-' }}</td>
+                    <td class="tc">{{ $s->product?->satuan ?? 'PCS' }}</td>
+                    @php $k = $s->product?->konversiDisplay($s->qty ?? 0); @endphp
+                    <td class="tc">{{ ($s->qty ?? 0) . ($k && $k !== '-' ? " ({$k})" : '') }}</td>
+                    @php $kt = $s->product?->konversiDisplay($totalQty); @endphp
+                    <td class="tc">{{ $totalQty . ($kt && $kt !== '-' ? " ({$kt})" : '') }}</td>
+                    <td class="tc">{{ $minStok }}</td>
+                    <td class="tc">{{ ($selisih >= 0 ? '+' : '') . $selisih }}</td>
+                    <td class="tc">{{ $statusStok }}</td>
+                    <td class="tc">{{ $s->expired_at ? $statusExp : '-' }}</td>
+                    <td>{{ $s->location ?? '-' }}</td>
+                </tr>
+            @empty
+                <tr>
+                    <td colspan="14" class="tc">Tidak ada data</td>
+                </tr>
+            @endforelse
+        </tbody>
+    </table>
+</body>
+
+</html>

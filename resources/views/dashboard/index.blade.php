@@ -338,6 +338,7 @@
                                         <td class="text-center">{{ $p->current_stock }}</td>
                                         <td class="text-center">
                                             {{ $p->effective_min }}
+                                            <span class="label label-{{ $p->min_source === 'auto' ? 'primary' : 'default' }}">{{ $p->min_source }}</span>
                                             @if($p->adjustment_percentage > 0)
                                                 <br><small class="text-info">+{{ $p->adjustment_percentage }}%</small>
                                             @endif
@@ -501,8 +502,8 @@
                             <th>Kode</th>
                             <th>Nama Produk</th>
                             <th>Stok Saat Ini</th>
-                            <th>Min Stok</th>
-                            <th>Min Efektif (sekarang)</th>
+                            <th>Min Default (manual)</th>
+                            <th>Min Final (sekarang)</th>
                             <th>Min Efektif (tanggal)</th>
                         </tr>
                     </thead>
@@ -609,8 +610,11 @@
                 success: function (res) {
                     let rows = '';
                     (res.data || []).forEach(function (p) {
-                        const diff = p.effective_min > p.min_stock
-                            ? ' <span class="label label-info">+' + (p.effective_min - p.min_stock) + '</span>' : '';
+                        const diff = p.effective_min > p.min_dasar
+                            ? ' <span class="label label-info">+' + (p.effective_min - p.min_dasar) + '</span>' : '';
+                        const src = p.min_source === 'auto'
+                            ? ' <span class="label label-primary" title="Hasil hitung penjualan 3 bulan">auto</span>'
+                            : ' <span class="label label-default" title="Default manual (belum 3 bulan data penjualan)">manual</span>';
                         const period = (p.active_from || p.active_until)
                             ? escHtml(p.active_from || '') + ' - ' + escHtml(p.active_until || '') : '';
                         rows += '<tr>' +
@@ -619,7 +623,7 @@
                             '<td>' + escHtml(p.name) + '</td>' +
                             '<td class="text-center">' + p.current_stock + '</td>' +
                             '<td class="text-center">' + p.min_stock + '</td>' +
-                            '<td class="text-center">' + p.effective_min + diff + '</td>' +
+                            '<td class="text-center">' + p.effective_min + diff + src + '</td>' +
                             '<td>' + period + '</td>' +
                             '</tr>';
                     });

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\MinimumStockCalculator;
 use App\Exports\ProductsExport;
 use App\Exports\ProductsMinStockExport;
 use App\Http\Requests\ProductRequest;
@@ -240,7 +241,6 @@ class ProductController extends Controller
             // stock_qty (SUM qty), reserved_stock_qty (SUM qty_reserved), owner_stock_qty (SUM owner_stocks.qty)
             // -> sumber angka yang sama dengan menu Stok, Dashboard, dan Laporan
             ->withStockTotals()
-            ->withEffectiveMin() // view membaca effective_min_stock per baris -> hitung di query
             ->withSum([
                 'stockPembelians as approved_stock_pembelians_qty' => function ($query) {
                     $query->whereHas('pembelian', fn($pembelian) => $pembelian->where('owner_approval_status', 'approved'));
@@ -250,8 +250,12 @@ class ProductController extends Controller
             ->paginate(10)
             ->withQueryString();
 
+        // Min stok final (hasil 3 bulan / default manual + adjustment) hanya untuk 10 produk di halaman ini.
+        $minimums = app(MinimumStockCalculator::class)->forWarehouse($products->pluck('id')->all());
+
         return view('products.index', [
             'products' => $products,
+            'minimums' => $minimums,
             'categories' => Category::orderBy('name')->get(['id', 'name']),
             'locations' => Product::query()
                 ->whereNotNull('lokasi')

@@ -360,126 +360,73 @@ class OutletLaporanService
         ];
     }
 
+    /**
+     * Laporan Minimal Stock GUDANG, satu baris per produk (K6). Filter outlet tidak dipakai.
+     * Angka berasal dari MinimumStockCalculator::forWarehouse() (sumber yang sama dengan PO):
+     * min dasar (auto 3 bulan / manual) + adjustment aktif = min final.
+     */
     public function minimumStock(Request $request): array
     {
+        $calculator = app(MinimumStockCalculator::class);
         $asOf = $request->filled('tanggal_selesai')
             ? Carbon::parse($request->input('tanggal_selesai'))->endOfDay()
             : now()->endOfDay();
         // The rolling window is the three completed months before the current
         // month: month 4 uses months 1-3, month 5 uses months 2-4, etc.
-        $windowEnd = $asOf->copy()->startOfMonth()->subSecond();
-        $windowStart = $windowEnd->copy()->startOfMonth()->subMonths(2);
-        $outletId = $this->outletId($request);
+        [$windowStart, $windowEnd] = $calculator->window($asOf);
 
-        $outletStocks = OwnerStock::query()
-            ->select('owner_id', 'product_id')
-            ->when($outletId, fn ($query) => $query->where('owner_id', $outletId))
-            ->groupBy('owner_id', 'product_id')->get();
+        $minimums = $calculator->forWarehouse(null, $asOf);
         $warehouseStocks = Stock::query()
             ->select('product_id', DB::raw('SUM(qty) as qty'))
             ->groupBy('product_id')->pluck('qty', 'product_id');
 
-        $historySales = $this->saleQuery(null, $windowEnd, $outletId)
-            ->with('items')->get();
-        $windowSales = $this->saleQuery($windowStart, $windowEnd, $outletId)
-            ->with('items')
-            ->get();
-        $returnedByItem = $this->returnedQuantities($windowEnd, $outletId);
-        $salesQty = collect();
-        $firstSales = collect();
-
-        foreach ($historySales as $sale) {
-            foreach ($sale->items as $item) {
-                $key = $sale->outlet_id.'-'.$item->product_id;
-                $firstSales[$key] = isset($firstSales[$key])
-                    ? min($firstSales[$key], $sale->created_at)
-                    : $sale->created_at;
-            }
-        }
-
-        foreach ($windowSales as $sale) {
-            foreach ($sale->items as $item) {
-                $key = $sale->outlet_id.'-'.$item->product_id;
-                $returned = $returnedByItem[$item->id] ?? 0;
-                $salesQty[$key] = ($salesQty[$key] ?? 0) + max(0, (float) $item->qty - (float) $returned);
-            }
-        }
-
-        $replacementQuery = $this->refundQuery($windowStart, $windowEnd, $outletId)
-            ->with('items');
-        foreach ($replacementQuery->get() as $refund) {
-            foreach ($refund->items->where('type', 'replacement') as $item) {
-                $key = $refund->outlet_id.'-'.$item->product_id;
-                $salesQty[$key] = ($salesQty[$key] ?? 0) + (float) ($item->qty ?? 0);
-            }
-        }
-
-        $outletIds = $outletStocks->pluck('owner_id')->merge($salesQty->keys()
-            ->map(fn ($key) => (int) explode('-', $key)[0]))->filter()->unique()->values();
-        if ($outletId) {
-            $outletIds = collect([$outletId]);
-        }
-
-        $productIds = $outletStocks->pluck('product_id')->merge($salesQty->keys()
-            ->map(fn ($key) => (int) explode('-', $key)[1]))->filter()->unique()->values();
+        // Produk yang ditampilkan: yang ada di outlet, terjual di jendela, atau punya min stok > 0.
+        $outletProductIds = OwnerStock::query()->select('product_id')->distinct()->pluck('product_id')->flip();
+        $productIds = collect($minimums)
+            ->filter(fn ($min, $productId) => $outletProductIds->has($productId)
+                || $min['average_sold'] > 0
+                || $min['min_final'] > 0)
+            ->keys();
         $products = Product::with('category')->whereIn('id', $productIds)->get()->keyBy('id');
-        $outlets = Outlet::whereIn('id', $outletIds)->get()->keyBy('id');
-        $poCounts = OutletPurchase::query()
-            ->select('outlet_id', DB::raw('COUNT(*) as total'))
-            ->tap(fn ($q) => \App\Support\ReportQuery::betweenDates($q, 'purchase_date', $windowStart->toDateString(), $windowEnd->toDateString()))
-            ->when($outletId, fn ($query) => $query->where('outlet_id', $outletId))
-            ->groupBy('outlet_id')->pluck('total', 'outlet_id');
-        $stockMap = $outletStocks->keyBy(fn ($stock) => $stock->owner_id.'-'.$stock->product_id);
 
         $rows = collect();
-        foreach ($outletIds as $currentOutletId) {
-            $currentProductIds = $productIds->filter(function ($productId) use ($currentOutletId, $stockMap, $salesQty) {
-                return $stockMap->has($currentOutletId.'-'.$productId) || $salesQty->has($currentOutletId.'-'.$productId);
-            });
-            foreach ($currentProductIds as $productId) {
-                $product = $products->get($productId);
-                if (! $product) {
-                    continue;
-                }
-                $key = $currentOutletId.'-'.$productId;
-                $firstSale = $firstSales[$key] ?? null;
-                $eligible = $firstSale && Carbon::parse($firstSale)->startOfMonth()->lte($windowStart->copy()->startOfMonth());
-                $averageSold = (float) ($salesQty[$key] ?? 0) / 3;
-                $poCount = (int) ($poCounts[$currentOutletId] ?? 0);
-                $poPerMonth = $poCount / 3;
-                $frequency = max(1, min(4, (int) ceil($poPerMonth)));
-                $factor = [1 => 2.5, 2 => 1.875, 3 => 1.25, 4 => 0.625][$frequency];
-                $manualMin = (int) ($product->min_stock ?? 0);
-                $minStock = $eligible ? (int) ceil($averageSold * $factor) : $manualMin;
-                $currentQty = (float) ($warehouseStocks[$productId] ?? 0);
-                $outOfStock = $currentQty < $minStock;
-
-                $rows->push([
-                    'outlet_id' => $currentOutletId,
-                    'outlet' => $outlets->get($currentOutletId)?->name ?? '-',
-                    'barcode' => $product->code ?? '-',
-                    'product' => $product->name ?? '-',
-                    'category' => $product->category?->name ?? '-',
-                    'window_start' => $windowStart->toDateString(),
-                    'window_end' => $windowEnd->toDateString(),
-                    'first_sale' => $firstSale,
-                    'average_sold' => $averageSold,
-                    'po_count' => $poCount,
-                    'po_per_month' => $poPerMonth,
-                    'factor' => $eligible ? $factor : null,
-                    'manual_min_stock' => $manualMin,
-                    'min_stock' => $minStock,
-                    'stock_qty' => $currentQty,
-                    'suggested_po_qty' => $outOfStock ? max(0, $minStock - $currentQty) : 0,
-                    'status' => $outOfStock ? 'out_of_stock' : 'normal',
-                    'calculation_status' => $eligible ? 'auto (3 bulan)' : 'manual (belum 3 bulan)',
-                ]);
+        foreach ($productIds as $productId) {
+            $product = $products->get($productId);
+            if (! $product) {
+                continue;
             }
+            $min = $minimums[$productId];
+            $minFinal = $min['min_final'];
+            $currentQty = (float) ($warehouseStocks[$productId] ?? 0);
+            $outOfStock = $currentQty < $minFinal;
+            $isAuto = $min['source'] === 'auto';
+            $adjustmentPct = $min['adjustment_pct'];
+
+            $rows->push([
+                'product_id' => (int) $productId,
+                'barcode' => $product->code ?? '-',
+                'product' => $product->name ?? '-',
+                'category' => $product->category?->name ?? '-',
+                'window_start' => $windowStart->toDateString(),
+                'window_end' => $windowEnd->toDateString(),
+                'first_sale' => $min['first_sale'],
+                'average_sold' => $min['average_sold'],
+                'manual_min_stock' => $min['manual_min'],
+                'base_min_stock' => $min['min_dasar'],
+                'adjustment_pct' => $adjustmentPct,
+                'min_stock' => $minFinal,
+                'stock_qty' => $currentQty,
+                'suggested_po_qty' => $outOfStock ? max(0, $minFinal - $currentQty) : 0,
+                'status' => $outOfStock ? 'out_of_stock' : 'normal',
+                'source' => $min['source'],
+                'calculation_status' => ($isAuto ? 'auto (3 bulan)' : 'manual (belum 3 bulan)')
+                    .($adjustmentPct > 0 ? ' + adj '.rtrim(rtrim(number_format($adjustmentPct, 2, '.', ''), '0'), '.').'%' : ''),
+            ]);
         }
-        $rows = $this->withRowSpans($rows, ['outlet'], ['outlet_id']);
+        $rows = $rows->sortBy(fn ($row) => mb_strtolower($row['product']))->values();
 
         return [
-            'rows' => $rows->values(),
+            'rows' => $rows,
             'summary' => [
                 'total_produk' => $rows->count(),
                 'out_of_stock' => $rows->where('status', 'out_of_stock')->count(),
@@ -572,52 +519,7 @@ class OutletLaporanService
     /** Allocate returns without a sale item to the newest eligible invoice at the same outlet. */
     protected function returnedQuantities(Carbon $end, ?int $outletId): \Illuminate\Support\Collection
     {
-        $refunds = RefundPenjualan::query()
-            ->where('created_at', '<=', $end)
-            ->when($outletId, fn ($query) => $query->where('outlet_id', $outletId))
-            ->with('items')
-            ->orderBy('created_at')->orderBy('id')->get();
-        $items = $refunds->flatMap(fn ($refund) => $refund->items->where('type', 'return'));
-        $allocated = $items->filter(fn ($item) => $item->penjualan_item_id)
-            ->groupBy('penjualan_item_id')
-            ->map(fn ($group) => (float) $group->sum('qty'));
-        $unlinked = $items->reject(fn ($item) => $item->penjualan_item_id);
-        if ($unlinked->isEmpty()) {
-            return $allocated;
-        }
-
-        $candidates = PenjualanItem::query()
-            ->whereIn('product_id', $unlinked->pluck('product_id')->unique())
-            ->whereHas('penjualan', function ($query) use ($end, $outletId) {
-                $query->where('created_at', '<=', $end)
-                    ->where(fn ($q) => $q->where('status', 'paid')->orWhereNull('status'))
-                    ->when($outletId, fn ($q) => $q->where('outlet_id', $outletId));
-            })
-            ->with('penjualan')
-            ->get()
-            ->sort(fn ($a, $b) => $b->penjualan->created_at <=> $a->penjualan->created_at ?: $b->id <=> $a->id)
-            ->groupBy(fn ($item) => $item->penjualan->outlet_id.'-'.$item->product_id);
-
-        foreach ($refunds as $refund) {
-            foreach ($refund->items->where('type', 'return')->reject(fn ($item) => $item->penjualan_item_id) as $item) {
-                $remaining = (float) $item->qty;
-                foreach ($candidates->get($refund->outlet_id.'-'.$item->product_id, collect()) as $candidate) {
-                    if ($remaining <= 0) {
-                        break;
-                    }
-                    if ($candidate->penjualan->created_at->gt($refund->created_at)
-                        || ($refund->penjualan_id && (int) $candidate->penjualan_id !== (int) $refund->penjualan_id)) {
-                        continue;
-                    }
-                    $available = max(0, (float) $candidate->qty - (float) ($allocated[$candidate->id] ?? 0));
-                    $take = min($remaining, $available);
-                    $allocated[$candidate->id] = (float) ($allocated[$candidate->id] ?? 0) + $take;
-                    $remaining -= $take;
-                }
-            }
-        }
-
-        return $allocated;
+        return app(MinimumStockCalculator::class)->returnedQuantities($end, $outletId);
     }
 
     /** Apportion voucher redemptions to the products they apply to. */

@@ -15,8 +15,8 @@
     <div class="row">
         <div class="col-md-4 col-sm-6">
             <div class="box box-primary">
-                <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-line-chart"></i> Minimal Stock &amp; Alokasi PO</h3></div>
-                <div class="box-body small">Rata-rata penjualan 3 bulan x faktor frekuensi PO. Menampilkan status out_of_stock dan saran qty PO.</div>
+                <div class="box-header with-border"><h3 class="box-title"><i class="fa fa-line-chart"></i> Minimal Stock Gudang &amp; Alokasi PO</h3></div>
+                <div class="box-body small">Min stok per produk gudang: hasil 3 bulan (atau default manual) + adjustment aktif. Menampilkan status out_of_stock dan saran qty PO.</div>
                 <div class="box-footer"><button class="btn btn-sm btn-default btn-block" data-toggle="modal" data-target="#modal_outlet_minimal_stock"><i class="fa fa-bar-chart"></i> Lihat Laporan</button></div>
             </div>
         </div>
@@ -66,7 +66,7 @@
 
     @php
         $reports = [
-            ['id' => 'outlet_minimal_stock', 'title' => 'Minimal Stock & Alokasi PO', 'pdf' => 'laporan.pdf.outlet.minimal-stock', 'xls' => 'laporan.outlet.minimal-stock', 'date' => false, 'outlet' => true, 'cashier' => false, 'rafaksi' => false],
+            ['id' => 'outlet_minimal_stock', 'title' => 'Minimal Stock Gudang & Alokasi PO', 'pdf' => 'laporan.pdf.outlet.minimal-stock', 'xls' => 'laporan.outlet.minimal-stock', 'date' => false, 'outlet' => false, 'cashier' => false, 'rafaksi' => false],
             ['id' => 'outlet_penjualan', 'title' => 'Penjualan Outlet', 'pdf' => 'laporan.pdf.outlet.penjualan', 'xls' => 'laporan.outlet.penjualan', 'date' => true, 'outlet' => true, 'cashier' => true, 'rafaksi' => false],
             ['id' => 'outlet_rafaksi', 'title' => 'Rafaksi Outlet', 'pdf' => 'laporan.pdf.outlet.rafaksi', 'xls' => 'laporan.outlet.rafaksi', 'date' => true, 'outlet' => true, 'cashier' => false, 'rafaksi' => true],
             ['id' => 'outlet_retur', 'title' => 'Retur Outlet', 'pdf' => 'laporan.pdf.outlet.retur', 'xls' => 'laporan.outlet.retur', 'date' => true, 'outlet' => true, 'cashier' => false, 'rafaksi' => false],

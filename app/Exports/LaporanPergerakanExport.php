@@ -9,7 +9,7 @@ use App\Exports\LaporanToko\ReportMeta;
 use App\Exports\LaporanToko\SheetWriter;
 use App\Exports\LaporanToko\Theme;
 use App\Models\Product;
-use App\Models\ProductMinimumAdjustment;
+use App\Services\MinimumStockCalculator;
 use App\Models\StockMovement;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -51,9 +51,8 @@ class LaporanPergerakanExport extends BaseLaporanTokoExport
             ->groupBy('product_id')
             ->get()->keyBy('product_id');
 
-        $adjustments = ProductMinimumAdjustment::activeOn(now()->toDateString())
-            ->orderByDesc('active_from')->orderByDesc('id')
-            ->get()->keyBy('product_id');
+        // Min stok gudang: hasil 3 bulan (atau default manual) + adjustment aktif (sumber sama dengan PO).
+        $minimums = app(MinimumStockCalculator::class)->forWarehouse();
 
         // Per PRODUK dengan stok fisik = SUM(stocks.qty) semua batch; dibaca per potongan.
         $products = Product::with('category')
@@ -71,9 +70,7 @@ class LaporanPergerakanExport extends BaseLaporanTokoExport
             $avgOut = round($totalOut / $months, 1);
             $idleDays = $stat ? (int) now()->diffInDays(Carbon::parse($stat->last_date)) : 0;
 
-            $baseMin = (float) ($p->min_stock ?? 0);
-            $adj = $adjustments->get($p->id);
-            $min = $adj ? (int) ceil($baseMin * (1 + $adj->adjustment_percentage / 100)) : (int) $baseMin;
+            $min = (int) ($minimums[$p->id]['min_final'] ?? ($p->min_stock ?? 0));
 
             $movement = $avgOut >= 10 ? 'Fast Moving' : ($avgOut >= 3 ? 'Medium Moving' : 'Slow Moving');
             $status = $qty > $min ? 'Aman' : ($qty > 0 ? 'Kritis' : 'Habis');
