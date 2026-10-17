@@ -509,9 +509,12 @@ class ProductController extends Controller
 
     ///-----------------------------------------------------------------------------------------------
 
-    public function export()
+    public function export(Request $request)
     {
-        return Excel::download(new ProductsExport(), 'products.xlsx');
+        // Ikut filter yang sedang aktif di halaman Data Products (kosong = export semua produk).
+        $filters = $request->only(['search', 'status_produk', 'category_id', 'lokasi']);
+
+        return Excel::download(new ProductsExport(filters: $filters), 'products.xlsx');
     }
 
     public function exportTemplate()

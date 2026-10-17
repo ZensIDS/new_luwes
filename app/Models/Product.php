@@ -174,6 +174,47 @@ class Product extends Model
             ->withSum('ownerStocks as owner_stock_qty', 'qty');
     }
 
+    /*
+    | Filter daftar produk gudang (halaman Data Products) — dipakai juga oleh Export
+    | supaya hasil export sama persis dengan tabel yang sedang difilter.
+    | Parameter: search, status_produk, category_id, lokasi (semua opsional).
+    */
+    public function scopeApplyIndexFilters(Builder $query, array $filters): Builder
+    {
+        $search = trim((string) ($filters['search'] ?? ''));
+
+        if ($search !== '') {
+            // Nama dicari dari AWAL nama; kode/brand/model/harga di mana saja (sama dengan index()).
+            $nameLike = addcslashes($search, '\\%_') . '%';
+
+            $query->where(function ($q) use ($search, $nameLike) {
+                $q->where('name', 'LIKE', $nameLike)
+                    ->orWhere('code', 'LIKE', "%{$search}%")
+                    ->orWhere('brand', 'LIKE', "%{$search}%")
+                    ->orWhere('model', 'LIKE', "%{$search}%")
+                    ->orWhere('harga_jual', 'LIKE', "%{$search}%")
+                    ->orWhereHas('stocks', function ($stockQuery) use ($search) {
+                        $stockQuery->where('serial_number', 'LIKE', "%{$search}%")
+                            ->orWhere('status', 'LIKE', "%{$search}%");
+                    });
+            });
+        }
+
+        if (! empty($filters['category_id'])) {
+            $query->where('category_id', (int) $filters['category_id']);
+        }
+
+        if (! empty($filters['lokasi'])) {
+            $query->where('lokasi', $filters['lokasi']);
+        }
+
+        if (! empty($filters['status_produk']) && $filters['status_produk'] !== 'all') {
+            $query->where('status_produk', $filters['status_produk']);
+        }
+
+        return $query;
+    }
+
     // PERINGATAN: tiap akses = 1 query SUM. Jangan dipakai di loop/koleksi;
     // gunakan scopeWithStockTotals() / withSum('stocks as stock_qty', 'qty').
     // Total stok fisik gudang (SUM qty semua batch/SKU)

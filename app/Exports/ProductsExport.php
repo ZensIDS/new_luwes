@@ -9,7 +9,10 @@ use Maatwebsite\Excel\Concerns\WithMapping;
 
 class ProductsExport implements FromQuery, WithHeadings, WithMapping
 {
-    public function __construct(private bool $templateOnly = false) {}
+    /**
+     * @param array $filters search, status_produk, category_id, lokasi (kosong = semua produk)
+     */
+    public function __construct(private bool $templateOnly = false, private array $filters = []) {}
 
     /**
      * Dibaca per potongan (chunk) oleh Laravel Excel, bukan ->get() sekaligus.
@@ -18,7 +21,10 @@ class ProductsExport implements FromQuery, WithHeadings, WithMapping
      */
     public function query()
     {
-        $query = Product::query()->with(['category', 'suppliers'])->orderBy('id');
+        $query = Product::query()
+            ->applyIndexFilters($this->filters)
+            ->with(['category', 'suppliers'])
+            ->orderBy('id');
 
         return $this->templateOnly ? $query->whereRaw('1 = 0') : $query;
     }

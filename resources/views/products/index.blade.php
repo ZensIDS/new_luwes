@@ -19,7 +19,13 @@
                 <div class="box">
                     <div class="box-header">
                         <a href="{{ route('product.create') }}" class="btn btn-sm bg-light-blue"><i class="fa fa-plus"></i>Tambah</a>
-                        <a href="{{ route('product.export') }}" class="btn btn-sm bg-green">
+                        @php
+                            $exportFilters = array_filter(
+                                request()->only(['search', 'status_produk', 'category_id', 'lokasi']),
+                                fn ($v) => $v !== null && $v !== ''
+                            );
+                        @endphp
+                        <a href="{{ route('product.export', $exportFilters) }}" class="btn btn-sm bg-green">
                             <i class="fa fa-download"></i> Export
                         </a>
                         <a href="{{ route('product.export.template') }}" class="btn btn-sm bg-gray">
