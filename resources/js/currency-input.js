@@ -37,6 +37,25 @@ const shouldFormatAsCurrency = (input) => {
     return document.getElementById(toggleId)?.value === "nominal";
 };
 
+// Input bertipe persentase (toggle bukan "nominal"): boleh desimal, maksimal 2 digit di belakang koma.
+const isPercentInput = (input) => Boolean(input.dataset.currencyToggle) && !shouldFormatAsCurrency(input);
+
+// Saat mengetik, jangan format ulang isian persentase supaya "2," / "2." tidak terhapus.
+// Cukup bersihkan karakter tidak valid, 1 pemisah desimal, dan batasi 2 digit desimal.
+const sanitizePercentInput = (input) => {
+    let text = input.value.replace(/[^\d,.]/g, "");
+    const separatorIndex = text.search(/[,.]/);
+
+    if (separatorIndex >= 0) {
+        text = text.slice(0, separatorIndex + 1) + text.slice(separatorIndex + 1).replace(/[,.]/g, "").slice(0, 2);
+    }
+
+    if (input.value !== text) input.value = text;
+
+    const number = parseIdNumber(text);
+    input.dataset.rawValue = number === null ? "" : String(number);
+};
+
 const normalizeCurrencyInput = (input, format = true) => {
     const number = parseIdNumber(input.value);
     if (number === null) {
@@ -68,7 +87,11 @@ const initializeCurrencyInputs = (root = document) => {
 
 document.addEventListener("input", (event) => {
     if (event.target.matches?.("[data-currency-input]")) {
-        normalizeCurrencyInput(event.target, true);
+        if (isPercentInput(event.target)) {
+            sanitizePercentInput(event.target);
+        } else {
+            normalizeCurrencyInput(event.target, true);
+        }
     }
 }, true);
 
