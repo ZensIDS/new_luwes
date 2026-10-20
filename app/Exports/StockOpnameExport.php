@@ -65,15 +65,21 @@ class StockOpnameExport extends BaseLaporanTokoExport
             ['h' => 'Keterangan', 'max' => 50, 'wrap' => true],
         ])->kop()->info()->header();
 
+        // Urut abjad berdasarkan nama barang; penyesuaian barang yang sama diurutkan menurut tanggal.
+        // Produk yang sudah dihapus / tanpa nama diletakkan paling bawah.
         $query = StockAdjustment::with(['product', 'stock'])
+            ->leftJoin('products', 'products.id', '=', 'stock_adjustments.product_id')
+            ->select('stock_adjustments.*')
             ->tap(fn ($q) => ReportQuery::betweenDates(
                 $q,
-                'adjustment_date',
+                'stock_adjustments.adjustment_date',
                 $meta->start->toDateString(),
                 $meta->end->toDateString()
             ))
-            ->orderBy('adjustment_date')
-            ->orderBy('id');
+            ->orderByRaw('products.name IS NULL')
+            ->orderBy('products.name')
+            ->orderBy('stock_adjustments.adjustment_date')
+            ->orderBy('stock_adjustments.id');
 
         if ($this->request->filled('lokasi')) {
             $lokasi = (string) $this->request->input('lokasi');

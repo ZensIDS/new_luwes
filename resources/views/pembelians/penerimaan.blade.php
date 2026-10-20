@@ -49,7 +49,7 @@
                                     <input type="text"
                                         id="scan-highlight-input"
                                         class="form-control"
-                                        placeholder="Scan barcode untuk highlight produk..."
+                                        placeholder="Scan / ketik sebagian barcode untuk highlight produk..."
                                         autocomplete="off">
                                     <span class="input-group-btn">
                                         <button type="button" id="btn-clear-highlight" class="btn btn-default" title="Clear highlight">
@@ -58,7 +58,8 @@
                                     </span>
                                 </div>
                                 <small class="text-muted">
-                                    <i class="fa fa-info-circle"></i> Scan barcode untuk langsung menemukan & highlight produk di tabel.
+                                    <i class="fa fa-info-circle"></i> Scan barcode, atau ketik sebagian barcode (minimal 3 karakter, mis. <code>4567</code>), untuk menemukan & highlight produk di tabel.
+                                    <span id="scan-highlight-info" style="margin-left:6px;font-weight:bold;"></span>
                                 </small>
                             </div>
                             <table class="table table-bordered table-striped" style="margin:0">
@@ -514,44 +515,89 @@
 </script>
 <script>
     var $lastHighlighted = null;
+    var scanFlashInterval = null; // efek kedip baris pertama; harus dihentikan saat highlight dihapus
+    var SCAN_PLACEHOLDER = 'Scan / ketik sebagian barcode untuk highlight produk...';
+    var SCAN_MIN_AUTO_LENGTH = 3; // ketik manual: otomatis cari setelah minimal 3 karakter
 
-    function clearHighlight() {
+    // keepInput = true -> hanya hapus highlight, isi kolom scan dibiarkan
+    // (dipakai saat user masih mengetik, supaya ketikannya tidak terhapus)
+    function clearHighlight(keepInput) {
+        if (scanFlashInterval) {
+            clearInterval(scanFlashInterval);
+            scanFlashInterval = null;
+        }
         if ($lastHighlighted) {
             $lastHighlighted.each(function() {
                 $(this).css('background-color', '').css('outline', '');
             });
             $lastHighlighted = null;
         }
-        $('#scan-highlight-input').val('');
+        $('#scan-highlight-info').text('');
+        if (!keepInput) {
+            $('#scan-highlight-input').val('');
+        }
     }
 
-    function processHighlightScan(barcode) {
-        barcode = barcode.trim().toLowerCase();
+    // Cari baris produk berdasarkan barcode (data-product-code).
+    // 1) Kalau ada yang cocok PERSIS, pakai itu saja (scan barcode penuh tidak ikut
+    //    menyorot produk lain yang barcode-nya kebetulan memuat angka yang sama).
+    // 2) Kalau tidak ada, cocokkan SEBAGIAN (di bagian mana saja): "4567" / "2345"
+    //    menemukan barcode "12345678".
+    function findRowsByBarcode(query) {
+        var $rows = $('table tbody tr[data-product-code]');
+
+        function codeOf(el) {
+            return ($(el).attr('data-product-code') || '').toString().trim().toLowerCase();
+        }
+
+        var $exact = $rows.filter(function() {
+            var code = codeOf(this);
+            return code !== '' && code === query;
+        });
+        if ($exact.length) {
+            return { $rows: $exact, exact: true };
+        }
+
+        var $partial = $rows.filter(function() {
+            var code = codeOf(this);
+            return code !== '' && code.indexOf(query) !== -1;
+        });
+        return { $rows: $partial, exact: false };
+    }
+
+    // fromScanner = true saat dipicu tombol Enter (scanner fisik biasanya mengirim Enter)
+    function processHighlightScan(barcode, fromScanner) {
+        barcode = (barcode || '').trim().toLowerCase();
+
+        clearHighlight(true);
         if (!barcode) return;
 
-        clearHighlight();
-
-        var $matched = $('table tbody tr').filter(function() {
-            var productCode = ($(this).data('product-code') || '').toString().trim().toLowerCase();
-            return productCode === barcode;
-        });
+        var found = findRowsByBarcode(barcode);
+        var $matched = found.$rows;
+        var $input = $('#scan-highlight-input');
 
         console.log('Barcode:', barcode);
         console.log('Matched rows:', $matched.length);
 
         if ($matched.length === 0) {
-            $('#scan-highlight-input')
-                .css('border-color', '#e74c3c')
-                .attr('placeholder', '"' + barcode + '" tidak ditemukan di list');
+            $input.css('border-color', '#e74c3c');
+            $('#scan-highlight-info').css('color', '#e74c3c').text('"' + barcode + '" tidak ditemukan di list');
 
             setTimeout(function() {
-                $('#scan-highlight-input')
-                    .css('border-color', '')
-                    .attr('placeholder', 'Scan barcode untuk highlight produk...')
-                    .val('');
+                $input.css('border-color', '');
+                // Kosongkan kolom hanya untuk hasil scan (Enter) dan hanya kalau isinya belum diganti,
+                // supaya ketikan manual user tidak terhapus.
+                if (fromScanner && $input.val().trim().toLowerCase() === barcode) {
+                    $input.val('');
+                    $('#scan-highlight-info').text('');
+                }
             }, 2000);
             return;
         }
+
+        $input.css('border-color', '');
+        $('#scan-highlight-info').css('color', '#00a65a')
+            .text($matched.length + ' baris cocok' + (found.exact ? '' : ' (sebagian barcode)'));
 
         $matched.each(function() {
             $(this).css('background-color', '#fff3cd').css('outline', '2px solid #f39c12');
@@ -584,15 +630,19 @@
         console.log('Container offsetTop:', containerOffsetTop);
         console.log('Final target:', targetScroll);
 
-        $scrollContainer.animate({
+        $scrollContainer.stop(true).animate({
             scrollTop: targetScroll
         }, 500, function() {
+            // Hasil pencarian sudah berganti / dihapus selama animasi scroll -> jangan kedipkan baris lama
+            if ($lastHighlighted !== $matched) return;
+
             var flashCount = 0;
-            var flashInterval = setInterval(function() {
+            scanFlashInterval = setInterval(function() {
                 $firstMatch.css('background-color', flashCount % 2 === 0 ? '#ffe082' : '#fff3cd');
                 flashCount++;
                 if (flashCount >= 6) {
-                    clearInterval(flashInterval);
+                    clearInterval(scanFlashInterval);
+                    scanFlashInterval = null;
                     $firstMatch.css('background-color', '#fff3cd');
                 }
             }, 150);
@@ -608,27 +658,35 @@
         }
     });
 
+    var scanTimer = null;
+
     $('#scan-highlight-input').on('keydown', function(e) {
         if (e.key === 'Enter') {
             e.preventDefault();
-            processHighlightScan($(this).val());
+            clearTimeout(scanTimer); // batalkan pencarian otomatis yang masih menunggu
+            processHighlightScan($(this).val(), true);
         }
     });
 
-    var scanTimer = null;
+    // Ketik manual: cari otomatis (jeda 300ms) mulai 3 karakter, hasil ikut berubah
+    // saat ketikan ditambah / dikurangi. Kolom TIDAK dikosongkan saat mengetik.
     $('#scan-highlight-input').on('input', function() {
         clearTimeout(scanTimer);
         var val = $(this).val();
-        if (val.length >= 3) {
+        if (val.trim().length >= SCAN_MIN_AUTO_LENGTH) {
             scanTimer = setTimeout(function() {
-                processHighlightScan(val);
+                processHighlightScan(val, false);
             }, 300);
+        } else {
+            clearHighlight(true);
+            $(this).css('border-color', '');
         }
     });
 
     $('#btn-clear-highlight').on('click', function() {
+        clearTimeout(scanTimer);
         clearHighlight();
-        $('#scan-highlight-input').focus();
+        $('#scan-highlight-input').css('border-color', '').focus();
     });
 
     // Auto focus ke scan input saat halaman load
