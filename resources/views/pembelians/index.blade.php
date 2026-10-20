@@ -49,6 +49,7 @@
         var table = $('#example1').DataTable({
             processing: true,
             serverSide: true,
+            searchDelay: 400, // tunggu 400ms setelah berhenti mengetik, supaya search luas (%kata%) tidak query tiap ketikan
             ajax: {
                 url: '{{ route('pembelian.index.data') }}'
             },

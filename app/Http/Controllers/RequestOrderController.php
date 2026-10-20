@@ -12,6 +12,7 @@ use App\Models\RequestOrderNote;
 use App\Models\PickingList;
 use App\Models\PickingListItem;
 use App\Models\Stock;
+use App\Support\SearchHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -60,31 +61,30 @@ class RequestOrderController extends Controller
 
         $recordsTotal = (clone $base)->count('request_orders.id');
 
-        // SEARCH berbasis AWALAN (LIKE 'kata%'), seperti halaman Outlet Purchases:
-        // "jet sw" / "jet sweet" menemukan "JET SWEET", tetapi "sweet" tidak.
-        // Berlaku untuk kode request, nama outlet, nama peminta, serta nama/kode produk.
-        // Peminta & produk dicari lewat subquery IN supaya tidak menggandakan baris.
+        // SEARCH luas (LIKE %kata%): "kacang hijau" menemukan produk "ABC KACANG HIJAU".
+        // Dicari di kode request, nama outlet, nama peminta, serta nama dan kode/barcode produk
+        // (barcode boleh sebagian: "4567" menemukan "12345678"). Tiap kata harus ketemu (AND),
+        // boleh di kolom berbeda. Peminta & produk dicari lewat subquery IN supaya tidak
+        // menggandakan baris.
         if ($searchValue !== '') {
-            $prefix = addcslashes($searchValue, '\\%_') . '%';
-
-            $base->where(function ($q) use ($prefix) {
-                $q->where('request_orders.code', 'like', $prefix)
-                    ->orWhere('outlets.name', 'like', $prefix)
-                    ->orWhereIn('request_orders.requested_by', function ($sub) use ($prefix) {
+            SearchHelper::apply($base, $searchValue, function ($q, $like) {
+                $q->where('request_orders.code', 'like', $like)
+                    ->orWhere('outlets.name', 'like', $like)
+                    ->orWhereIn('request_orders.requested_by', function ($sub) use ($like) {
                         $sub->select('u.id')
                             ->from('users as u')
                             ->whereNull('u.deleted_at')
-                            ->where('u.name', 'like', $prefix);
+                            ->where('u.name', 'like', $like);
                     })
-                    ->orWhereIn('request_orders.id', function ($sub) use ($prefix) {
+                    ->orWhereIn('request_orders.id', function ($sub) use ($like) {
                         $sub->select('roi.request_order_id')
                             ->from('request_order_items as roi')
                             ->join('products as p', 'p.id', '=', 'roi.product_id')
                             ->whereNull('roi.deleted_at')
                             ->whereNull('p.deleted_at')
-                            ->where(function ($qp) use ($prefix) {
-                                $qp->where('p.name', 'like', $prefix)
-                                    ->orWhere('p.code', 'like', $prefix);
+                            ->where(function ($qp) use ($like) {
+                                $qp->where('p.name', 'like', $like)
+                                    ->orWhere('p.code', 'like', $like);
                             });
                     });
             });
