@@ -364,6 +364,11 @@ class StockController extends Controller
 
         $stocks = $query->get()
             ->filter(fn($stock) => $stock->product !== null) // produk sudah dihapus -> skip dari opname
+            // Urut abjad berdasarkan nama produk (natural & tidak peka huruf besar/kecil:
+            // "Gula 2" sebelum "Gula 10"), lalu SKU/batch, lalu id sebagai penentu terakhir.
+            ->sort(fn($a, $b) => strnatcasecmp($a->product->name ?? '', $b->product->name ?? '')
+                ?: strnatcasecmp((string) $a->sku, (string) $b->sku)
+                ?: $a->id <=> $b->id)
             ->map(function ($stock) {
                 return [
                     'id'            => $stock->id,
@@ -526,7 +531,11 @@ class StockController extends Controller
             $stock->qty = (int) ($row->total_qty ?? 0);
 
             return $stock;
-        })->filter()->values();
+        })->filter()
+            // Urut abjad berdasarkan nama produk (natural & tidak peka huruf besar/kecil)
+            ->sort(fn($a, $b) => strnatcasecmp($a->product->name ?? '', $b->product->name ?? '')
+                ?: $a->product_id <=> $b->product_id)
+            ->values();
 
         $date = date('Y-m-d');
 
