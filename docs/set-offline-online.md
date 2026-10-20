@@ -444,6 +444,37 @@ Cek dari terminal:
 php artisan dbsync:status
 ```
 
+### 11.1 Tombol aksi (khusus owner & superadmin, di server lokal)
+
+| Tombol | Sama dengan perintah |
+|---|---|
+| **Cek Koneksi** | `php artisan dbsync:status` |
+| **Lihat Rencana (dry-run)** | `php artisan dbsync:run --dry-run` (hanya menampilkan apa yang akan berubah, tidak mengubah data) |
+| **Sinkron Sekarang** | `php artisan dbsync:run -v` |
+| Pilihan **Modul** + tombol di atas | `php artisan dbsync:run --group=...` |
+| Centang **Izinkan hapus massal** | `--force` |
+| Tombol **Lokal / Hosting / Terbaru** di daftar konflik | `php artisan dbsync:resolve ...` |
+
+**Modul.** Tabel saling terkait (produk ↔ stok ↔ pembelian ↔ penjualan), jadi sinkron sebagian dipilih per
+**modul**, bukan per tabel. Tabel induknya otomatis ikut. Contoh: memilih *Penjualan & Kasir* juga menyinkron
+`products`, `owner_stocks`, `stocks`, `outlets`, `users`, `categories`, dst. Daftar tabel yang ikut tampil di bawah
+pilihan modul. **Tidak memilih modul = semua tabel (disarankan)**. Sinkron hanya mengirim baris yang berubah,
+jadi sinkron semua tabel tetap cepat.
+
+| Kunci modul (`--group`) | Isi |
+|---|---|
+| `master` | User, outlet, kategori, supplier, bank, metode bayar, salesman, slider |
+| `produk_stok` | Produk, harga outlet, stok gudang & outlet, mutasi & penyesuaian stok |
+| `pembelian` | Pembelian (PO), penerimaan, retur supplier, belanja outlet, beserta stok & kas |
+| `distribusi` | Request order, picking list, delivery order, beserta stok |
+| `penjualan` | Penjualan, kasir/shift, retur penjualan, nomor invoice, beserta stok & kas |
+| `promo` | Promo & voucher |
+| `keuangan` | Kas, pengeluaran, pendapatan lain |
+| `log` | Log aktivitas |
+| `lainnya` | Tabel yang belum masuk modul mana pun (muncul otomatis bila ada) |
+
+Isi modul bisa diubah di `config/dbsync.php` bagian `groups`.
+
 ---
 
 ## 12. Menangani Konflik
@@ -457,7 +488,20 @@ products: KONFLIK id 4 dilewati (name: lokal "A" vs hosting "B").
 Selesaikan: php artisan dbsync:resolve products 4 --keep=local|server|newest
 ```
 
-Pilih versi yang benar, lalu jalankan di PC server:
+**Dari dashboard:** pada daftar *Konflik dilewati*, klik **Lihat perbedaan** untuk membuka tabel perbandingan
+per kolom: nilai **saat sinkron terakhir**, nilai **lokal**, dan nilai **hosting** saat ini, beserta statusnya:
+
+| Status | Arti |
+|---|---|
+| 🔴 Konflik | Kolom diubah berbeda di dua sisi (penyebab baris dilewati) |
+| 🔵 Lokal berubah | Hanya berubah di lokal |
+| 🟠 Hosting berubah | Hanya berubah di hosting |
+| 🟢 Digabung | Digabung otomatis (stok/saldo dijumlahkan, waktu terbaru dipakai) |
+
+Kolom versi yang terakhir diubah ditandai *(terbaru)*. Lalu klik **Lokal**, **Hosting**, atau **Terbaru**
+(khusus owner & superadmin).
+
+**Dari terminal:** pilih versi yang benar, lalu jalankan di PC server:
 
 ```bash
 php artisan dbsync:resolve products 4 --keep=server   # pakai versi hosting
@@ -513,7 +557,8 @@ Bila ingin konflik **otomatis** diselesaikan dengan data terbaru (tanpa dilewati
 php artisan dbsync:status                               # cek koneksi & sinkron terakhir
 php artisan dbsync:run --dry-run                        # lihat rencana tanpa mengubah data
 php artisan dbsync:run -v                               # sinkron sekarang (detail per tabel)
-php artisan dbsync:run --table=products                 # sinkron satu tabel
+php artisan dbsync:run --group=penjualan                # sinkron satu modul (+ tabel terkait)
+php artisan dbsync:run --table=products                 # sinkron satu tabel (+ tabel induknya)
 php artisan dbsync:run --table=stock_movements --force  # izinkan penghapusan massal yang ditahan
 php artisan dbsync:resolve products 4 --keep=server     # selesaikan konflik
 ```

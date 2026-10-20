@@ -63,6 +63,9 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/db-sync/status', DbSyncStatusController::class)
         ->middleware('role:admin-gudang|owner|superadmin')
         ->name('db-sync.status');
+    Route::get('/db-sync/conflict', [DbSyncStatusController::class, 'conflict'])
+        ->middleware('role:admin-gudang|owner|superadmin')
+        ->name('db-sync.conflict');
     Route::middleware('role:owner|superadmin')->group(function () {
         Route::post('/db-sync/run', [DbSyncStatusController::class, 'run'])->name('db-sync.run');
         Route::post('/db-sync/resolve', [DbSyncStatusController::class, 'resolve'])->name('db-sync.resolve');

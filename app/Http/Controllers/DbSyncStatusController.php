@@ -19,12 +19,12 @@ class DbSyncStatusController extends Controller
     {
         $snapshot = $status->snapshot();
         $snapshot['can_manage'] = $this->canManage($request);
-        $snapshot['tables'] = $snapshot['can_manage'] ? rescue(fn () => $sync->syncableTables(), [], false) : [];
+        $snapshot['groups'] = $snapshot['can_manage'] ? rescue(fn () => $sync->groups(), [], false) : [];
 
         return response()->json($snapshot);
     }
 
-    /** Sama dengan: php artisan dbsync:run [--dry-run] [--table=..] [--force] */
+    /** Sama dengan: php artisan dbsync:run [--dry-run] [--group=..] [--force] */
     public function run(Request $request, DbSyncService $sync): JsonResponse
     {
         abort_unless($this->canManage($request), 403);
@@ -32,7 +32,8 @@ class DbSyncStatusController extends Controller
         $data = $request->validate([
             'dry_run' => ['boolean'],
             'force' => ['boolean'],
-            'table' => ['nullable', 'string', Rule::in($sync->syncableTables())],
+            'groups' => ['nullable', 'array'],
+            'groups.*' => ['string', Rule::in(array_keys($sync->groups()))],
         ]);
 
         // Sinkron pertama bisa beberapa menit; jangan berhenti bila browser ditutup.
@@ -41,7 +42,7 @@ class DbSyncStatusController extends Controller
 
         try {
             $result = $sync->run(
-                array_filter([$data['table'] ?? null]),
+                $sync->tablesForGroups($data['groups'] ?? []),
                 (bool) ($data['force'] ?? false),
                 (bool) ($data['dry_run'] ?? false),
             );
@@ -78,6 +79,35 @@ class DbSyncStatusController extends Controller
         }
 
         return response()->json(['message' => "Baris {$data['table']} #{$data['id']} disamakan memakai versi {$data['keep']}."]);
+    }
+
+    /** Perbedaan data satu baris (lokal vs hosting vs sinkron terakhir) untuk modal konflik di dashboard. */
+    public function conflict(Request $request, DbSyncService $sync): JsonResponse
+    {
+        abort_unless(DbSyncService::isConfigured(), 404);
+
+        $data = $request->validate([
+            'table' => ['required', 'string', Rule::in($sync->syncableTables())],
+            'id' => ['required', 'string', 'max:64'],
+        ]);
+
+        try {
+            $row = $sync->inspectRow($data['table'], $data['id']);
+        } catch (Throwable $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        // Nilai panjang (mis. JSON activity_log) dipotong supaya modal tetap ringan.
+        $short = fn (?array $values) => $values === null ? null : array_map(
+            fn ($v) => is_string($v) ? mb_strimwidth($v, 0, 2000, '…') : $v,
+            $values
+        );
+
+        return response()->json([
+            'local' => $short($row['local']),
+            'server' => $short($row['server']),
+            'base' => $short($row['base']),
+        ] + $row);
     }
 
     private function canManage(Request $request): bool

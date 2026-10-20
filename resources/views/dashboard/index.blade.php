@@ -460,14 +460,39 @@
                             </div>
                         </div>
 
+                        <div class="modal fade" id="dbSyncDiffModal" tabindex="-1" role="dialog">
+                            <div class="modal-dialog modal-lg" role="document">
+                                <div class="modal-content">
+                                    <div class="modal-header">
+                                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                                        <h4 class="modal-title"><i class="fa fa-columns"></i> Perbedaan data <span id="dbSyncDiffTitle"></span></h4>
+                                    </div>
+                                    <div class="modal-body">
+                                        <p class="small" style="margin-bottom:8px">
+                                            <span class="label label-danger">Konflik</span> diubah berbeda di dua sisi &nbsp;
+                                            <span class="label label-info">Lokal</span> hanya berubah di lokal &nbsp;
+                                            <span class="label label-warning">Hosting</span> hanya berubah di hosting &nbsp;
+                                            <span class="label label-success">Digabung</span> digabung otomatis (stok / saldo / waktu)
+                                        </p>
+                                        <div class="checkbox" style="margin-top:0">
+                                            <label><input type="checkbox" id="dbSyncDiffAll"> Tampilkan semua kolom (termasuk yang sama)</label>
+                                        </div>
+                                        <div id="dbSyncDiffBody" class="table-responsive" style="max-height:60vh;overflow-y:auto"></div>
+                                    </div>
+                                    <div class="modal-footer">
+                                        <span id="dbSyncDiffActions"></span>
+                                        <button type="button" class="btn btn-default" data-dismiss="modal">Tutup</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         @if(in_array(auth()->user()->role, \App\Http\Controllers\DbSyncStatusController::MANAGER_ROLES, true))
                         <div id="dbSyncActions" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid #f4f4f4">
                             <div class="form-inline" style="margin-bottom:8px">
                                 <div class="form-group" style="margin-right:10px">
-                                    <label for="dbSyncTable" style="margin-right:6px">Tabel</label>
-                                    <select id="dbSyncTable" class="form-control input-sm" style="min-width:220px">
-                                        <option value="">Semua tabel</option>
-                                    </select>
+                                    <label for="dbSyncGroups" style="margin-right:6px">Modul</label>
+                                    <select id="dbSyncGroups" class="form-control input-sm" multiple style="min-width:320px"></select>
                                 </div>
                                 <div class="checkbox" style="margin-right:10px">
                                     <label title="Izinkan penghapusan massal yang ditahan pengaman (--force)">
@@ -486,6 +511,7 @@
                                     <i class="fa fa-refresh"></i> Sinkron Sekarang
                                 </button>
                             </div>
+                            <p id="dbSyncScope" class="small text-muted" style="margin:6px 0 0"></p>
                             <div id="dbSyncResult" style="display:none;margin-top:10px"></div>
                         </div>
                         @endif
@@ -793,6 +819,7 @@
             const STATUS = { success: 'Berhasil', partial: 'Sebagian gagal', failed: 'Gagal', running: 'Berjalan' };
             const esc = (s) => $('<div>').text(s ?? '').html();
             let canManage = false;
+            let groups = {};
             let resolved = { run: null, keys: new Set() };   // konflik yang sudah diselesaikan sejak sinkron terakhir
 
             function render(s) {
@@ -839,9 +866,16 @@
                 renderConflicts((run?.conflicts || []).filter((c) => !resolved.keys.has(c.table + '#' + c.id)));
                 $('#dbSyncActions').toggle(canManage);
 
-                const $table = $('#dbSyncTable');
-                if (canManage && $table.children().length <= 1) {
-                    (s.tables || []).forEach((t) => $table.append($('<option>').val(t).text(t)));
+                const $groups = $('#dbSyncGroups');
+                if (canManage && !$groups.children().length && s.groups && Object.keys(s.groups).length) {
+                    groups = s.groups;
+                    Object.entries(groups).forEach(([key, g]) => $groups.append(
+                        $('<option>').val(key).text(g.label + ' (' + g.tables.length + ' tabel)')
+                    ));
+                    if ($.fn.select2) {
+                        $groups.select2({ width: '100%', placeholder: 'Semua tabel (disarankan)', allowClear: true });
+                    }
+                    renderScope();
                 }
             }
 
@@ -855,8 +889,10 @@
                             + '<button class="btn btn-xs btn-default dbsync-keep" data-keep="newest" ' + data + '>Terbaru</button>'
                         : '<small class="text-muted">Hubungi owner / superadmin</small>';
 
-                    return '<tr><td>' + esc(c.table) + '</td><td>' + esc(String(c.id)) + '</td>'
-                        + '<td><small>' + esc(c.detail) + '</small></td><td>' + actions + '</td></tr>';
+                    return '<tr data-key="' + esc(c.table + '#' + c.id) + '"><td>' + esc(c.table) + '</td><td>' + esc(String(c.id)) + '</td>'
+                        + '<td><small>' + esc(c.detail) + '</small><br>'
+                        + '<button class="btn btn-xs btn-link dbsync-diff" style="padding-left:0" ' + data + '><i class="fa fa-columns"></i> Lihat perbedaan</button></td>'
+                        + '<td>' + actions + '</td></tr>';
                 }).join(''));
             }
 
@@ -903,10 +939,25 @@
 
             const failMessage = (xhr) => xhr.responseJSON?.message || ('Gagal (HTTP ' + xhr.status + ').');
 
+            // Tabel yang ikut tersinkron untuk modul terpilih (sudah termasuk tabel induk foreign key).
+            function selectedTables() {
+                const keys = $('#dbSyncGroups').val() || [];
+                return [...new Set(keys.flatMap((k) => groups[k]?.tables || []))].sort();
+            }
+
+            function renderScope() {
+                const tables = selectedTables();
+                $('#dbSyncScope').html(tables.length
+                    ? '<i class="fa fa-info-circle"></i> Akan disinkron ' + tables.length + ' tabel (termasuk tabel terkait): ' + esc(tables.join(', '))
+                    : '<i class="fa fa-info-circle"></i> Tidak memilih modul = semua tabel disinkron. Hanya baris yang berubah yang dikirim, jadi tetap cepat.');
+            }
+
+            $('#dbSyncGroups').on('change', renderScope);
+
             function runSync(dryRun) {
-                const table = $('#dbSyncTable').val();
+                const keys = $('#dbSyncGroups').val() || [];
                 const force = $('#dbSyncForce').is(':checked');
-                const scope = table ? 'tabel ' + table : 'SEMUA tabel';
+                const scope = keys.length ? 'modul ' + keys.map((k) => groups[k]?.label || k).join(', ') : 'SEMUA tabel';
 
                 if (!dryRun && !confirm('Sinkron sekarang untuk ' + scope + (force ? ' DAN izinkan penghapusan massal' : '') + '?')) {
                     return;
@@ -916,7 +967,7 @@
                     ? 'Menghitung rencana sinkron…'
                     : 'Menyinkronkan… sinkron pertama bisa memakan beberapa menit, jangan tutup halaman ini.');
 
-                post(@json(route('db-sync.run')), { dry_run: dryRun ? 1 : 0, force: force ? 1 : 0, table: table || '' })
+                post(@json(route('db-sync.run')), { dry_run: dryRun ? 1 : 0, force: force ? 1 : 0, groups: keys })
                     .done((r) => { renderResult(r); if (!dryRun) load(); })
                     .fail((xhr) => $('#dbSyncResult').show().html('<div class="alert alert-danger" style="padding:8px 12px">' + esc(failMessage(xhr)) + '</div>'))
                     .always(() => busy(false));
@@ -926,6 +977,76 @@
             $('#dbSyncBtnDry').on('click', () => runSync(true));
             $('#dbSyncBtnRun').on('click', () => runSync(false));
 
+            // Modal perbedaan data lokal vs hosting untuk satu baris konflik.
+            const STATE = {
+                conflict: { cls: 'danger', label: 'label-danger', text: 'Konflik' },
+                local: { cls: 'info', label: 'label-info', text: 'Lokal berubah' },
+                server: { cls: 'warning', label: 'label-warning', text: 'Hosting berubah' },
+                merged: { cls: 'success', label: 'label-success', text: 'Digabung' },
+                same: { cls: '', label: 'label-default', text: 'Sama' },
+            };
+            const STATE_ORDER = ['conflict', 'local', 'server', 'merged', 'same'];
+            let diff = null;
+
+            const cell = (row, col) => {
+                if (!row) {
+                    return '<i class="text-muted">— baris tidak ada —</i>';
+                }
+                const v = row[col];
+                return v === null || v === undefined
+                    ? '<i class="text-muted">NULL</i>'
+                    : '<span style="white-space:pre-wrap;word-break:break-word">' + esc(String(v)) + '</span>';
+            };
+
+            function renderDiff() {
+                const showAll = $('#dbSyncDiffAll').is(':checked');
+                const cols = Object.keys(diff.states)
+                    .filter((c) => showAll || diff.states[c] !== 'same')
+                    .sort((a, b) => STATE_ORDER.indexOf(diff.states[a]) - STATE_ORDER.indexOf(diff.states[b]));
+                const newest = diff.newest === 'local' ? 'Lokal' : 'Hosting';
+
+                $('#dbSyncDiffBody').html(
+                    '<table class="table table-bordered table-condensed" style="margin-bottom:0">'
+                    + '<thead><tr><th style="width:150px">Kolom</th><th>Saat sinkron terakhir</th>'
+                    + '<th>Lokal' + (diff.newest === 'local' ? ' <small class="text-green">(terbaru)</small>' : '') + '</th>'
+                    + '<th>Hosting' + (diff.newest === 'server' ? ' <small class="text-green">(terbaru)</small>' : '') + '</th>'
+                    + '<th style="width:110px">Status</th></tr></thead><tbody>'
+                    + (cols.length
+                        ? cols.map((c) => {
+                            const st = STATE[diff.states[c]] || STATE.same;
+                            return '<tr class="' + st.cls + '"><td><code>' + esc(c) + '</code></td>'
+                                + '<td>' + (diff.base ? cell(diff.base, c) : '<i class="text-muted">belum pernah sinkron</i>') + '</td>'
+                                + '<td>' + cell(diff.local, c) + '</td><td>' + cell(diff.server, c) + '</td>'
+                                + '<td><span class="label ' + st.label + '">' + st.text + '</span></td></tr>';
+                        }).join('')
+                        : '<tr><td colspan="5" class="text-center text-success">Data lokal & hosting sekarang sudah sama. Konflik akan hilang pada sinkron berikutnya.</td></tr>')
+                    + '</tbody></table>'
+                    + '<p class="small text-muted" style="margin:8px 0 0">Versi terbaru (berdasarkan <code>updated_at</code>): <b>' + newest + '</b>.</p>'
+                );
+            }
+
+            $(document).on('click', '.dbsync-diff', function () {
+                const { table, id } = $(this).data();
+                const data = 'data-table="' + esc(table) + '" data-id="' + esc(String(id)) + '"';
+
+                $('#dbSyncDiffTitle').text(table + ' #' + id);
+                $('#dbSyncDiffBody').html('<p class="text-muted"><i class="fa fa-spinner fa-spin"></i> Mengambil data lokal & hosting…</p>');
+                $('#dbSyncDiffActions').html(canManage
+                    ? '<span class="text-muted small" style="margin-right:6px">Pakai versi:</span>'
+                        + '<button class="btn btn-info dbsync-keep" data-keep="local" ' + data + '>Lokal</button> '
+                        + '<button class="btn btn-warning dbsync-keep" data-keep="server" ' + data + '>Hosting</button> '
+                        + '<button class="btn btn-default dbsync-keep" data-keep="newest" ' + data + '>Terbaru</button>'
+                    : '');
+                $('#dbSyncDiffModal').modal('show');
+
+                $.getJSON(@json(route('db-sync.conflict')), { table, id: String(id) })
+                    .done((r) => { diff = r; renderDiff(); })
+                    .fail((xhr) => $('#dbSyncDiffBody').html('<div class="alert alert-danger">' + esc(failMessage(xhr)) + '</div>'));
+            });
+
+            $('#dbSyncDiffAll').on('change', () => diff && renderDiff());
+            $('#dbSyncDiffModal').appendTo('body');
+
             $(document).on('click', '.dbsync-keep', function () {
                 const { table, id, keep } = $(this).data();
                 const label = { local: 'versi LOKAL', server: 'versi HOSTING', newest: 'versi yang TERAKHIR diubah' }[keep];
@@ -933,7 +1054,8 @@
                     return;
                 }
 
-                const $row = $(this).closest('tr');
+                const $row = $('#dbSyncConflictRows tr').filter((i, tr) => $(tr).data('key') === table + '#' + id);
+                $('#dbSyncDiffModal').modal('hide');
                 busy(true, 'Menyelesaikan konflik ' + table + ' #' + id + '…');
                 post(@json(route('db-sync.resolve')), { table, id: String(id), keep })
                     .done((r) => {

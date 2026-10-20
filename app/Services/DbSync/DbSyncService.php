@@ -18,6 +18,10 @@ class DbSyncService
 
     private const INT_TYPES = ['tinyint', 'smallint', 'mediumint', 'int', 'bigint'];
 
+    private ?array $syncableTables = null;
+
+    private ?array $foreignParents = null;
+
     public static function isConfigured(): bool
     {
         return filled(config('database.connections.'.config('dbsync.server_connection').'.host'))
@@ -33,6 +37,9 @@ class DbSyncService
         if (! self::isConfigured()) {
             throw new RuntimeException('DB_SERVER_HOST / DB_SERVER_DATABASE belum diisi di .env.');
         }
+
+        // Sinkron sebagian: tabel induk (foreign key) selalu ikut supaya data terkait tidak tertinggal.
+        $onlyTables = $onlyTables ? $this->expandTables($onlyTables) : [];
 
         $startedAt = now();
         $started = microtime(true);
@@ -105,10 +112,90 @@ class DbSyncService
     /** @return string[] tabel yang ikut disinkron (dari database lokal) */
     public function syncableTables(): array
     {
-        return array_values(array_diff(
+        return $this->syncableTables ??= array_values(array_diff(
             array_keys($this->columns($this->localConnection())),
             config('dbsync.exclude_tables', [])
         ));
+    }
+
+    /**
+     * Modul sinkron (config dbsync.groups) + modul "lainnya" untuk tabel yang belum masuk modul.
+     *
+     * @return array<string, array{label: string, tables: string[]}> tabel sudah termasuk induk foreign key
+     */
+    public function groups(): array
+    {
+        $syncable = $this->syncableTables();
+        $groups = [];
+        $grouped = [];
+
+        foreach (config('dbsync.groups', []) as $key => $group) {
+            $tables = array_values(array_intersect($group['tables'], $syncable));
+            $grouped = array_merge($grouped, $tables);
+            $groups[$key] = ['label' => $group['label'], 'tables' => $tables];
+        }
+
+        $others = array_values(array_diff($syncable, $grouped));
+        if ($others) {
+            $groups['lainnya'] = ['label' => 'Lainnya', 'tables' => $others];
+        }
+
+        foreach ($groups as $key => $group) {
+            $groups[$key]['tables'] = $this->expandTables($group['tables']);
+        }
+
+        return $groups;
+    }
+
+    /** @param  string[]  $keys  kunci modul dari groups() */
+    public function tablesForGroups(array $keys): array
+    {
+        $groups = $this->groups();
+        $unknown = array_diff($keys, array_keys($groups));
+
+        if ($unknown) {
+            throw new RuntimeException('Modul tidak dikenal: '.implode(', ', $unknown));
+        }
+
+        return array_values(array_unique(array_merge(...array_map(fn ($k) => $groups[$k]['tables'], $keys))));
+    }
+
+    /**
+     * Tambahkan semua tabel induk (foreign key, berantai) dari tabel yang dipilih.
+     * Contoh: penjualan_items -> penjualans, products, owner_stocks -> outlets, users, categories, ...
+     *
+     * @param  string[]  $tables
+     * @return string[]
+     */
+    public function expandTables(array $tables): array
+    {
+        $parents = $this->foreignParents();
+        $result = [];
+        $queue = array_values($tables);
+
+        while ($queue) {
+            $table = array_shift($queue);
+            if (isset($result[$table])) {
+                continue;
+            }
+            $result[$table] = true;
+            array_push($queue, ...($parents[$table] ?? []));
+        }
+
+        $tables = array_values(array_intersect(array_keys($result), $this->syncableTables()));
+        sort($tables);
+
+        return $tables;
+    }
+
+    /** @return array<string, string[]> tabel => tabel induk (foreign key) */
+    private function foreignParents(): array
+    {
+        return $this->foreignParents ??= collect($this->localConnection()->select(
+            'SELECT DISTINCT table_name AS t, referenced_table_name AS p
+             FROM information_schema.key_column_usage
+             WHERE table_schema = DATABASE() AND referenced_table_name IS NOT NULL AND referenced_table_name <> table_name'
+        ))->groupBy('t')->map(fn ($rows) => $rows->pluck('p')->all())->all();
     }
 
     /**
@@ -117,6 +204,17 @@ class DbSyncService
      * @param  string  $keep  'local' | 'server' | 'newest'
      */
     public function resolveConflict(string $table, int|string $id, string $keep): array
+    {
+        return $this->tableSynchronizer($table)->resolveConflict($id, $keep);
+    }
+
+    /** Bandingkan satu baris di lokal & hosting (lihat TableSynchronizer::inspect). */
+    public function inspectRow(string $table, int|string $id): array
+    {
+        return $this->tableSynchronizer($table)->inspect($id);
+    }
+
+    private function tableSynchronizer(string $table): TableSynchronizer
     {
         if (! self::isConfigured()) {
             throw new RuntimeException('DB_SERVER_HOST / DB_SERVER_DATABASE belum diisi di .env.');
@@ -131,7 +229,7 @@ class DbSyncService
             throw new RuntimeException("Tabel $table tidak bisa disinkron: ".implode('; ', $summary[$table]['errors'] ?? ['dikecualikan dari sinkron']));
         }
 
-        return $this->synchronizer($local, $server, $table, $schema, true, false)->resolveConflict($id, $keep);
+        return $this->synchronizer($local, $server, $table, $schema, true, false);
     }
 
     /** @param  array{0: string[], 1: string[], 2: bool}  $schema */

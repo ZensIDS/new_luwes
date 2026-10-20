@@ -466,6 +466,33 @@ class TableSynchronizer
     }
 
     /**
+     * Data satu baris di lokal, hosting, dan saat sinkron terakhir, beserta status tiap kolom
+     * (untuk menampilkan perbedaan konflik di dashboard).
+     */
+    public function inspect(int|string $id): array
+    {
+        $l = $this->fetchRows($this->local, [$id])[$id] ?? null;
+        $s = $this->fetchRows($this->server, [$id])[$id] ?? null;
+        $local = $l ? $this->strip($l) : null;
+        $server = $s ? $this->strip($s) : null;
+        $base = json_decode((string) $this->baseQuery()->where('row_id', (string) $id)->value('data'), true) ?: null;
+
+        $states = $local && $server
+            ? $this->merger->columnStates($local, $server, $base)
+            : array_fill_keys(array_keys($local ?? $server ?? []), $local ? 'local' : 'server');
+
+        return [
+            'table' => $this->table,
+            'id' => $id,
+            'local' => $local,
+            'server' => $server,
+            'base' => $base,
+            'states' => $states,
+            'newest' => $local && $server ? $this->merger->newerWins($local, $server) : ($local ? 'local' : 'server'),
+        ];
+    }
+
+    /**
      * Selesaikan konflik satu baris secara manual: salin versi yang dipilih ke sisi lain.
      *
      * @param  string  $keep  'local' | 'server' | 'newest'

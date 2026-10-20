@@ -95,4 +95,20 @@ class DbSyncRowMergerTest extends TestCase
 
         $this->assertSame(['qty'], $this->merger()->conflicts($local, $server, null));
     }
+
+    public function test_column_states_explain_each_difference()
+    {
+        $base = ['id' => 1, 'name' => 'A', 'harga' => 100, 'qty' => 10, 'note' => 'x', 'updated_at' => 'a'];
+        $local = ['name' => 'L', 'qty' => 8, 'note' => 'y', 'updated_at' => 'b'] + $base;
+        $server = ['name' => 'S', 'harga' => 120, 'qty' => 15, 'updated_at' => 'c'] + $base;
+
+        $this->assertEquals([
+            'name' => 'conflict',
+            'harga' => 'server',
+            'qty' => 'merged',
+            'note' => 'local',
+            'updated_at' => 'merged',
+            'id' => 'same',
+        ], $this->merger()->columnStates($local, $server, $base));
+    }
 }

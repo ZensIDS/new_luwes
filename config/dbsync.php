@@ -92,6 +92,64 @@ return [
         'ratio' => 0.25,
     ],
 
+    /*
+    | Modul untuk sinkron sebagian dari dashboard / php artisan dbsync:run --group=...
+    | Tabel yang direferensikan lewat foreign key (mis. products -> categories, outlets)
+    | otomatis ikut disinkron, jadi data yang saling terkait tidak tertinggal.
+    | Tiap modul juga memuat tabel stok/kas yang ikut berubah oleh transaksinya.
+    | Tabel yang tidak masuk modul mana pun muncul sebagai modul "Lainnya".
+    */
+    'groups' => [
+        'master' => [
+            'label' => 'Master Data (User, Outlet, Kategori, Supplier)',
+            'tables' => ['users', 'outlets', 'categories', 'suppliers', 'banks', 'payment_methods', 'salesmans', 'sliders'],
+        ],
+        'produk_stok' => [
+            'label' => 'Produk & Stok',
+            'tables' => [
+                'products', 'product_supplier', 'product_minimum_adjustments', 'outlet_prices', 'stocks', 'owner_stocks',
+                'stock_movements', 'stock_adjustments', 'product_imports', 'product_import_failures', 'reviews',
+            ],
+        ],
+        'pembelian' => [
+            'label' => 'Pembelian & Retur Supplier',
+            'tables' => [
+                'pembelians', 'pembelian_products', 'pembelian_transactions', 'stock_pembelians', 'refund_pembelians',
+                'refund_pembelian_items', 'outlet_purchases', 'outlet_purchase_items', 'stocks', 'owner_stocks', 'stock_movements', 'kas',
+            ],
+        ],
+        'distribusi' => [
+            'label' => 'Request Order, Picking & Delivery',
+            'tables' => [
+                'request_orders', 'request_order_items', 'request_order_notes', 'picking_lists', 'picking_list_items',
+                'delivery_orders', 'delivery_order_items', 'stocks', 'owner_stocks', 'stock_movements',
+            ],
+        ],
+        'penjualan' => [
+            'label' => 'Penjualan & Kasir',
+            'tables' => [
+                'penjualans', 'penjualan_items', 'invoice_sequences', 'cashier_sessions', 'cashier_shifts', 'cashier_drawer_entries',
+                'refund_penjualans', 'refund_penjualan_items', 'refunds', 'refund_items', 'transactions', 'user_cart', 'user_wishlist',
+                'promotion_applications', 'voucher_redemptions', 'owner_stocks', 'stocks', 'stock_movements', 'kas',
+            ],
+        ],
+        'promo' => [
+            'label' => 'Promo & Voucher',
+            'tables' => [
+                'promotions', 'promotion_products', 'promotion_bonuses', 'promotion_outlets', 'promotion_applications',
+                'vouchers', 'voucher_products', 'voucher_outlets', 'voucher_redemptions',
+            ],
+        ],
+        'keuangan' => [
+            'label' => 'Kas, Pengeluaran & Pendapatan Lain',
+            'tables' => ['kas', 'pengeluarans', 'other_income_categories', 'other_incomes'],
+        ],
+        'log' => [
+            'label' => 'Log Aktivitas',
+            'tables' => ['activity_log'],
+        ],
+    ],
+
     // Riwayat sinkron disimpan sekian hari.
     'keep_runs_days' => 14,
 

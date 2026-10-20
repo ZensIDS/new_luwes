@@ -69,32 +69,50 @@ class RowMerger
      */
     public function conflicts(array $local, array $server, ?array $base): array
     {
-        $conflicts = [];
+        return array_keys(array_filter(
+            $this->columnStates($local, $server, $base),
+            fn ($state) => $state === 'conflict'
+        ));
+    }
+
+    /**
+     * Status tiap kolom dibanding nilai saat sinkron terakhir:
+     * same | local (hanya lokal berubah) | server (hanya hosting berubah)
+     * | merged (dua sisi berubah, digabung otomatis) | conflict.
+     *
+     * @return array<string, string>
+     */
+    public function columnStates(array $local, array $server, ?array $base): array
+    {
+        $states = [];
 
         foreach (array_keys($local + $server) as $column) {
             $l = $local[$column] ?? null;
             $s = $server[$column] ?? null;
 
-            if (self::same($l, $s) || $column === 'updated_at') {
-                continue;
-            }
-
-            if ($base === null) {
-                $conflicts[] = $column;
+            if (self::same($l, $s)) {
+                $states[$column] = 'same';
 
                 continue;
             }
 
             $b = $base[$column] ?? null;
-            $mergeable = in_array($column, $this->max, true)
-                || (in_array($column, $this->additive, true) && self::numeric($l, $s, $b));
+            $localChanged = $base === null || ! self::same($l, $b);
+            $serverChanged = $base === null || ! self::same($s, $b);
+            $mergeable = $column === 'updated_at' || ($base !== null && (
+                in_array($column, $this->max, true)
+                || (in_array($column, $this->additive, true) && self::numeric($l, $s, $b))
+            ));
 
-            if (! self::same($l, $b) && ! self::same($s, $b) && ! $mergeable) {
-                $conflicts[] = $column;
-            }
+            $states[$column] = match (true) {
+                $localChanged && ! $serverChanged => 'local',
+                $serverChanged && ! $localChanged => 'server',
+                $mergeable => 'merged',
+                default => 'conflict',
+            };
         }
 
-        return $conflicts;
+        return $states;
     }
 
     /** 'local' atau 'server': baris dengan updated_at terbaru. */

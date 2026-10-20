@@ -8,7 +8,8 @@ use Illuminate\Console\Command;
 class DbSyncRun extends Command
 {
     protected $signature = 'dbsync:run
-        {--table=* : Hanya sinkron tabel tertentu}
+        {--group=* : Hanya sinkron modul tertentu (master, produk_stok, pembelian, distribusi, penjualan, promo, keuangan, log, lainnya)}
+        {--table=* : Hanya sinkron tabel tertentu (tabel induk foreign key otomatis ikut)}
         {--force : Izinkan penghapusan massal yang ditahan pengaman}
         {--dry-run : Hanya tampilkan rencana perubahan, tanpa menulis apa pun}';
 
@@ -18,8 +19,13 @@ class DbSyncRun extends Command
     {
         $verbose = $this->output->isVerbose() || $this->option('dry-run');
 
-        $result = $sync->run(
+        $tables = array_merge(
             $this->option('table'),
+            $this->option('group') ? $sync->tablesForGroups($this->option('group')) : []
+        );
+
+        $result = $sync->run(
+            $tables,
             (bool) $this->option('force'),
             (bool) $this->option('dry-run'),
             function (string $table, array $stats) use ($verbose) {
