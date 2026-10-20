@@ -14,13 +14,7 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule)
     {
-        // Hanya di PC server lokal (DB_SYNC_ENABLED=true): sinkron dua arah dengan database hosting.
-        if (config('dbsync.enabled')) {
-            $schedule->command('dbsync:run')
-                ->cron('*/'.max(1, (int) config('dbsync.interval', 2)).' * * * *')
-                ->withoutOverlapping(30)
-                ->runInBackground();
-        }
+        // Tidak ada jadwal. Fitur import produk (queue:work --queue=imports) sudah dihapus.
     }
 
     /**

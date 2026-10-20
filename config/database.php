@@ -60,38 +60,6 @@ return [
             'engine' => null,
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
-                // Sinkron offline <-> hosting: lokal offset 1, hosting offset 2 (lihat config/dbsync.php),
-                // sehingga id baru dari dua database tidak pernah sama.
-                PDO::MYSQL_ATTR_INIT_COMMAND => env('DB_AUTO_INCREMENT_INCREMENT')
-                    ? sprintf(
-                        'SET SESSION auto_increment_increment=%d, auto_increment_offset=%d',
-                        (int) env('DB_AUTO_INCREMENT_INCREMENT'),
-                        (int) env('DB_AUTO_INCREMENT_OFFSET', 1)
-                    )
-                    : null,
-            ]) : [],
-        ],
-
-        // Database hosting, dipakai PC server lokal untuk sinkronisasi (php artisan dbsync:run).
-        'server' => [
-            'driver' => env('DB_SERVER_CONNECTION', 'mysql'),
-            'host' => env('DB_SERVER_HOST'),
-            'port' => env('DB_SERVER_PORT', '3306'),
-            'database' => env('DB_SERVER_DATABASE'),
-            'username' => env('DB_SERVER_USERNAME'),
-            'password' => env('DB_SERVER_PASSWORD', ''),
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_unicode_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => false,
-            'engine' => null,
-            'options' => extension_loaded('pdo_mysql') ? array_filter([
-                PDO::MYSQL_ATTR_SSL_CA => env('DB_SERVER_SSL_CA'),
-                PDO::ATTR_TIMEOUT => (int) env('DB_SERVER_TIMEOUT', 5),
-                // affected rows = baris yang cocok (dipakai update bersyarat saat sinkron).
-                PDO::MYSQL_ATTR_FOUND_ROWS => true,
-                PDO::MYSQL_ATTR_INIT_COMMAND => 'SET SESSION foreign_key_checks=0',
             ]) : [],
         ],
 
