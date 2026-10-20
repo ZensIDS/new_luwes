@@ -9,6 +9,7 @@ use App\Models\OwnerStock;
 use App\Models\PickingList;
 use App\Models\StockMovement;
 use App\Services\OutletStockService;
+use App\Support\SearchHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -58,11 +59,30 @@ class DeliveryOrderController extends Controller
 
         $recordsTotal = (clone $base)->count('delivery_orders.id');
 
+        // SEARCH luas (LIKE %kata%): kode DO, nama outlet, kode request order, serta nama,
+        // kode/barcode (boleh sebagian), dan SKU produk yang ada di item DO.
+        // Tiap kata harus ketemu (AND), boleh di kolom berbeda. Item dicari lewat subquery IN
+        // supaya satu DO dengan banyak item tidak menggandakan baris.
         if ($searchValue !== '') {
-            $base->where(function ($q) use ($searchValue) {
-                $q->where('delivery_orders.code', 'like', "%{$searchValue}%")
-                    ->orWhere('outlets.name', 'like', "%{$searchValue}%")
-                    ->orWhere('request_orders.code', 'like', "%{$searchValue}%");
+            SearchHelper::apply($base, $searchValue, function ($q, $like) {
+                $q->where('delivery_orders.code', 'like', $like)
+                    ->orWhere('outlets.name', 'like', $like)
+                    ->orWhere('request_orders.code', 'like', $like)
+                    ->orWhereIn('delivery_orders.id', function ($sub) use ($like) {
+                        $sub->select('doi.delivery_order_id')
+                            ->from('delivery_order_items as doi')
+                            ->leftJoin('products as p', 'p.id', '=', 'doi.product_id')
+                            ->whereNotNull('doi.delivery_order_id')
+                            ->where(function ($qp) use ($like) {
+                                $qp->where(function ($qq) use ($like) {
+                                    $qq->whereNull('p.deleted_at')
+                                        ->where(function ($qn) use ($like) {
+                                            $qn->where('p.name', 'like', $like)
+                                                ->orWhere('p.code', 'like', $like);
+                                        });
+                                })->orWhere('doi.sku', 'like', $like);
+                            });
+                    });
             });
         }
 

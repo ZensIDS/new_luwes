@@ -14,6 +14,7 @@ use App\Models\Stock;
 use App\Models\StockMovement;
 use App\Models\StockPembelian;
 use App\Models\Supplier;
+use App\Support\SearchHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use PDF;
@@ -98,6 +99,26 @@ class PembelianController extends Controller
         return view('pembelians.index');
     }
 
+    /**
+     * Tambahkan kondisi OR: PO ini punya item produk yang nama atau kode/barcode-nya cocok.
+     * Dipakai bersama oleh pencarian /pembelian dan /penerimaan.
+     * $like sudah berbentuk pola LIKE (%kata%) dari SearchHelper.
+     */
+    private function orWhereProductInPembelian($q, string $like): void
+    {
+        $q->orWhereIn('pembelians.id', function ($sub) use ($like) {
+            $sub->select('pp.pembelian_id')
+                ->from('pembelian_products as pp')
+                ->join('products as p', 'p.id', '=', 'pp.product_id')
+                ->whereNull('pp.deleted_at')
+                ->whereNull('p.deleted_at')
+                ->where(function ($qp) use ($like) {
+                    $qp->where('p.name', 'like', $like)
+                        ->orWhere('p.code', 'like', $like);
+                });
+        });
+    }
+
     public function getIndexData(Request $request)
     {
         $draw        = (int) $request->input('draw');
@@ -124,28 +145,16 @@ class PembelianController extends Controller
 
         $recordsTotal = (clone $base)->count('pembelians.id');
 
-        // SEARCH berbasis AWALAN (LIKE 'kata%'), seperti halaman Outlet Purchases:
-        // "jet sw" / "jet sweet" menemukan "JET SWEET", tetapi "sweet" tidak.
-        // Berlaku untuk kode PO, nama supplier, serta nama/kode produk di dalam PO.
-        // Produk dicari lewat subquery IN (bukan JOIN/whereHas) supaya satu PO dengan
-        // banyak produk tidak menggandakan baris dan index bisa dipakai.
+        // SEARCH luas (LIKE %kata%): "kacang hijau" menemukan produk "ABC KACANG HIJAU".
+        // Dicari di kode PO, nama supplier, serta nama dan kode/barcode produk di dalam PO
+        // (barcode boleh sebagian: "4567" menemukan "12345678"). Tiap kata harus ketemu (AND),
+        // boleh di kolom berbeda. Produk dicari lewat subquery IN (bukan JOIN/whereHas)
+        // supaya satu PO dengan banyak produk tidak menggandakan baris.
         if ($searchValue !== '') {
-            $prefix = addcslashes($searchValue, '\\%_') . '%';
-
-            $base->where(function ($q) use ($prefix) {
-                $q->where('pembelians.code', 'like', $prefix)
-                    ->orWhere('suppliers.name', 'like', $prefix)
-                    ->orWhereIn('pembelians.id', function ($sub) use ($prefix) {
-                        $sub->select('pp.pembelian_id')
-                            ->from('pembelian_products as pp')
-                            ->join('products as p', 'p.id', '=', 'pp.product_id')
-                            ->whereNull('pp.deleted_at')
-                            ->whereNull('p.deleted_at')
-                            ->where(function ($qp) use ($prefix) {
-                                $qp->where('p.name', 'like', $prefix)
-                                    ->orWhere('p.code', 'like', $prefix);
-                            });
-                    });
+            SearchHelper::apply($base, $searchValue, function ($q, $like) {
+                $q->where('pembelians.code', 'like', $like)
+                    ->orWhere('suppliers.name', 'like', $like);
+                $this->orWhereProductInPembelian($q, $like);
             });
         }
 
@@ -633,29 +642,17 @@ class PembelianController extends Controller
 
         $recordsTotal = (clone $base)->count('pembelians.id');
 
-        // SEARCH berbasis AWALAN (LIKE 'kata%'), seperti halaman Outlet Purchases:
-        // "jet sw" / "jet sweet" menemukan "JET SWEET", tetapi "sweet" tidak.
-        // Berlaku untuk kode PO, kode GR, nama supplier, PIC penerima, serta nama/kode produk.
-        // Produk dicari lewat subquery IN supaya tidak menggandakan baris.
+        // SEARCH luas (LIKE %kata%): "kacang hijau" menemukan produk "ABC KACANG HIJAU".
+        // Dicari di kode PO, kode GR (penerimaan), nama supplier, PIC penerima, serta nama dan
+        // kode/barcode produk (barcode boleh sebagian). Tiap kata harus ketemu (AND), boleh di
+        // kolom berbeda. Produk dicari lewat subquery IN supaya tidak menggandakan baris.
         if ($searchValue !== '') {
-            $prefix = addcslashes($searchValue, '\\%_') . '%';
-
-            $base->where(function ($q) use ($prefix) {
-                $q->where('pembelians.code', 'like', $prefix)
-                    ->orWhere('pembelians.code_gr', 'like', $prefix)
-                    ->orWhere('suppliers.name', 'like', $prefix)
-                    ->orWhere('pembelians.receipt_pic', 'like', $prefix)
-                    ->orWhereIn('pembelians.id', function ($sub) use ($prefix) {
-                        $sub->select('pp.pembelian_id')
-                            ->from('pembelian_products as pp')
-                            ->join('products as p', 'p.id', '=', 'pp.product_id')
-                            ->whereNull('pp.deleted_at')
-                            ->whereNull('p.deleted_at')
-                            ->where(function ($qp) use ($prefix) {
-                                $qp->where('p.name', 'like', $prefix)
-                                    ->orWhere('p.code', 'like', $prefix);
-                            });
-                    });
+            SearchHelper::apply($base, $searchValue, function ($q, $like) {
+                $q->where('pembelians.code', 'like', $like)
+                    ->orWhere('pembelians.code_gr', 'like', $like)
+                    ->orWhere('suppliers.name', 'like', $like)
+                    ->orWhere('pembelians.receipt_pic', 'like', $like);
+                $this->orWhereProductInPembelian($q, $like);
             });
         }
 

@@ -10,6 +10,7 @@ use App\Models\RefundPembelianItem;
 use App\Models\Stock;
 use App\Models\StockAdjustment;
 use App\Models\StockMovement;
+use App\Support\SearchHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -114,17 +115,15 @@ class StockController extends Controller
         }
 
         // ==== SEARCH ====
-        // Nama produk dicari dari AWAL nama ("jet" menemukan "JET SWEET", "sweet" tidak; "jet sweet"
-        // lengkap tetap ketemu). Kode produk, SKU, dan serial number tetap dicari di mana saja
-        // supaya scan / ketik sebagian kode tetap jalan.
+        // Pencarian luas (LIKE %kata%): "kacang hijau" menemukan "ABC KACANG HIJAU".
+        // Dicari di nama produk, kode produk (= barcode, boleh sebagian: "4567" menemukan "12345678"),
+        // SKU, dan serial number. Tiap kata harus ketemu (AND), boleh di kolom berbeda.
         if ($searchValue !== '') {
-            $like = addcslashes($searchValue, '\\%_');
-
-            $base->where(function ($q) use ($like) {
-                $q->where('products.name', 'like', "{$like}%")
-                    ->orWhere('products.code', 'like', "%{$like}%")
-                    ->orWhere('s.sku', 'like', "%{$like}%")
-                    ->orWhere('s.serial_number', 'like', "%{$like}%");
+            SearchHelper::apply($base, $searchValue, function ($q, $like) {
+                $q->where('products.name', 'like', $like)
+                    ->orWhere('products.code', 'like', $like)
+                    ->orWhere('s.sku', 'like', $like)
+                    ->orWhere('s.serial_number', 'like', $like);
             });
         }
 
@@ -282,11 +281,8 @@ class StockController extends Controller
         $query = Product::query()->whereHas('stocks');
 
         if ($search !== '') {
-            $query->where(function ($q) use ($search) {
-                // Nama dicari dari awal nama, bukan dari tengah kata
-                $q->where('name', 'like', addcslashes($search, '\\%_') . '%')
-                    ->orWhere('code', 'like', addcslashes($search, '\\%_') . '%');
-            });
+            // Pencarian luas: nama atau kode/barcode produk, boleh sebagian dan di bagian mana saja.
+            SearchHelper::applyColumns($query, $search, ['name', 'code']);
         }
 
         $total = (clone $query)->count();
