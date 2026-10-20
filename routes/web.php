@@ -10,6 +10,7 @@ use App\Http\Controllers\CashierSessionController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DbSyncStatusController;
 use App\Http\Controllers\DeficitStockController;
 use App\Http\Controllers\ExpiredStockController;
 use App\Http\Controllers\KasController;
@@ -59,6 +60,13 @@ Route::middleware('auth')->group(function () {
 
 Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->group(function () {
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    Route::get('/db-sync/status', DbSyncStatusController::class)
+        ->middleware('role:admin-gudang|owner|superadmin')
+        ->name('db-sync.status');
+    Route::middleware('role:owner|superadmin')->group(function () {
+        Route::post('/db-sync/run', [DbSyncStatusController::class, 'run'])->name('db-sync.run');
+        Route::post('/db-sync/resolve', [DbSyncStatusController::class, 'resolve'])->name('db-sync.resolve');
+    });
     Route::get('/setting', [DashboardController::class, 'setting'])->name('setting');
     Route::post('/setting-store', [DashboardController::class, 'store'])->name('setting.store');
     Route::get('/get-customer/{penjualan_id}', [CustomerController::class, 'getCustomer']);

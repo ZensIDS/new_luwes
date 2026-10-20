@@ -1,0 +1,98 @@
+<?php
+
+/*
+|--------------------------------------------------------------------------
+| Sinkronisasi Database Offline <-> Hosting
+|--------------------------------------------------------------------------
+|
+| Sinkronisasi dua arah dijalankan HANYA dari PC server lokal (offline),
+| karena hosting tidak bisa menjangkau PC di jaringan lokal, sedangkan PC
+| lokal bisa menjangkau MySQL hosting (Remote MySQL).
+|
+| Server lokal : DB_SYNC_ENABLED=true + DB_SERVER_* diisi kredensial MySQL hosting.
+| Hosting      : DB_SYNC_ENABLED=false, DB_SERVER_* dikosongkan.
+|
+| Kedua sisi WAJIB memakai DB_AUTO_INCREMENT_INCREMENT=2 dengan
+| DB_AUTO_INCREMENT_OFFSET berbeda (lokal=1, hosting=2) supaya id baris
+| baru yang dibuat di dua tempat tidak pernah bentrok.
+|
+*/
+
+return [
+
+    'enabled' => (bool) env('DB_SYNC_ENABLED', false),
+
+    // Nama koneksi (config/database.php) untuk database hosting.
+    'server_connection' => 'server',
+
+    // Koneksi aplikasi lokal yang disinkronkan.
+    'local_connection' => env('DB_CONNECTION', 'mysql'),
+
+    // Jalan setiap N menit lewat scheduler (php artisan schedule:run di cron).
+    'interval' => (int) env('DB_SYNC_INTERVAL', 2),
+
+    // Ukuran blok id yang dibandingkan per checksum, dan ukuran batch insert.
+    'chunk_size' => 1000,
+    'batch_size' => 200,
+
+    // Tabel yang tidak ikut disinkronkan (data teknis / per-mesin).
+    'exclude_tables' => array_merge([
+        'migrations',
+        'jobs',
+        'failed_jobs',
+        'job_batches',
+        'password_resets',
+        'personal_access_tokens',
+        'sessions',
+        'cache',
+        'cache_locks',
+        'cart_storage',
+        'db_sync_runs',
+        'db_sync_rows',
+    ], array_filter(explode(',', (string) env('DB_SYNC_EXCLUDE_TABLES', '')))),
+
+    /*
+    | Kolom penghitung: bila kolom ini berubah di DUA sisi sejak sinkron
+    | terakhir, perubahannya dijumlahkan (lokal + hosting - nilai lama),
+    | misal stok terjual di kasir offline dan stok masuk dari hosting.
+    */
+    'additive_columns' => [
+        'stocks' => ['qty', 'qty_reserved'],
+        'owner_stocks' => ['qty'],
+        'kas' => ['nominal'],
+        'promotions' => ['used_qty'],
+        'products' => ['update_count'],
+    ],
+
+    // Kolom yang diambil nilai terbesarnya bila berubah di dua sisi.
+    'max_columns' => [
+        'invoice_sequences' => ['last_number'],
+    ],
+
+    /*
+    | Kolom lain yang diubah di DUA sisi ke nilai berbeda = KONFLIK.
+    |  'skip'   : baris tidak disinkron (lokal & hosting tetap dengan datanya masing-masing),
+    |             muncul peringatan di dashboard, diselesaikan dengan
+    |             php artisan dbsync:resolve {tabel} {id} --keep=local|server|newest
+    |  'newest' : otomatis menang baris dengan updated_at terbaru.
+    */
+    'conflict' => env('DB_SYNC_CONFLICT', 'skip'),
+
+    // Pada mode 'newest', bila updated_at sama persis, menang sisi ini ('local' atau 'server').
+    'prefer' => env('DB_SYNC_PREFER', 'local'),
+
+    /*
+    | Pengaman: bila satu kali sinkron akan menghapus lebih dari
+    | max(min_rows, ratio x jumlah baris) di sebuah tabel (misal salah satu
+    | database tidak sengaja dikosongkan), penghapusan ditahan sampai
+    | dijalankan manual dengan: php artisan dbsync:run --force
+    */
+    'delete_guard' => [
+        'min_rows' => 20,
+        'ratio' => 0.25,
+    ],
+
+    // Riwayat sinkron disimpan sekian hari.
+    'keep_runs_days' => 14,
+
+];
