@@ -31,6 +31,8 @@ class DbSyncStatus
             ! $isLocalNode && ! $lastRun && ! $configured => ['unconfigured', 'Belum ada server lokal yang tersinkron ke database ini.'],
             $isLocalNode && ! $configured => ['error', 'DB_SERVER_* belum diisi di .env server lokal.'],
             $lastRun && $lastRun['status'] === 'failed' => ['error', 'Sinkron terakhir gagal.'],
+            $isLocalNode && ! $lastRun => ['warning', 'Belum pernah sinkron. Sinkron pertama berjalan otomatis dalam '
+                .config('dbsync.interval', 2).' menit (atau jalankan sekarang: make sync).'],
             $stale => ['warning', $isLocalNode
                 ? "Belum ada sinkron berhasil dalam {$staleAfter} menit terakhir. Pastikan cron scheduler berjalan."
                 : "Server lokal belum sinkron dalam {$staleAfter} menit terakhir (PC server mati / internet putus?)."],

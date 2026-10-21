@@ -5,31 +5,31 @@ APP := $(COMPOSE) exec app
 ARTISAN := $(COMPOSE) exec -u www-data app php artisan
 
 .DEFAULT_GOAL := help
-.PHONY: help init up down restart build update ps logs logs-sync shell artisan migrate \
+.PHONY: help init hosting up down restart build update ps logs logs-sync shell artisan migrate \
         schedule status sync sync-dry pma pma-down backup restore mysql ip
 
 help: ## Tampilkan daftar perintah
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36mmake %-11s\033[0m %s\n", $$1, $$2}'
 
 init: ## Buat .env dari .env.docker.example (APP_KEY & password DB lokal dibuat otomatis)
-	@if [ -d .env ]; then echo "ERROR: .env adalah folder (dibuat Docker). Hapus dengan: rm -rf .env"; exit 1; fi
-	@if [ -f .env ]; then \
-		echo ".env sudah ada, tidak diubah."; \
-	else \
-		cp .env.docker.example .env; \
-		sed -i "s|^APP_KEY=.*|APP_KEY=base64:$$(openssl rand -base64 32)|" .env; \
-		sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=$$(openssl rand -hex 16)|" .env; \
-		sed -i "s|^DB_ROOT_PASSWORD=.*|DB_ROOT_PASSWORD=$$(openssl rand -hex 16)|" .env; \
-		IP=$$(hostname -I 2>/dev/null | awk '{print $$1}'); \
-		if [ -n "$$IP" ]; then sed -i "s|^APP_URL=.*|APP_URL=http://$$IP|" .env; fi; \
-		echo ".env dibuat. APP_URL=http://$$IP"; \
-	fi
-	@grep -q '^DB_SERVER_HOST=.\+' .env || echo -e "\033[33mPERHATIAN: DB_SERVER_* di .env belum diisi -> sinkron ke hosting belum jalan. Isi lalu jalankan: make restart\033[0m"
+	@bash docker/init-env.sh
+
+hosting: ## Isi / ganti kredensial database hosting (DB_SERVER_*) lalu restart
+	@bash docker/init-env.sh --hosting
+	@if [ -n "$$($(COMPOSE) ps -q app 2>/dev/null)" ]; then $(MAKE) --no-print-directory restart; fi
 
 up: init ## Build & jalankan semua service (web, scheduler, mysql)
 	$(COMPOSE) up -d --build
 	@echo ""
-	@echo "Aplikasi: $$(grep '^APP_URL=' .env | cut -d= -f2-)   (cek status: make ps)"
+	@echo "Menunggu aplikasi siap (migrasi database)..."
+	@for i in $$(seq 1 60); do \
+		[ "$$($(COMPOSE) ps --format '{{.Health}}' app 2>/dev/null)" = "healthy" ] && break; sleep 3; \
+	done
+	@$(COMPOSE) ps
+	@echo ""
+	@$(ARTISAN) dbsync:status || true
+	@echo ""
+	@echo "Aplikasi: $$(grep '^APP_URL=' .env | cut -d= -f2-)   (dibuka dari PC client)"
 
 down: ## Hentikan semua service (data tetap aman di volume)
 	$(COMPOSE) --profile tools down

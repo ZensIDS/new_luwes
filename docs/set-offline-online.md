@@ -1,17 +1,36 @@
-# Panduan Instalasi Offline (PC Server Lokal dengan Docker) + Sinkronisasi ke Hosting
+# Panduan Instalasi Offline (PC Server Lokal Debian + Docker) + Sinkronisasi ke Hosting
 
-Panduan ini menjelaskan cara memasang aplikasi Luwes di **1 PC server lokal (CentOS) memakai Docker**, yang
+Panduan ini menjelaskan cara memasang aplikasi Luwes di **1 PC server lokal (Debian) memakai Docker**, yang
 dipakai oleh **3 PC client** di jaringan toko/gudang, lalu menyinkronkan databasenya **otomatis dua arah**
 dengan aplikasi online di hosting: <https://newluwes.decaasoftwares.com/>.
 
-Ringkasnya, di PC server cukup:
+**Urutan pengerjaan:**
+
+| Langkah | Dikerjakan di | Isi |
+|---|---|---|
+| 3 | PC server | Pengaturan dasar Debian (sudo, jam, IP statis) |
+| 4 | Panel & SSH hosting | Izinkan Remote MySQL, atur `.env` hosting, migrasi |
+| 5 | PC server | Instal Docker, `git clone`, `make up` (menanyakan kredensial hosting), sinkron pertama |
+| 6 | 3 PC client | Buka `http://IP-PC-SERVER` di browser |
+
+### Yang dipasang di PC server hanya Docker
+
+PHP, Apache, MySQL, Composer, dan Node.js **tidak** dipasang di Debian; semuanya sudah ada di dalam container Docker.
+
+| Dipasang di Debian (host) | Ada di dalam Docker (otomatis) |
+|---|---|
+| Docker Engine + Docker Compose | PHP 8.2 + ekstensi (pdo_mysql, gd, zip, intl, bcmath, opcache) |
+| `git` (ambil kode dari GitHub) | Apache (web server) |
+| `make` (perintah singkat `make up`, dll.) | MySQL 8 (database lokal) |
+| | Composer & Node.js (hanya saat build image) |
+| | Scheduler Laravel (sinkron otomatis), phpMyAdmin (opsional) |
+
+Ringkasnya, setelah Docker, git, dan make terpasang:
 
 ```bash
 git clone https://github.com/ZensIDS/new_luwes.git luwes
 cd luwes
-make up          # pertama kali: buat .env, build, jalankan semua service
-nano .env        # isi DB_SERVER_* (kredensial database hosting)
-make restart
+make up          # buat .env + tanya kredensial DB hosting + build + jalankan semua service
 ```
 
 ---
@@ -21,7 +40,7 @@ make restart
 ```
             INTERNET                                   JARINGAN LOKAL (LAN / WiFi toko)
  ┌──────────────────────────────┐                ┌───────────────────────────────────────────┐
- │ Hosting (Hostinger)          │                │  PC SERVER LOKAL (CentOS + Docker)        │
+ │ Hosting (Hostinger)          │                │  PC SERVER LOKAL (Debian + Docker)        │
  │ newluwes.decaasoftwares.com  │◄── sinkron ────│   ├─ app       : web Laravel (Apache+PHP) │
  │ MySQL hosting (Remote MySQL) │   tiap 2 menit │   ├─ scheduler : sinkron DB otomatis      │
  └──────────────────────────────┘   (dua arah)   │   └─ mysql     : database lokal           │
@@ -66,7 +85,8 @@ Tabel yang tidak disinkron (data teknis per-mesin): `migrations`, `jobs`, `faile
 ## 2. Kebutuhan
 
 **PC Server lokal**
-* CentOS Stream 9 (atau Rocky Linux 9 / AlmaLinux 9, perintahnya sama). CentOS 7 sudah tidak didukung, jangan dipakai.
+* **Debian 12 (bookworm)** atau **Debian 13 (trixie)**, 64-bit, instalasi baru. Instalasi tanpa desktop
+  (*SSH server* + *standard system utilities*) sudah cukup. **Tidak perlu** memasang PHP, MySQL, atau Apache.
 * RAM minimal 4 GB, SSD minimal 120 GB.
 * Terhubung ke router/switch toko dengan **kabel LAN** (lebih stabil daripada WiFi).
 * Internet (untuk sinkron ke hosting & download image Docker saat instalasi).
@@ -77,138 +97,124 @@ Tabel yang tidak disinkron (data teknis per-mesin): `migrations`, `jobs`, `faile
 * Satu jaringan dengan PC server (router/switch yang sama).
 
 **Hosting**
-* Akses hPanel Hostinger (menu **Databases**), dan akses SSH / Terminal untuk menjalankan `php artisan`.
+* Akses panel Niagahoster/Hostinger (hPanel) dengan username panel (mis. `u1342798`).
+* Akses SSH / Terminal hosting untuk menjalankan `php artisan`.
 
 ---
 
-## 3. Pengaturan Dasar CentOS
+## 3. Pengaturan Dasar Debian (PC Server)
 
-Instal CentOS Stream 9 (pilihan *Server* atau *Minimal Install*), lalu login sebagai user dengan `sudo`.
+### 3.1 Pasang `sudo`
+
+Pada instalasi Debian yang mengisi password **root**, user biasa belum bisa memakai `sudo`. Login sebagai user
+biasa (contoh `luwes`), lalu:
 
 ```bash
-# Update sistem & paket yang dibutuhkan
-sudo dnf -y update
-sudo dnf -y install git make openssl curl nano
+su -                          # masuk sebagai root (password root)
+apt update && apt install -y sudo
+usermod -aG sudo luwes        # ganti "luwes" dengan nama user Anda
+exit
+```
+
+Logout lalu login lagi, cek dengan `sudo whoami` (hasilnya `root`).
+
+### 3.2 Paket dasar & jam
+
+```bash
+sudo apt update && sudo apt -y full-upgrade
+sudo apt install -y git make curl ca-certificates nano   # hanya ini; PHP/MySQL/Apache ada di Docker
 
 # Zona waktu & sinkron jam (PENTING: jam yang salah membuat aturan "data terbaru" keliru)
 sudo timedatectl set-timezone Asia/Jakarta
-sudo dnf -y install chrony
-sudo systemctl enable --now chronyd
+sudo timedatectl set-ntp true
 timedatectl            # pastikan "System clock synchronized: yes"
 ```
 
-### 3.1 Beri IP statis untuk PC server
+> Jika `set-ntp` gagal (*NTP not supported*), pasang dulu: `sudo apt install -y systemd-timesyncd`.
 
-PC client akan selalu membuka IP ini, jadi IP-nya **tidak boleh berubah**.
+### 3.3 Beri IP statis untuk PC server
+
+PC client akan selalu membuka IP ini, jadi IP-nya **tidak boleh berubah**. Cara paling mudah: atur
+**DHCP reservation** di router untuk MAC address PC server (lihat MAC dengan `ip link`). Bila tidak bisa,
+atur di Debian:
 
 ```bash
-# Lihat nama koneksi & IP sekarang
-nmcli connection show
-ip -4 addr
+ip -4 addr          # lihat nama kartu jaringan (mis. enp3s0) & IP sekarang
+ip route            # lihat gateway/router (mis. "default via 192.168.1.1")
 ```
 
-Contoh: nama koneksi `enp3s0`, router `192.168.1.1`, IP server yang dipilih `192.168.1.10`
-(pilih IP di luar rentang DHCP router agar tidak dipakai perangkat lain):
+Contoh: kartu `enp3s0`, router `192.168.1.1`, IP server yang dipilih `192.168.1.10`
+(pilih IP di luar rentang DHCP router agar tidak dipakai perangkat lain).
+
+**Debian tanpa desktop** (memakai `/etc/network/interfaces`):
 
 ```bash
-sudo nmcli connection modify enp3s0 \
-  ipv4.method manual \
-  ipv4.addresses 192.168.1.10/24 \
-  ipv4.gateway 192.168.1.1 \
-  ipv4.dns "8.8.8.8 1.1.1.1"
-sudo nmcli connection up enp3s0
+sudo nano /etc/network/interfaces
+```
 
-# Cek
+Ganti blok `enp3s0` yang berisi `dhcp` menjadi:
+
+```
+auto enp3s0
+iface enp3s0 inet static
+    address 192.168.1.10/24
+    gateway 192.168.1.1
+    dns-nameservers 8.8.8.8 1.1.1.1
+```
+
+```bash
+sudo apt install -y resolvconf      # agar baris dns-nameservers dipakai
+sudo systemctl restart networking   # atau reboot
+```
+
+**Debian dengan desktop** (NetworkManager):
+
+```bash
+nmcli connection show               # lihat nama koneksi, mis. "Wired connection 1"
+sudo nmcli connection modify "Wired connection 1" ipv4.method manual \
+  ipv4.addresses 192.168.1.10/24 ipv4.gateway 192.168.1.1 ipv4.dns "8.8.8.8 1.1.1.1"
+sudo nmcli connection up "Wired connection 1"
+```
+
+Cek:
+
+```bash
 hostname -I            # harus muncul 192.168.1.10
 ping -c 3 google.com   # internet harus jalan
 ```
 
-> Alternatif: atur **DHCP reservation** di router untuk MAC address PC server ke `192.168.1.10`.
-
 ---
 
-## 4. Instalasi Docker & Aplikasi
+## 4. Siapkan Database Hosting (dikerjakan dulu, sebelum PC server)
 
-### 4.1 Instal Docker + Docker Compose
+PC server membutuhkan izin masuk ke MySQL hosting. Siapkan ini lebih dulu agar saat aplikasi dijalankan di
+langkah 5, sinkron langsung berhasil.
 
-```bash
-# CentOS membawa podman yang bentrok dengan Docker, hapus dulu (aman bila belum terpasang)
-sudo dnf -y remove podman buildah runc
+### 4.1 Izinkan Remote MySQL
 
-sudo dnf -y install dnf-plugins-core
-sudo dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-sudo dnf -y install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-sudo systemctl enable --now docker
+1. Login panel **Niagahoster/Hostinger (hPanel)** memakai username panel (mis. `u1342798`).
+2. Buka **Websites** → `newluwes.decaasoftwares.com` → **Databases** → **Remote MySQL**.
+3. Cek IP publik internet toko dari PC server:
+   ```bash
+   curl -s ifconfig.me
+   ```
+4. Di **Host**, isi IP tersebut. Jika IP publik toko **berubah-ubah** (umumnya IndiHome / ISP rumahan),
+   centang **Any Host** (`%`).
+5. Pilih database aplikasi (mis. `u1342798_luwes_kasir`), klik **Create**.
+6. Catat data untuk `.env` PC server (langkah 5.3):
 
-# Agar bisa menjalankan docker tanpa sudo (logout lalu login lagi setelah perintah ini)
-sudo usermod -aG docker $USER
-```
+| `.env` PC server | Ambil dari | Contoh |
+|---|---|---|
+| `DB_SERVER_HOST` | Halaman **Remote MySQL** / **Management** (hostname/IP MySQL) | `45.130.231.160` |
+| `DB_SERVER_DATABASE` | `DB_DATABASE` di `.env` hosting | `u1342798_luwes_kasir` |
+| `DB_SERVER_USERNAME` | `DB_USERNAME` di `.env` hosting (**bukan** username panel) | `u1342798_ricky` |
+| `DB_SERVER_PASSWORD` | `DB_PASSWORD` di `.env` hosting | – |
 
-Setelah login ulang, cek:
+> Bila password database tidak diketahui, reset di **Databases → Management**, lalu perbarui juga
+> `DB_PASSWORD` di `.env` hosting dengan password baru tersebut.
+> Karena database bisa diakses dari internet, gunakan **password yang kuat**.
 
-```bash
-docker version
-docker compose version     # harus v2.x
-```
-
-### 4.2 Ambil kode & jalankan
-
-```bash
-cd ~
-git clone https://github.com/ZensIDS/new_luwes.git luwes
-cd luwes
-git checkout main          # versi yang SAMA dengan yang ada di hosting
-
-make up
-```
-
-`make up` pertama kali akan:
-
-1. Membuat file `.env` dari `.env.docker.example`, dengan `APP_KEY`, password database lokal, dan `APP_URL`
-   (IP PC server) **dibuat otomatis**.
-2. Build image aplikasi (PHP 8.2 + Apache + asset Vite). Pertama kali ±5–10 menit, tergantung internet.
-3. Menjalankan `mysql`, `app` (otomatis `php artisan migrate`), dan `scheduler`.
-
-Cek semua container sudah jalan:
-
-```bash
-make ps
-#   luwes-app-1         Up ... (healthy)   0.0.0.0:80->80/tcp
-#   luwes-mysql-1       Up ... (healthy)
-#   luwes-scheduler-1   Up ...
-make schedule
-#   */2 * * * *  php artisan dbsync:run ....... Next Due: ...
-```
-
-> Tanpa `make`? Bisa juga: `cp .env.docker.example .env`, isi `APP_KEY` (`base64:` + `openssl rand -base64 32`),
-> `DB_PASSWORD`, `DB_ROOT_PASSWORD`, lalu `docker compose up -d --build`.
-> **Jangan** menjalankan `docker compose up` sebelum file `.env` ada (Docker akan membuat folder `.env` kosong).
-
-### 4.3 Firewall
-
-Docker membuka port 80 sendiri. Bila PC client tetap tidak bisa membuka aplikasi:
-
-```bash
-sudo firewall-cmd --permanent --add-service=http
-sudo firewall-cmd --reload
-```
-
----
-
-## 5. Menyiapkan Database Hosting untuk Sinkron
-
-### 5.1 Izinkan Remote MySQL di Hostinger
-
-1. Login **hPanel** → **Websites** → pilih `newluwes.decaasoftwares.com` → **Databases** → **Remote MySQL**.
-2. Di **Host**, isi IP publik internet toko (cek dari PC server: `curl -s ifconfig.me`).
-   Jika IP publik toko **berubah-ubah** (umumnya IndiHome/ISP rumahan), centang **Any Host** (`%`).
-3. Pilih database aplikasi (mis. `u1342798_luwes_kasir`), klik **Create**.
-4. Catat **hostname/IP server MySQL** yang ditampilkan di halaman **Remote MySQL** / **Management**
-   (contoh: `45.130.231.160` atau `srvXXX.hstgr.io`). Inilah nilai `DB_SERVER_HOST`.
-
-> Karena database bisa diakses dari internet, gunakan **password database yang kuat**.
-
-### 5.2 Atur `.env` di hosting
+### 4.2 Atur `.env` hosting & jalankan migrasi
 
 Tambahkan baris berikut ke `.env` aplikasi **di hosting**:
 
@@ -222,7 +228,7 @@ DB_SYNC_ENABLED=false
 DB_SERVER_HOST=
 ```
 
-Lalu, lewat SSH / Terminal hosting:
+Lalu, lewat SSH / Terminal hosting (pastikan kode hosting sudah versi terbaru):
 
 ```bash
 cd ~/domains/newluwes.decaasoftwares.com/public_html   # sesuaikan dengan folder aplikasi
@@ -235,30 +241,102 @@ php artisan optimize:clear
 
 ---
 
-## 6. Isi `.env` di PC Server
+## 5. Instal Docker & Jalankan Aplikasi (PC Server)
 
-File `.env` sudah dibuat oleh `make up`. Isi bagian **database hosting** (dari langkah 5.1):
+### 5.1 Instal Docker Engine + Docker Compose
+
+Pakai repository resmi Docker (paket `docker.io` bawaan Debian tidak membawa `docker compose` v2):
 
 ```bash
-nano .env
+# Hapus paket Docker lama/bawaan Debian bila ada (aman bila belum terpasang)
+for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do sudo apt remove -y $pkg; done
+
+# Tambahkan repository Docker
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Instal
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker
+
+# Agar bisa menjalankan docker tanpa sudo (logout lalu login lagi setelah perintah ini)
+sudo usermod -aG docker $USER
 ```
 
-```dotenv
-# --- Database HOSTING (tujuan sinkron) — WAJIB DIISI ---
-DB_SERVER_CONNECTION=mysql
-DB_SERVER_HOST=45.130.231.160
-DB_SERVER_PORT=3306
-DB_SERVER_DATABASE=u1342798_luwes_kasir
-DB_SERVER_USERNAME=u1342798_xxxxx
-DB_SERVER_PASSWORD='password_database_hosting'
+Setelah login ulang, cek:
+
+```bash
+docker version
+docker compose version             # harus v2.x
+docker run --rm hello-world        # harus muncul "Hello from Docker!"
 ```
 
-> Password yang mengandung karakter `$`, `#`, atau spasi **wajib** diapit tanda kutip tunggal `'...'`.
+### 5.2 Ambil kode aplikasi
 
-Bagian lain sudah terisi otomatis dan **jangan diubah** kecuali perlu:
+```bash
+cd ~
+git clone https://github.com/ZensIDS/new_luwes.git luwes
+cd luwes
+git checkout main          # versi yang SAMA dengan yang ada di hosting
+```
+
+> Repo private: GitHub akan meminta username + **Personal Access Token** (bukan password akun).
+> Buat token di GitHub → *Settings → Developer settings → Personal access tokens*.
+
+### 5.3 Jalankan aplikasi
+
+```bash
+make up
+```
+
+Saat pertama kali, `make up` akan:
+
+1. Membuat `.env` dari `.env.docker.example` dan **otomatis** mengisi `APP_KEY`, password database lokal
+   (`DB_PASSWORD`, `DB_ROOT_PASSWORD`), dan `APP_URL` (IP PC server).
+2. **Menanyakan kredensial database hosting** (data dari langkah 4.1):
+   ```
+   Kredensial database HOSTING (panduan langkah 4.1). Tekan Enter tanpa isi untuk melewati.
+     DB_SERVER_HOST     (IP/hostname MySQL hosting): 45.130.231.160
+     DB_SERVER_PORT     [3306]:
+     DB_SERVER_DATABASE (mis. u1342798_luwes_kasir): u1342798_luwes_kasir
+     DB_SERVER_USERNAME (user database, BUKAN username panel): u1342798_ricky
+     DB_SERVER_PASSWORD (tidak tampil saat diketik): ********
+   ```
+   Password dengan karakter khusus (`$`, `#`, spasi) otomatis disimpan dengan aman.
+   Bila dilewati (Enter), isi nanti dengan `make hosting`.
+3. Build image aplikasi (PHP 8.2 + Apache + asset). Pertama kali ±5–10 menit, tergantung internet.
+4. Menjalankan `mysql`, lalu `app` (otomatis `php artisan migrate`), lalu `scheduler`.
+5. Menunggu aplikasi siap, lalu menampilkan status container dan **hasil cek koneksi ke database hosting**:
+   ```
+   luwes-app-1         Up ... (healthy)   0.0.0.0:80->80/tcp
+   luwes-mysql-1       Up ... (healthy)
+   luwes-scheduler-1   Up ...
+
+   Kesehatan       : WARNING — Belum pernah sinkron. Sinkron pertama berjalan otomatis dalam 2 menit ...
+   Koneksi         : OK (35 ms, 10.11.x-MariaDB)
+
+   Aplikasi: http://192.168.1.10   (dibuka dari PC client)
+   ```
+
+Jika `Koneksi : GAGAL — Access denied ...`, periksa langkah 4.1, lalu isi ulang kredensial:
+
+```bash
+make hosting       # tanya ulang DB_SERVER_* lalu restart otomatis
+make status        # cek lagi
+```
+
+### 5.4 Isi `.env` (opsional, bila perlu mengubah manual)
+
+Semua nilai sudah terisi oleh `make up`. Bila perlu mengubah, `nano .env` lalu **wajib** `make restart`.
 
 | Variabel | Nilai | Keterangan |
 |---|---|---|
+| `DB_SERVER_*` | dari langkah 4.1 | Kredensial database hosting (lebih mudah lewat `make hosting`) |
 | `APP_URL` | `http://IP-PC-SERVER` | Diisi otomatis; sesuaikan bila IP server berubah |
 | `APP_PORT` | `80` | Port web di PC server |
 | `DB_HOST` | `mysql` | Nama container MySQL lokal, **jangan** diganti `127.0.0.1` |
@@ -270,25 +348,24 @@ Bagian lain sudah terisi otomatis dan **jangan diubah** kecuali perlu:
 | `DB_SERVER_TIMEOUT` | `5` | (opsional) batas waktu koneksi ke hosting, detik |
 | `DB_SYNC_EXCLUDE_TABLES` | – | (opsional) tabel tambahan yang tidak disinkron, pisahkan koma |
 
-> **Penting:** password `DB_PASSWORD` / `DB_ROOT_PASSWORD` dipakai saat volume MySQL **pertama kali** dibuat.
+> Mengisi password manual di `.env`: bila mengandung `$`, `#`, atau spasi, **wajib** diapit kutip tunggal,
+> mis. `DB_SERVER_PASSWORD='ab$cd#12'`.
+>
+> **Penting:** `DB_PASSWORD` / `DB_ROOT_PASSWORD` dipakai saat volume MySQL **pertama kali** dibuat.
 > Jangan diubah setelah `make up` pertama, atau MySQL lokal tidak bisa diakses.
+>
+> **Jangan** menjalankan `docker compose up` sebelum file `.env` ada (Docker akan membuat folder `.env` kosong).
+> Selalu gunakan `make up`.
 
-Terapkan perubahan `.env`:
+### 5.5 Cek koneksi & sinkron pertama
 
-```bash
-make restart
-```
-
----
-
-## 7. Ambil Data dari Hosting (Sinkron Pertama)
-
-Database lokal masih kosong (hanya struktur tabel dari migrasi). Sinkron pertama menyalin semua data hosting.
+Database lokal masih kosong (hanya struktur tabel). Sinkron pertama menyalin semua data dari hosting.
 
 ```bash
-# 1) Cek koneksi ke database hosting
+# 1) Cek koneksi ke database hosting (sudah ditampilkan juga di akhir "make up")
 make status
 #   Koneksi : OK (35 ms, 10.11.x-MariaDB)
+#   (Bila "Access denied ... @'IP'" -> periksa langkah 4.1, lalu "make hosting")
 
 # 2) Lihat rencana tanpa mengubah apa pun
 make sync-dry
@@ -297,15 +374,26 @@ make sync-dry
 make sync
 #   Sinkron success: 48210 baris berubah, 0 konflik dilewati, 0 error, 95000 ms.
 
-# 4) Sinkron selanjutnya berjalan otomatis tiap 2 menit oleh container scheduler
+# 4) Selanjutnya sinkron berjalan otomatis tiap 2 menit oleh container scheduler
 make logs-sync
 ```
 
-> Bila langkah 3 dilewati, container `scheduler` tetap akan melakukan sinkron pertama sendiri dalam ±2 menit.
+> Bila `make sync` (no. 3) dilewati, container `scheduler` tetap akan melakukan sinkron pertama sendiri dalam ±2 menit.
+> Setelah mengubah `.env` kapan pun, jalankan `make restart`.
+
+### 5.6 Firewall (bila ada)
+
+Debian **tidak** memasang firewall secara bawaan, dan Docker membuka port 80 sendiri. Bila server memakai
+`ufw` dan PC client tetap tidak bisa membuka aplikasi:
+
+```bash
+sudo ufw allow 80/tcp
+sudo ufw status
+```
 
 ---
 
-## 8. Menghubungkan 3 PC Client
+## 6. Menghubungkan 3 PC Client
 
 1. Sambungkan PC client ke router/switch yang **sama** dengan PC server.
 2. Cek IP server dari PC server: `make ip` (atau `hostname -I`) → contoh `192.168.1.10`.
@@ -315,7 +403,7 @@ make logs-sync
    ping 192.168.1.10
    ```
    Harus ada balasan (`Reply from 192.168.1.10 ...`). Jika *Request timed out*, cek kabel/WiFi dan
-   firewall server (lihat bagian 4.3) dan `make ps` (container `app` harus *healthy*).
+   firewall server (lihat bagian 5.6) dan `make ps` (container `app` harus *healthy*).
 4. Buka browser (Chrome) di PC client, ketik: **`http://192.168.1.10`**.
 5. Login memakai akun yang sama seperti di hosting (data user ikut tersinkron dari hosting).
 6. Pastikan data (produk, stok, penjualan) sama dengan yang ada di
@@ -334,7 +422,7 @@ Setelah itu aplikasi bisa dibuka dengan `http://luwes.local`.
 
 ---
 
-## 9. Kartu "Status Database Server Hosting" di Dashboard
+## 7. Kartu "Status Database Server Hosting" di Dashboard
 
 Di dashboard (role admin-gudang, owner, superadmin), di bawah kartu **Stok Mendekati Expired**, ada kartu
 status yang diperbarui otomatis setiap 60 detik (tombol ↻ untuk cek ulang):
@@ -355,7 +443,7 @@ Cek dari terminal PC server:
 make status
 ```
 
-### 9.1 Tombol aksi (khusus owner & superadmin, di server lokal)
+### 7.1 Tombol aksi (khusus owner & superadmin, di server lokal)
 
 | Tombol | Sama dengan perintah |
 |---|---|
@@ -390,7 +478,7 @@ Dari terminal: `make sync`, `make sync-dry`, atau `make artisan cmd="dbsync:run 
 
 ---
 
-## 10. Menangani Konflik
+## 8. Menangani Konflik
 
 Konflik terjadi bila **kolom yang sama** pada **baris yang sama** diubah ke nilai berbeda di lokal dan di
 hosting di antara dua sinkron. Contoh: nama produk #4 diganti "A" di kasir offline dan "B" di hosting.
@@ -427,7 +515,7 @@ Bila ingin konflik **otomatis** diselesaikan dengan data terbaru (tanpa dilewati
 
 ---
 
-## 11. Pemeliharaan & Hal yang WAJIB Diperhatikan
+## 9. Pemeliharaan & Hal yang WAJIB Diperhatikan
 
 * **Update aplikasi:** jalankan `php artisan migrate --force` di **hosting**, lalu di PC server:
   ```bash
@@ -455,29 +543,32 @@ Bila ingin konflik **otomatis** diselesaikan dengan data terbaru (tanpa dilewati
 
 ---
 
-## 12. Troubleshooting
+## 10. Troubleshooting
 
 | Gejala | Penyebab & solusi |
 |---|---|
-| `Access denied for user '...'@'IP'` | IP toko belum ditambahkan di **Remote MySQL** hosting (pakai *Any Host*), atau `DB_SERVER_USERNAME` / `DB_SERVER_PASSWORD` salah. Username database (`u1342798_xxx`) berbeda dengan username login panel (`u1342798`). |
+| `Access denied for user '...'@'IP'` | IP toko belum ditambahkan di **Remote MySQL** hosting (pakai *Any Host*), atau `DB_SERVER_USERNAME` / `DB_SERVER_PASSWORD` salah (isi ulang dengan `make hosting`). Username database (`u1342798_xxx`) berbeda dengan username login panel (`u1342798`). |
 | `Connection timed out` / `Can't connect to MySQL server` | Internet putus, `DB_SERVER_HOST` salah, atau ISP memblokir port 3306. Tes: `curl -v telnet://DB_SERVER_HOST:3306`. |
 | `isi DB_ROOT_PASSWORD di .env` saat `docker compose up` | `.env` belum dibuat. Jalankan `make init` (atau `make up`). |
+| `sudo: command not found` / user tidak ada di sudoers | Jalankan langkah 3.1 (pasang `sudo` lewat `su -`). |
 | Error `.env berupa folder` | `docker compose up` dijalankan sebelum `.env` ada. `rm -rf .env && make up`. |
 | `Struktur database berbeda` | Versi aplikasi berbeda. Samakan kode (`make update`) dan jalankan `php artisan migrate --force` di hosting. |
-| `kemungkinan id bentrok` | Hosting belum memakai `DB_AUTO_INCREMENT_OFFSET=2`. Perbaiki `.env` hosting, lalu selesaikan baris itu (bagian 10). |
+| `kemungkinan id bentrok` | Hosting belum memakai `DB_AUTO_INCREMENT_OFFSET=2`. Perbaiki `.env` hosting, lalu selesaikan baris itu (bagian 8). |
 | `Penghapusan N baris ... ditahan` | Ada penghapusan massal. Periksa apakah disengaja; jika ya, jalankan dengan `--force`. |
 | Peringatan "belum ada sinkron berhasil dalam 10 menit" | Container scheduler mati: `make ps`, `make logs-sync`, lalu `make restart`. |
 | Container `app` tidak *healthy* / web error 500 | `make logs`, dan log Laravel: `make shell` lalu `tail -100 storage/logs/laravel-*.log`. |
-| PC client tidak bisa membuka `http://IP-SERVER` | Cek `ping`, `make ps`, firewall (bagian 4.3), dan apakah port 80 dipakai program lain (`sudo ss -ltnp`, cari `:80`); bila ya, ganti `APP_PORT` di `.env` lalu `make restart`. |
+| PC client tidak bisa membuka `http://IP-SERVER` | Cek `ping`, `make ps`, firewall (bagian 5.6), dan apakah port 80 dipakai program lain (`sudo ss -ltnp`, cari `:80`); bila ya, ganti `APP_PORT` di `.env` lalu `make restart`. |
 | `permission denied ... docker.sock` | User belum masuk grup docker: `sudo usermod -aG docker $USER`, lalu logout & login. |
+| `make: command not found` | `sudo apt install -y make` |
 | Perubahan `.env` tidak berpengaruh | Jalankan `make restart` (konfigurasi di-cache saat container start). |
 
 ---
 
-## 13. Ringkasan Perintah (`make help`)
+## 11. Ringkasan Perintah (`make help`)
 
 ```bash
-make up                 # build & jalankan semua service (pertama kali juga membuat .env)
+make up                 # build & jalankan semua service (pertama kali: buat .env + tanya kredensial hosting)
+make hosting            # isi / ganti kredensial database hosting (DB_SERVER_*) lalu restart
 make restart            # wajib setelah mengubah .env
 make update             # git pull + build ulang + migrasi
 make down               # hentikan semua service (data aman)
