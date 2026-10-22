@@ -63,6 +63,23 @@ ask_hosting() {
     read -rsp "  DB_SERVER_PASSWORD (tidak tampil saat diketik): " password
     echo
 
+    # Host MySQL bukan URL: buang "http://", "/..." dan ":port" bila ikut diketik.
+    local cleaned=${host#*://}
+    cleaned=${cleaned%%/*}
+    if [[ $cleaned == *:* ]]; then
+        port=${port:-${cleaned##*:}}
+        cleaned=${cleaned%%:*}
+    fi
+    if [ "$cleaned" != "$host" ]; then
+        echo "${YELLOW}DB_SERVER_HOST diubah menjadi: $cleaned (tanpa http:// atau /)${RESET}"
+        host=$cleaned
+    fi
+
+    if [ -z "$database" ] || [ -z "$username" ] || [ -z "$password" ]; then
+        echo "${YELLOW}PERHATIAN: database/username/password hosting ada yang kosong -> koneksi ke hosting akan gagal.${RESET}"
+        echo "${YELLOW}Lengkapi nanti dengan: make hosting (atau edit .env lalu: make restart)${RESET}"
+    fi
+
     if [[ $password == *"'"* ]]; then
         echo "${YELLOW}PERHATIAN: password mengandung tanda kutip tunggal ('), periksa baris DB_SERVER_PASSWORD di .env.${RESET}"
     fi
@@ -100,6 +117,20 @@ else
 
     if interactive; then
         ask_hosting
+    fi
+fi
+
+# Build image + MySQL butuh ruang disk; cek lebih awal daripada gagal di tengah build.
+docker_root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || true)
+docker_root=${docker_root:-/var/lib/docker}
+[ -d "$docker_root" ] || docker_root=/
+free_gb=$(df -Pk "$docker_root" | awk 'NR==2 {print int($4 / 1048576)}')
+if [ "${free_gb:-0}" -lt "${MIN_FREE_GB:-6}" ]; then
+    echo "${YELLOW}PERHATIAN: sisa disk untuk Docker ($docker_root) hanya ${free_gb} GB, minimal ${MIN_FREE_GB:-6} GB.${RESET}" >&2
+    echo "${YELLOW}Build bisa gagal dengan 'No space left on device'. Perbesar disk dulu (lihat panduan, bagian Troubleshooting).${RESET}" >&2
+    if [ "${SKIP_DISK_CHECK:-0}" != 1 ]; then
+        echo "Lanjutkan tetap dengan: SKIP_DISK_CHECK=1 make up" >&2
+        exit 1
     fi
 fi
 

@@ -15,9 +15,6 @@
 name: luwes
 
 x-app: &app
-  build:
-    context: .
-    dockerfile: docker/Dockerfile
   image: luwes-app:latest
   restart: unless-stopped
   environment:
@@ -32,6 +29,9 @@ x-app: &app
 services:
   app:
     <<: *app
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
     environment:
       TZ: Asia/Jakarta
       CONTAINER_ROLE: app
@@ -46,6 +46,8 @@ services:
 
   scheduler:
     <<: *app
+    # Memakai image hasil build service app (tidak build dua kali -> hemat disk & waktu).
+    pull_policy: never
     environment:
       TZ: Asia/Jakarta
       CONTAINER_ROLE: scheduler

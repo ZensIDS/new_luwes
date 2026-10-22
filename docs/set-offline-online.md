@@ -88,6 +88,7 @@ Tabel yang tidak disinkron (data teknis per-mesin): `migrations`, `jobs`, `faile
 * **Debian 12 (bookworm)** atau **Debian 13 (trixie)**, 64-bit, instalasi baru. Instalasi tanpa desktop
   (*SSH server* + *standard system utilities*) sudah cukup. **Tidak perlu** memasang PHP, MySQL, atau Apache.
 * RAM minimal 4 GB, SSD minimal 120 GB.
+* Bila server berupa VM / **Proxmox LXC**: disk minimal **20 GB** (Docker butuh ±6 GB kosong saat build) dan untuk LXC aktifkan fitur *nesting* + *keyctl* (lihat Troubleshooting).
 * Terhubung ke router/switch toko dengan **kabel LAN** (lebih stabil daripada WiFi).
 * Internet (untuk sinkron ke hosting & download image Docker saat instalasi).
 * Akses ke repository GitHub `ZensIDS/new_luwes` (akun GitHub yang diundang ke repo, atau *Personal Access Token*).
@@ -560,6 +561,9 @@ Bila ingin konflik **otomatis** diselesaikan dengan data terbaru (tanpa dilewati
 | PC client tidak bisa membuka `http://IP-SERVER` | Cek `ping`, `make ps`, firewall (bagian 5.6), dan apakah port 80 dipakai program lain (`sudo ss -ltnp`, cari `:80`); bila ya, ganti `APP_PORT` di `.env` lalu `make restart`. |
 | `permission denied ... docker.sock` | User belum masuk grup docker: `sudo usermod -aG docker $USER`, lalu logout & login. |
 | `make: command not found` | `sudo apt install -y make` |
+| `No space left on device` saat `make up` (build gagal di `apt-get install`) | Disk penuh. Docker butuh **minimal ±6 GB kosong** (image aplikasi + MySQL + image dasar saat build). Cek: `df -h /`. Bersihkan sisa build gagal: `docker system prune -af`, lalu perbesar disk. Di **Proxmox LXC** (jalankan di host Proxmox): `pct resize <CTID> rootfs +20G`, atau *Container → Resources → Root Disk → Volume Action → Resize*. Setelah itu `make up` lagi. |
+| Docker di **Proxmox LXC**: `permission denied`, `operation not permitted`, `failed to create shim task` | Aktifkan *nesting* (dan *keyctl* untuk container *unprivileged*) di host Proxmox: `pct set <CTID> --features nesting=1,keyctl=1` lalu `pct reboot <CTID>`. Tes di dalam LXC: `docker run --rm hello-world`. |
+| Salah mengisi kredensial hosting saat `make up` | Aman, aplikasi lokal tetap jalan, hanya sinkron yang gagal (status merah di dashboard). Perbaiki dengan `make hosting`, atau edit `.env` lalu `make restart`. `DB_SERVER_HOST` diisi host MySQL hosting (tanpa `http://`), **bukan** IP PC server lokal. |
 | Perubahan `.env` tidak berpengaruh | Jalankan `make restart` (konfigurasi di-cache saat container start). |
 
 ---
