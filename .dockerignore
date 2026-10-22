@@ -4,6 +4,8 @@
 .vscode
 .fleet
 node_modules
+# .htaccess root khusus hosting (LiteSpeed), di Docker membuat PHP tampil sebagai teks
+/.htaccess
 vendor
 public/hot
 public/storage

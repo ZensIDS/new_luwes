@@ -38,7 +38,8 @@ services:
     ports:
       - "${APP_PORT:-80}:80"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost/login"]
+      # Harus berisi HTML (bukan sekadar HTTP 200), supaya PHP yang tidak jalan ikut terdeteksi.
+      test: ["CMD-SHELL", "curl -fsS http://localhost/login | grep -qi '<html'"]
       interval: 30s
       timeout: 5s
       start_period: 90s
