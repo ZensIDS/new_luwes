@@ -106,6 +106,8 @@ class CashierPrintController extends Controller
             'selectedOutlet' => $selectedOutlet,
             'search' => $request->input('search'),
             'printing' => $printing,
+            // Tanggal saat user menekan tombol cetak label (request POST print=1).
+            'printedAt' => $printing ? now()->timezone('Asia/Jakarta') : null,
         ]);
     }
 

@@ -45,6 +45,32 @@ class LatestHpp
     }
 
     /**
+     * HPP terbaru untuk satu produk TANPA melihat outlet (HPP dianggap sama di semua outlet).
+     * Urutan: batch tersedia terbaru di outlet mana pun -> batch terbaru apa pun -> harga_beli produk.
+     */
+    public function forProductGlobal(int $productId): float
+    {
+        $base = fn () => OwnerStock::where('product_id', $productId)
+            ->notDeficit()
+            ->orderByDesc('created_at')
+            ->orderByDesc('id');
+
+        $stock = $base()
+            ->where('qty', '>', 0)
+            ->where(function ($query) {
+                $query->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
+            })
+            ->first(['id', 'product_id', 'hpp'])
+            ?? $base()->first(['id', 'product_id', 'hpp']);
+
+        if ($stock && $stock->hpp !== null) {
+            return (float) $stock->hpp;
+        }
+
+        return (float) (Product::whereKey($productId)->value('harga_beli') ?? 0);
+    }
+
+    /**
      * @param  iterable<int|string|null>  $productIds
      * @return array<int, float> product_id => HPP terbaru
      */
