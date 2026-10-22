@@ -31,7 +31,8 @@
         .strip-left, .strip-right { display: flex; align-items: center; justify-content: center; border-right: 1px solid #000; }
         .strip-right { border-right: none; border-left: 1px solid #000; }
         .strip-left span, .strip-right span { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; }
-        .label-content { padding: 3mm 4mm 3.5mm; text-align: center; }
+        .label-content { position: relative; padding: 3mm 4mm 4.5mm; text-align: center; }
+        .print-date { position: absolute; right: 1.5mm; bottom: .8mm; font-size: 7px; line-height: 1; color: #000; }
         .product-name { font-size: 14px; font-weight: 800; text-transform: uppercase; letter-spacing: .2px; line-height: 1.15; max-height: 2.3em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; margin-bottom: 2mm; }
         .old-price-wrap { display: inline-flex; align-items: center; gap: 5px; margin-bottom: 1.5mm; border: 1.5px solid #000; padding: .8mm 3mm; }
         .discount-badge { font-size: 9px; font-weight: 900; letter-spacing: 1px; }
@@ -126,6 +127,7 @@
                             <div class="net-price {{ $product->print_has_discount ? '' : 'no-discount' }}"><span class="rp">Rp</span>{{ number_format($product->print_price_net, 0, ',', '.') }}</div>
                             <hr class="separator">
                             <div class="product-code">{{ $product->code }}</div>
+                            <div class="print-date">{{ $printedAt?->format('d/m/Y') }}</div>
                         </div>
                         <div class="strip strip-right"><span>{{ $labelName }} • </span></div>
                         <div class="strip strip-bottom"><span>{{ $labelStrip }}</span></div>

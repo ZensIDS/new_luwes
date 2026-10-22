@@ -29,6 +29,15 @@ class PriceCalculator
                 'disc_tambahan_type' => 'nominal',
                 'disc_tambahan_value' => 0,
                 'disc_tambahan_amount' => 0,
+                'disc_tambahan_2_type' => 'nominal',
+                'disc_tambahan_2_value' => 0,
+                'disc_tambahan_2_amount' => 0,
+                'disc_tambahan_3_type' => 'nominal',
+                'disc_tambahan_3_value' => 0,
+                'disc_tambahan_3_amount' => 0,
+                'disc_tambahan_4_type' => 'nominal',
+                'disc_tambahan_4_value' => 0,
+                'disc_tambahan_4_amount' => 0,
                 'harga_dasar' => $hpp,
                 'margin_type' => 'nominal',
                 'margin_value' => $margin,
@@ -59,6 +68,18 @@ class PriceCalculator
         $additionalAmount = $this->discountAmount($hargaAkhir, $additionalType, $additionalValue);
         $hargaDasar = max(0, $this->money($hargaAkhir - $additionalAmount));
 
+        // Diskon Tambahan 2-4: bertingkat, masing-masing dihitung dari harga setelah diskon sebelumnya.
+        $extra = [];
+        foreach ([2, 3, 4] as $n) {
+            $extraType = $rule->{"disc_tambahan_{$n}_type"} ?: 'percentage';
+            $extraValue = (float) ($rule->{"disc_tambahan_{$n}_value"} ?? 0);
+            $extraAmount = $this->discountAmount($hargaDasar, $extraType, $extraValue);
+            $hargaDasar = max(0, $this->money($hargaDasar - $extraAmount));
+            $extra["disc_tambahan_{$n}_type"] = $extraType;
+            $extra["disc_tambahan_{$n}_value"] = $extraValue;
+            $extra["disc_tambahan_{$n}_amount"] = $extraAmount;
+        }
+
         $marginAmount = $this->isPercentage($rule->margin_type)
             ? $this->money($hargaDasar * ((float) $rule->margin_value / 100))
             : $this->money($rule->margin_value);
@@ -87,6 +108,7 @@ class PriceCalculator
             'disc_tambahan_type' => $additionalType,
             'disc_tambahan_value' => $additionalValue,
             'disc_tambahan_amount' => $additionalAmount,
+            ...$extra,
             'harga_dasar' => $hargaDasar,
             'margin_type' => $rule->margin_type,
             'margin_value' => (float) $rule->margin_value,

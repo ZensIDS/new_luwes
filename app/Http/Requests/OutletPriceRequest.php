@@ -22,6 +22,12 @@ class OutletPriceRequest extends FormRequest
             'disc_brand_value' => 'required|numeric|min:0',
             'disc_tambahan_type' => ['nullable', Rule::in(['nominal', 'percentage'])],
             'disc_tambahan_value' => 'nullable|numeric|min:0',
+            'disc_tambahan_2_type' => ['nullable', Rule::in(['nominal', 'percentage'])],
+            'disc_tambahan_2_value' => 'nullable|numeric|min:0',
+            'disc_tambahan_3_type' => ['nullable', Rule::in(['nominal', 'percentage'])],
+            'disc_tambahan_3_value' => 'nullable|numeric|min:0',
+            'disc_tambahan_4_type' => ['nullable', Rule::in(['nominal', 'percentage'])],
+            'disc_tambahan_4_value' => 'nullable|numeric|min:0',
             'margin_type' => ['required', Rule::in(['nominal', 'percentage'])],
             'margin_value' => 'required|numeric|min:0',
             'disc_toko_type' => ['nullable', Rule::in(['nominal', 'percentage'])],
@@ -36,6 +42,8 @@ class OutletPriceRequest extends FormRequest
             'note' => 'nullable|string|max:500',
             'hpp' => 'nullable|numeric|min:0',
             'hpp_changed' => 'nullable|boolean',
+            'hpp_unit' => ['nullable', Rule::in(['kecil', 'besar'])],
+            'hpp_besar' => 'nullable|numeric|min:0',
         ];
     }
 
@@ -44,11 +52,15 @@ class OutletPriceRequest extends FormRequest
         $this->merge([
             'disc_brand_value' => IndonesianNumber::parse($this->input('disc_brand_value')),
             'disc_tambahan_value' => IndonesianNumber::parse($this->input('disc_tambahan_value')),
+            'disc_tambahan_2_value' => IndonesianNumber::parse($this->input('disc_tambahan_2_value')),
+            'disc_tambahan_3_value' => IndonesianNumber::parse($this->input('disc_tambahan_3_value')),
+            'disc_tambahan_4_value' => IndonesianNumber::parse($this->input('disc_tambahan_4_value')),
             'margin_value' => IndonesianNumber::parse($this->input('margin_value')),
             'disc_toko_value' => IndonesianNumber::parse($this->input('disc_toko_value')),
             'pajak_value' => IndonesianNumber::parse($this->input('pajak_value')),
             'outlet_adjustment_value' => IndonesianNumber::parse($this->input('outlet_adjustment_value')),
             'hpp' => IndonesianNumber::parse($this->input('hpp')),
+            'hpp_besar' => IndonesianNumber::parse($this->input('hpp_besar')),
             'note' => $this->filled('note') ? trim((string) $this->input('note')) : null,
         ]);
     }

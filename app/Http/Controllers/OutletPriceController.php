@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\OutletPriceRequest;
 use App\Http\Requests\NewProductFromPriceRequest;
+use App\Http\Requests\UpdateProductFromPriceRequest;
 use App\Models\Category;
 use App\Models\Outlet;
 use App\Models\OutletPrice;
@@ -297,14 +298,20 @@ class OutletPriceController extends Controller
     {
         $this->ensureManagementAccess();
         $newPrice = new OutletPrice([
-            'disc_brand_type' => 'nominal',
+            'disc_brand_type' => 'percentage',
             'pajak_type' => 'percentage',
             'pajak_value' => 0,
-            'disc_tambahan_type' => 'nominal',
+            'disc_tambahan_type' => 'percentage',
             'disc_tambahan_value' => 0,
+            'disc_tambahan_2_type' => 'percentage',
+            'disc_tambahan_2_value' => 0,
+            'disc_tambahan_3_type' => 'percentage',
+            'disc_tambahan_3_value' => 0,
+            'disc_tambahan_4_type' => 'percentage',
+            'disc_tambahan_4_value' => 0,
             'margin_type' => 'percentage',
             'margin_value' => 0,
-            'disc_toko_type' => 'nominal',
+            'disc_toko_type' => 'percentage',
             'disc_toko_value' => 0,
             'outlet_adjustment_type' => 'nominal',
             'outlet_adjustment_value' => 0,
@@ -343,7 +350,7 @@ class OutletPriceController extends Controller
                 'product_id' => $request->product_id,
             ]);
             $price->fill([
-                ...Arr::except($request->validated(), ['hpp', 'hpp_changed']),
+                ...Arr::except($request->validated(), ['hpp', 'hpp_changed', 'hpp_unit', 'hpp_besar']),
                 'created_by' => auth()->id(),
                 'is_active' => $request->boolean('is_active', true),
             ]);
@@ -410,6 +417,112 @@ class OutletPriceController extends Controller
             ->with('toast_success', "Produk \"{$product->name}\" berhasil didaftarkan. Silakan atur harga jualnya.");
     }
 
+    /**
+     * Data produk (JSON) untuk mengisi panel "Edit Barang" di form tambah aturan harga.
+     * Termasuk kategori, supplier, status produk, satuan & konversi, serta info jendela Other Income Listing
+     * (sama seperti halaman edit Product) supaya panel bisa menampilkan keterangan yang benar.
+     */
+    public function editProduct(Product $product)
+    {
+        $this->ensureManagementAccess();
+
+        $otherIncome = app(OtherIncomeService::class);
+        $listingAlreadyRecorded = $otherIncome->hasListing($product);
+        $listingWindowOpen = (int) $product->update_count === 0 && ! $listingAlreadyRecorded;
+
+        return response()->json([
+            'id' => $product->id,
+            'code' => $product->code,
+            'name' => $product->name,
+            'category_id' => $product->category_id,
+            'satuan' => $product->satuan,
+            'satuan_besar' => $product->satuan_besar,
+            'konversi_qty' => $product->konversi_qty !== null ? (float) $product->konversi_qty : null,
+            'harga_beli' => (float) $product->harga_beli,
+            'harga_beli_besar' => $product->harga_beli_besar !== null ? (float) $product->harga_beli_besar : null,
+            'supplier_ids' => $product->suppliers()->pluck('suppliers.id')->values(),
+            'status_produk' => $product->status_produk ?: 'sudah',
+            'status_produk_note' => $product->status_produk_note,
+            'brand' => $product->brand,
+            'min_stock' => (int) $product->min_stock,
+            'warna' => $product->warna,
+            'ukuran' => $product->ukuran,
+            'model' => $product->model,
+            'lokasi' => $product->lokasi,
+            // 'trigger' = simpan ini masih memicu income Listing; 'recorded' = sudah pernah tercatat; 'closed' = sudah lewat jendela.
+            'listing_mode' => $listingWindowOpen ? 'trigger' : ($listingAlreadyRecorded ? 'recorded' : 'closed'),
+            'listing_nominal' => $otherIncome->listingNominal(),
+        ]);
+    }
+
+    /**
+     * Simpan hasil "Edit Barang" dari form master harga. Aturan simpan sama dengan ProductController::update
+     * (kunci baris, pemicu Other Income Listing hanya di update pertama, hitung update_count, sinkron supplier),
+     * tetapi hanya kolom yang tampil di panel yang diubah.
+     *
+     * Dipanggil lewat AJAX (JSON) supaya isian form harga yang sudah diketik tidak hilang;
+     * tanpa JSON tetap ada redirect ke form tambah dengan produk terpilih.
+     */
+    public function updateProduct(UpdateProductFromPriceRequest $request, Product $product)
+    {
+        $this->ensureManagementAccess();
+
+        $data = $request->productData();
+        if (($data['status_produk'] ?? 'sudah') !== 'tambahan_diskon') {
+            $data['status_produk_note'] = null;
+        }
+
+        try {
+            $locked = DB::transaction(function () use ($request, $data, $product) {
+                // Kunci baris produk: dua simpan bersamaan tidak bisa sama-sama lolos jendela Listing.
+                $locked = Product::lockForUpdate()->findOrFail($product->id);
+
+                $isFirstUpdate = (int) $locked->update_count === 0;
+                $newStatus = $data['status_produk'] ?? $locked->status_produk;
+
+                // harga_beli (kecil) & harga_beli_besar sudah dihitung konsisten di productData();
+                // model Product juga menjaga keduanya tetap sinkron saat disimpan.
+                $locked->update($data);
+
+                $service = app(OtherIncomeService::class);
+                if ($isFirstUpdate && $newStatus === 'listing' && ! $service->hasListing($locked)) {
+                    $service->recordListing($locked, $request->user());
+                }
+
+                // Sama seperti form Product: setiap simpan lewat form edit dihitung satu update.
+                $locked->increment('update_count');
+
+                $locked->suppliers()->sync($request->input('supplier_ids', []));
+
+                return $locked;
+            });
+        } catch (ValidationException $e) {
+            // Panel memakai error bag "newProduct" (terpisah dari form aturan harga).
+            throw $e->errorBag('newProduct');
+        }
+
+        $message = "Barang \"{$locked->name}\" berhasil diperbarui.";
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => $message,
+                'product' => [
+                    'id' => $locked->id,
+                    'code' => $locked->code,
+                    'name' => $locked->name,
+                ],
+            ]);
+        }
+
+        return redirect()
+            ->route('outlet-prices.create', array_filter([
+                'product_id' => $locked->id,
+                'outlet_id' => $request->filled('outlet_id') ? (int) $request->input('outlet_id') : null,
+            ]))
+            ->with('toast_success', $message);
+    }
+
     public function edit(Request $request, OutletPrice $outletPrice)
     {
         $this->ensureManagementAccess();
@@ -472,12 +585,30 @@ class OutletPriceController extends Controller
     {
         $this->ensureManagementAccess();
         $request->validate([
-            'outlet_id' => 'required|integer|exists:outlets,id',
+            'outlet_id' => 'nullable|integer|exists:outlets,id',
             'product_id' => 'required|integer|exists:products,id',
         ]);
 
+        $productId = (int) $request->product_id;
+        $latest = app(LatestHpp::class);
+
+        // HPP dianggap sama di semua outlet: tanpa outlet dipakai HPP terbaru global.
+        $hppKecil = $request->filled('outlet_id')
+            ? $latest->forProduct((int) $request->outlet_id, $productId)
+            : $latest->forProductGlobal($productId);
+
+        $product = Product::find($productId, ['id', 'satuan', 'satuan_besar', 'konversi_qty']);
+        $konversi = (float) ($product?->konversi_qty ?? 0);
+        $hasBesar = $product && $product->satuan_besar && $konversi >= 1;
+
         return response()->json([
-            'hpp' => app(LatestHpp::class)->forProduct((int) $request->outlet_id, (int) $request->product_id),
+            'hpp' => $hppKecil,
+            'hpp_kecil' => $hppKecil,
+            'hpp_besar' => $hasBesar ? round($hppKecil * $konversi, 2) : null,
+            'satuan' => $product?->satuan,
+            'satuan_besar' => $hasBesar ? $product->satuan_besar : null,
+            'konversi_qty' => $hasBesar ? $konversi : null,
+            'konversi_text' => $hasBesar ? $product->konversi_string : '-',
         ]);
     }
 
@@ -495,6 +626,18 @@ class OutletPriceController extends Controller
         $outletId = (int) $price->outlet_id;
         $productId = (int) $price->product_id;
         $hpp = round((float) $request->input('hpp'), 2);
+
+        // HPP diisi per satuan besar: HPP per satuan kecil (yang dipakai hitung harga jual) = besar / konversi.
+        $product = Product::find($productId, ['id', 'konversi_qty']);
+        $konversi = (float) ($product?->konversi_qty ?? 0);
+        $inputBesar = $request->input('hpp_unit') === 'besar'
+            && $request->filled('hpp_besar')
+            && $konversi >= 1;
+        $hppBesar = $inputBesar ? round((float) $request->input('hpp_besar'), 2) : null;
+        if ($inputBesar) {
+            $hpp = round($hppBesar / $konversi, 2);
+        }
+
         $latest = app(LatestHpp::class);
         $oldHpp = $latest->forProduct($outletId, $productId);
         $stock = $latest->stockFor($outletId, $productId);
@@ -502,7 +645,12 @@ class OutletPriceController extends Controller
         if ($stock) {
             $stock->update(['hpp' => $hpp]);
         } else {
-            Product::whereKey($productId)->update(['harga_beli' => $hpp]);
+            $productUpdate = ['harga_beli' => $hpp];
+            if ($konversi >= 1) {
+                // update() query builder tidak memicu sinkronisasi di model Product, jadi harga besar diisi di sini.
+                $productUpdate['harga_beli_besar'] = $hppBesar ?? round($hpp * $konversi, 2);
+            }
+            Product::whereKey($productId)->update($productUpdate);
         }
 
         if (abs($oldHpp - $hpp) < 0.005) {
@@ -521,6 +669,8 @@ class OutletPriceController extends Controller
                 'old' => $oldHpp,
                 'new' => $hpp,
                 'target' => $stock ? 'batch' : 'product',
+                'input_unit' => $inputBesar ? 'besar' : 'kecil',
+                'hpp_besar' => $hppBesar,
                 'batch_number' => $stock?->batch_number,
             ])
             ->log('HPP diubah dari master harga');
@@ -530,7 +680,7 @@ class OutletPriceController extends Controller
     {
         DB::transaction(function () use ($request, $outletPrice) {
             $outletPrice->fill([
-                ...Arr::except($request->validated(), ['hpp', 'hpp_changed']),
+                ...Arr::except($request->validated(), ['hpp', 'hpp_changed', 'hpp_unit', 'hpp_besar']),
                 'is_active' => $request->boolean('is_active'),
             ]);
             // Setiap kali form edit disimpan, updated_at selalu diperbarui

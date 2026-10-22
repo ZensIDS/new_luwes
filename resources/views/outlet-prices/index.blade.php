@@ -3,14 +3,16 @@
 @section('title', 'Master Harga Jual')
 
 @php
-    // Komponen harga yang digabung dalam satu kolom: label => [kolom nilai, kolom tipe]
-    $priceComponents = [
-        'Disc. Reguler' => ['disc_brand_value', 'disc_brand_type'],
-        'Disc. Tambahan' => ['disc_tambahan_value', 'disc_tambahan_type'],
-        'Margin' => ['margin_value', 'margin_type'],
-        'Disc. Toko' => ['disc_toko_value', 'disc_toko_type'],
+    // Kolom komponen harga (urutan sama dengan tabel): label => [kolom nilai, kolom tipe]
+    $componentColumns = [
         'Pajak' => ['pajak_value', 'pajak_type'],
-        'Peny. Outlet' => ['outlet_adjustment_value', 'outlet_adjustment_type'],
+        'Disc Reg' => ['disc_brand_value', 'disc_brand_type'],
+        'Disc 1' => ['disc_tambahan_value', 'disc_tambahan_type'],
+        'Disc 2' => ['disc_tambahan_2_value', 'disc_tambahan_2_type'],
+        'Disc 3' => ['disc_tambahan_3_value', 'disc_tambahan_3_type'],
+        'Disc 4' => ['disc_tambahan_4_value', 'disc_tambahan_4_type'],
+        'Disc Toko' => ['disc_toko_value', 'disc_toko_type'],
+        'Margin' => ['margin_value', 'margin_type'],
     ];
     $formatComponent = fn (float $value, ?string $type) => $type === 'percentage'
         ? rtrim(rtrim(number_format($value, 2, ',', '.'), '0'), ',') . '%'
@@ -18,6 +20,24 @@
 @endphp
 
 @section('container')
+    <style>
+        /* Kolom dibekukan: checkbox + barcode + nama di kiri, aksi di kanan, supaya tetap terlihat saat scroll horizontal. */
+        /* Padding kiri/kanan area scroll dihapus: kalau ada, kolom yang digeser tembus terlihat di celah antara tepi kotak dan kolom beku. */
+        .op-scroll { padding-left: 0; padding-right: 0; }
+        #example1 { min-width: 1900px; }
+        #example1 th, #example1 td { vertical-align: middle !important; }
+        #example1 .op-sticky { position: sticky; background: #fff; z-index: 2; }
+        #example1 tbody tr:nth-of-type(odd) .op-sticky { background: #f9f9f9; }
+        #example1 thead th.op-sticky { z-index: 3; }
+        #example1 .op-s-check { left: 0; min-width: 44px; width: 44px; max-width: 44px; padding-left: 0 !important; padding-right: 0 !important; text-align: center; }
+        #example1 .op-s-check input[type=checkbox] { margin: 0; vertical-align: middle; cursor: pointer; }
+        #example1 .op-s-code { left: 44px; min-width: 130px; white-space: nowrap; }
+        #example1 tbody .op-s-code { font-family: Menlo, Consolas, monospace; }
+        #example1 .op-s-name { left: 174px; min-width: 240px; max-width: 280px; white-space: normal; font-weight: 600; box-shadow: 3px 0 3px -2px rgba(0, 0, 0, .25); }
+        #example1 .op-s-action { right: 0; white-space: nowrap; box-shadow: -3px 0 3px -2px rgba(0, 0, 0, .25); }
+        #example1 .op-num { white-space: nowrap; min-width: 70px; }
+        #example1 .op-price { white-space: nowrap; min-width: 110px; font-size: 15px; }
+    </style>
     <section class="content-header">
         <h1>Master Harga Jual <small>Aturan harga POS per outlet</small></h1>
     </section>
@@ -60,32 +80,36 @@
                     <button class="btn btn-primary btn-sm">Filter</button>
                 </form>
             </div>
-            <div class="box-body table-responsive">
+            <div class="box-body table-responsive op-scroll">
                 <table id="{{ $selectedOutletId ? 'example1' : 'outlet-prices-empty-table' }}" class="table table-bordered table-striped table-condensed">
                     <thead>
                         <tr>
                             @if ($selectedOutletId)
-                                <th class="text-center">
+                                <th class="text-center op-sticky op-s-check">
                                     <input type="checkbox" id="select-all-outlet-price-labels"
                                         title="Pilih semua produk pada halaman ini">
                                 </th>
                             @endif
                             <th>Outlet</th>
-                            <th>Produk</th>
+                            <th class="op-sticky op-s-code">Barcode</th>
+                            <th class="op-sticky op-s-name">Nama Product</th>
                             <th>HPP</th>
-                            <th>Harga Coret</th>
-                            <th>Harga Jual</th>
+                            @foreach ($componentColumns as $label => $columns)
+                                <th class="text-center">{{ $label }}</th>
+                            @endforeach
+                            <th class="text-center">Harga Jual</th>
+                            <th class="text-center">Penyesuaian</th>
                             <th>Catatan</th>
-                            <th>Terakhir Diupdate</th>
-                            <th>Stok Outlet</th>
-                            <th>Aksi</th>
+                            <th>Terakhir Update</th>
+                            <th>Stock Outlet</th>
+                            <th class="op-sticky op-s-action">Action</th>
                         </tr>
                     </thead>
                     <tbody>
                         @forelse($prices as $price)
                             <tr>
                                 @if ($selectedOutletId)
-                                    <td class="text-center">
+                                    <td class="text-center op-sticky op-s-check">
                                         @if ($price->product?->code)
                                             <input type="checkbox" class="outlet-price-label-checkbox"
                                                 form="outlet-price-label-print-form" name="product_ids[]"
@@ -96,9 +120,10 @@
                                         @endif
                                     </td>
                                 @endif
-                                <td>{{ $price->outlet?->name }}</td>
-                                <td>{{ $price->product?->code }} — {{ $price->product?->name }}</td>
-                                <td>
+                                <td style="white-space:nowrap">{{ $price->outlet?->name }}</td>
+                                <td class="op-sticky op-s-code">{{ $price->product?->code ?: '—' }}</td>
+                                <td class="op-sticky op-s-name">{{ $price->product?->name }}</td>
+                                <td style="white-space:nowrap">
                                     <button type="button" class="btn btn-xs btn-info btn-hpp-history"
                                         data-toggle="modal" data-target="#hppHistoryModal"
                                         data-url="{{ route('outlet-prices.hpp-history', $price) }}"
@@ -119,21 +144,16 @@
                                         </div>
                                     @endif
                                 </td>
-                                <td>
-                                    <del>@currency($price->print_price_strike ?? 0)</del>
-                                    <small class="text-muted">HPP: @currency($price->print_price_hpp_after_tax ?? 0) + Margin: @currency($price->print_price_margin ?? 0)</small>
-                                </td>
-                                <td style="min-width:200px">
-                                    <strong style="font-size:15px">@currency($price->print_price_net ?? 0)</strong>
-                                    <div class="small" style="line-height:1.6;margin-top:4px">
-                                        @foreach ($priceComponents as $label => $columns)
-                                            @php $componentValue = (float) ($price->{$columns[0]} ?? 0); @endphp
-                                            <div class="{{ $componentValue == 0 ? 'text-muted' : '' }}">
-                                                <span style="display:inline-block;min-width:78px">{{ $label }}</span>
-                                                : {{ $formatComponent($componentValue, $price->{$columns[1]}) }}
-                                            </div>
-                                        @endforeach
-                                    </div>
+                                @foreach ($componentColumns as $label => $columns)
+                                    @php $componentValue = (float) ($price->{$columns[0]} ?? 0); @endphp
+                                    <td class="text-center op-num {{ $componentValue == 0 ? 'text-muted' : '' }}">
+                                        {{ $componentValue == 0 ? '—' : $formatComponent($componentValue, $price->{$columns[1]}) }}
+                                    </td>
+                                @endforeach
+                                <td class="text-center op-price"><strong>@currency($price->print_price_net ?? 0)</strong></td>
+                                @php $adjustmentValue = (float) ($price->outlet_adjustment_value ?? 0); @endphp
+                                <td class="text-center op-num {{ $adjustmentValue == 0 ? 'text-muted' : '' }}">
+                                    {{ $adjustmentValue == 0 ? '—' : $formatComponent($adjustmentValue, $price->outlet_adjustment_type) }}
                                 </td>
                                 <td style="min-width:160px;white-space:normal">{{ $price->note ?: '—' }}</td>
                                 <td data-order="{{ $price->updated_at?->timestamp }}" style="white-space:nowrap">
@@ -151,7 +171,7 @@
                                         / <span class="label label-info">{{ $stockProduct->konversiDisplay($stockQty) }}</span>
                                     @endif
                                 </td>
-                                <td><a class="btn btn-xs btn-warning"
+                                <td class="op-sticky op-s-action"><a class="btn btn-xs btn-warning"
                                         href="{{ route('outlet-prices.edit', $price) }}">Edit</a>
                                     <form action="{{ route('outlet-prices.destroy', $price) }}" method="POST"
                                         style="display:inline">@csrf @method('DELETE')<button class="btn btn-xs btn-danger"
@@ -163,7 +183,7 @@
                                  Pesan kosong ditangani DataTables lewat language.emptyTable. --}}
                             @unless ($selectedOutletId)
                                 <tr>
-                                    <td colspan="9" class="text-center">Pilih outlet terlebih dahulu untuk melihat master harga.</td>
+                                    <td colspan="18" class="text-center">Pilih outlet terlebih dahulu untuk melihat master harga.</td>
                                 </tr>
                             @endunless
                         @endforelse

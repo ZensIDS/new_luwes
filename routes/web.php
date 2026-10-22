@@ -122,6 +122,8 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::post('/outlet-prices/products', [App\Http\Controllers\OutletPriceController::class, 'storeProduct'])->name('outlet-prices.products.store');
     Route::get('/outlet-prices/products/search', [App\Http\Controllers\OutletPriceController::class, 'searchProducts'])->middleware('throttle:120,1,search')->name('outlet-prices.products.search');
     Route::get('/outlet-prices/preview-hpp', [App\Http\Controllers\OutletPriceController::class, 'previewHpp'])->name('outlet-prices.preview-hpp');
+    Route::get('/outlet-prices/products/{product}', [App\Http\Controllers\OutletPriceController::class, 'editProduct'])->whereNumber('product')->name('outlet-prices.products.show');
+    Route::put('/outlet-prices/products/{product}', [App\Http\Controllers\OutletPriceController::class, 'updateProduct'])->whereNumber('product')->name('outlet-prices.products.update');
     Route::get('/outlet-prices/{outletPrice}/hpp-history', [App\Http\Controllers\OutletPriceController::class, 'hppHistory'])->name('outlet-prices.hpp-history');
     Route::post('/outlet-prices/{outletPrice}/touch', [App\Http\Controllers\OutletPriceController::class, 'touch'])->name('outlet-prices.touch');
     Route::get('/outlet-purchases/data', [App\Http\Controllers\OutletPurchaseController::class, 'getIndexData'])->name('outlet-purchases.index.data');

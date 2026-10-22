@@ -44,7 +44,8 @@
             $group.removeClass('has-error has-success');
             $feedback.attr('class', 'help-block text-muted barcode-check-feedback').text('Memeriksa barcode...').show();
 
-            request = $.getJSON(url, { code: code, ignore_id: ignoreId || '' })
+            // data-ignore-id (diisi halaman pemakai, mis. panel Edit Barang) menang atas ignoreId bawaan partial.
+            request = $.getJSON(url, { code: code, ignore_id: $input.attr('data-ignore-id') || ignoreId || '' })
                 .done(function (res) {
                     if ($.trim($input.val()) !== code) { return; }   // input sudah berubah lagi
 
@@ -75,6 +76,8 @@
             timer = setTimeout(check, 400);
         });
         $input.on('change blur', function () { check(); });
+        // Halaman pemakai bisa memicu cek ulang paksa (mis. saat panel pindah mode tambah/edit).
+        $input.on('barcode:recheck', function () { check(true); });
 
         // Scanner biasanya mengirim Enter di akhir barcode: jangan submit form, cukup cek barcode-nya.
         $input.on('keydown', function (e) {

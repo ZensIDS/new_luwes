@@ -1,10 +1,13 @@
 @extends('layouts.master')
 
 @php
-    $brandType = old('disc_brand_type', $price->disc_brand_type ?: 'nominal');
-    $additionalType = old('disc_tambahan_type', $price->disc_tambahan_type ?: 'nominal');
+    $brandType = old('disc_brand_type', $price->disc_brand_type ?: 'percentage');
+    $additionalType = old('disc_tambahan_type', $price->disc_tambahan_type ?: 'percentage');
+    $additionalType2 = old('disc_tambahan_2_type', $price->disc_tambahan_2_type ?: 'percentage');
+    $additionalType3 = old('disc_tambahan_3_type', $price->disc_tambahan_3_type ?: 'percentage');
+    $additionalType4 = old('disc_tambahan_4_type', $price->disc_tambahan_4_type ?: 'percentage');
     $marginType = old('margin_type', $price->margin_type ?: 'percentage');
-    $storeDiscType = old('disc_toko_type', $price->disc_toko_type ?: 'nominal');
+    $storeDiscType = old('disc_toko_type', $price->disc_toko_type ?: 'percentage');
     $taxType = old('pajak_type', $price->pajak_type ?: 'percentage');
     $adjustmentType = old('outlet_adjustment_type', $price->outlet_adjustment_type ?: 'nominal');
     // Panel "Daftarkan Produk Baru" otomatis terbuka lagi bila validasinya gagal.
@@ -42,10 +45,12 @@
                 </button>
                 <span class="text-muted" style="margin-left:8px;">Barangnya belum ada di daftar produk? Daftarkan dulu di sini.</span>
             </div>
+            {{-- Pesan hasil Edit Barang (AJAX): tampil di sini karena panel menutup setelah simpan --}}
+            <div class="alert alert-success" id="np-flash" role="status" style="display:none;"></div>
         {{-- Form daftar produk baru: tersembunyi sampai tombol "Daftarkan Produk Baru" diklik (bukan popup) --}}
         <div class="box box-success" id="new-product-panel" style="{{ $openNewProduct ? '' : 'display:none;' }}">
             <div class="box-header with-border">
-                <h3 class="box-title"><i class="fa fa-plus-square"></i> Daftarkan Produk Baru</h3>
+                <h3 class="box-title"><i class="fa fa-plus-square" id="np-title-icon"></i> <span id="np-title">Daftarkan Produk Baru</span></h3>
                 <div class="box-tools pull-right">
                     <button type="button" class="btn btn-box-tool" id="close-new-product-form" title="Tutup">
                         <i class="fa fa-times"></i>
@@ -55,8 +60,11 @@
             <form action="{{ route('outlet-prices.products.store') }}" method="POST" id="new-product-form" autocomplete="off">
                 @csrf
                 <input type="hidden" name="_new_product" value="1">
+                {{-- Mode Edit Barang: JS mengaktifkan _method=PUT dan mengganti action ke /outlet-prices/products/{id} --}}
+                <input type="hidden" name="_method" value="PUT" id="np-method" disabled>
                 <input type="hidden" name="outlet_id" id="new-product-outlet-id" value="">
                 <div class="box-body">
+                    <div class="alert alert-danger" id="np-ajax-errors" style="display:none;"></div>
                     @if ($openNewProduct)
                         <div class="alert alert-danger">
                             <strong>Produk belum tersimpan. Periksa kembali input berikut:</strong>
@@ -67,10 +75,17 @@
                             </ul>
                         </div>
                     @endif
-                    <p class="text-muted">
+                    <p class="text-muted np-create-only">
                         Cari dulu lewat pilihan <em>Produk</em> di form harga di bawah. Daftarkan di sini hanya jika
                         barangnya benar-benar belum ada. Barcode tidak boleh sama dengan produk lain.
                     </p>
+                    <div class="alert alert-warning np-edit-only">
+                        <i class="fa fa-info-circle"></i>
+                        Mengubah data barang yang sedang dipilih di form harga. Perubahan langsung tersimpan ke data produk
+                        (sama seperti menu Product), sedangkan isian form harga di bawah tidak ikut berubah.
+                        Harga beli di sini adalah harga beli produk; outlet yang sudah punya batch stok tetap memakai
+                        HPP batch-nya, jadi HPP outlet tersebut tidak ikut berubah.
+                    </div>
 
                     <div class="row">
                         <div class="col-md-6 form-group {{ $errors->newProduct->has('name') ? 'has-error' : '' }}">
@@ -188,7 +203,12 @@
                             'select' => '#np-status-produk',
                             'mode' => 'trigger',
                             'nominal' => $listingNominal ?? null,
+                            'wrapClass' => 'col-md-12 np-create-only',
                         ])
+                        {{-- Mode edit: keterangan Listing mengikuti kondisi produk (diisi JS dari data produk) --}}
+                        <div class="col-md-12 np-listing-edit" id="np-listing-edit-info" style="display:none;">
+                            <div class="alert" id="np-listing-edit-alert" style="margin-bottom:15px;"></div>
+                        </div>
                     </div>
 
                     <a href="#" id="toggle-new-product-extra"><i class="fa fa-caret-right"></i> Tampilkan field lainnya (opsional)</a>
@@ -228,7 +248,7 @@
                 <div class="box-footer">
                     <button type="button" class="btn btn-default" id="cancel-new-product-form">Batal</button>
                     <button type="submit" class="btn btn-success" id="submit-new-product-form">
-                        <i class="fa fa-save"></i> Simpan &amp; Atur Harga
+                        <i class="fa fa-save"></i> <span id="np-submit-label">Simpan &amp; Atur Harga</span>
                     </button>
                 </div>
             </form>
@@ -285,6 +305,34 @@
                                         <input type="hidden" name="product_id" value="{{ $price->product_id }}">
                                     @endif
                                     @error('product_id') <span class="help-block text-danger">{{ $message }}</span> @enderror
+                                    @if (! $price->exists && isset($categories))
+                                        <button type="button" class="btn btn-default btn-xs" id="edit-product-btn" disabled
+                                            style="margin-top:6px;" title="Edit data barang yang dipilih">
+                                            <i class="fa fa-pencil"></i> Edit Barang
+                                        </button>
+                                        <span class="text-muted small" id="edit-product-hint" style="margin-left:6px;">Pilih produk dulu untuk mengedit datanya.</span>
+                                    @endif
+                                </div>
+                            </div>
+
+                            <div id="product-unit-info" class="callout callout-info" style="display:none;margin:5px 0 0;padding:10px 15px;">
+                                <div class="row">
+                                    <div class="col-sm-3 col-xs-6">
+                                        <small class="text-muted">HPP Satuan Kecil</small><br>
+                                        <strong id="pui-hpp-kecil">-</strong>
+                                    </div>
+                                    <div class="col-sm-3 col-xs-6">
+                                        <small class="text-muted">HPP Satuan Besar</small><br>
+                                        <strong id="pui-hpp-besar">-</strong>
+                                    </div>
+                                    <div class="col-sm-3 col-xs-6">
+                                        <small class="text-muted">Satuan Kecil / Besar</small><br>
+                                        <strong id="pui-satuan">-</strong>
+                                    </div>
+                                    <div class="col-sm-3 col-xs-6">
+                                        <small class="text-muted">Konversi</small><br>
+                                        <strong id="pui-konversi">-</strong>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -324,8 +372,8 @@
                             <div class="price-rule-card price-rule-additional">
                                 <div class="row">
                                     <div class="col-sm-4">
-                                        <h4 style="margin-top:0"><span class="label label-success">2</span> Diskon Tambahan</h4>
-                                        <p class="text-muted small">Potongan tambahan setelah Diskon Reguler dan sebelum margin.</p>
+                                        <h4 style="margin-top:0"><span class="label label-success">2</span> Diskon Tambahan 1</h4>
+                                        <p class="text-muted small">Potongan tambahan setelah Diskon Reguler.</p>
                                     </div>
                                     <div class="col-sm-4 form-group">
                                         <label for="disc_tambahan_type">Tipe Potongan</label>
@@ -335,7 +383,7 @@
                                         </select>
                                     </div>
                                     <div class="col-sm-4 form-group">
-                                        <label for="disc_tambahan_value">Nilai Diskon Tambahan</label>
+                                        <label for="disc_tambahan_value">Nilai Diskon Tambahan 1</label>
                                         <div class="input-group">
                                             <span class="input-group-addon price-prefix" data-for="disc_tambahan_type">Rp</span>
                                             <input id="disc_tambahan_value" name="disc_tambahan_value" type="text" inputmode="decimal" data-currency-input data-currency-toggle="disc_tambahan_type" data-currency-decimals="0" min="0" step="0.01" class="form-control price-value"
@@ -346,10 +394,85 @@
                                 </div>
                             </div>
 
+                            <div class="price-rule-card price-rule-additional">
+                                <div class="row">
+                                    <div class="col-sm-4">
+                                        <h4 style="margin-top:0"><span class="label label-success">3</span> Diskon Tambahan 2</h4>
+                                        <p class="text-muted small">Potongan bertingkat setelah Diskon Tambahan 1.</p>
+                                    </div>
+                                    <div class="col-sm-4 form-group">
+                                        <label for="disc_tambahan_2_type">Tipe Potongan</label>
+                                        <select id="disc_tambahan_2_type" name="disc_tambahan_2_type" class="form-control select2 price-type" style="width:100%">
+                                            <option value="nominal" {{ $additionalType2 === 'nominal' ? 'selected' : '' }}>Rp — Nominal</option>
+                                            <option value="percentage" {{ $additionalType2 === 'percentage' ? 'selected' : '' }}>% — Persentase</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-sm-4 form-group">
+                                        <label for="disc_tambahan_2_value">Nilai Diskon Tambahan 2</label>
+                                        <div class="input-group">
+                                            <span class="input-group-addon price-prefix" data-for="disc_tambahan_2_type">Rp</span>
+                                            <input id="disc_tambahan_2_value" name="disc_tambahan_2_value" type="text" inputmode="decimal" data-currency-input data-currency-toggle="disc_tambahan_2_type" data-currency-decimals="0" min="0" step="0.01" class="form-control price-value"
+                                                value="{{ old('disc_tambahan_2_value', $price->disc_tambahan_2_value ?? 0) }}" placeholder="0">
+                                        </div>
+                                        @error('disc_tambahan_2_value') <span class="help-block text-danger">{{ $message }}</span> @enderror
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="price-rule-card price-rule-additional">
+                                <div class="row">
+                                    <div class="col-sm-4">
+                                        <h4 style="margin-top:0"><span class="label label-success">4</span> Diskon Tambahan 3</h4>
+                                        <p class="text-muted small">Potongan bertingkat setelah Diskon Tambahan 2.</p>
+                                    </div>
+                                    <div class="col-sm-4 form-group">
+                                        <label for="disc_tambahan_3_type">Tipe Potongan</label>
+                                        <select id="disc_tambahan_3_type" name="disc_tambahan_3_type" class="form-control select2 price-type" style="width:100%">
+                                            <option value="nominal" {{ $additionalType3 === 'nominal' ? 'selected' : '' }}>Rp — Nominal</option>
+                                            <option value="percentage" {{ $additionalType3 === 'percentage' ? 'selected' : '' }}>% — Persentase</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-sm-4 form-group">
+                                        <label for="disc_tambahan_3_value">Nilai Diskon Tambahan 3</label>
+                                        <div class="input-group">
+                                            <span class="input-group-addon price-prefix" data-for="disc_tambahan_3_type">Rp</span>
+                                            <input id="disc_tambahan_3_value" name="disc_tambahan_3_value" type="text" inputmode="decimal" data-currency-input data-currency-toggle="disc_tambahan_3_type" data-currency-decimals="0" min="0" step="0.01" class="form-control price-value"
+                                                value="{{ old('disc_tambahan_3_value', $price->disc_tambahan_3_value ?? 0) }}" placeholder="0">
+                                        </div>
+                                        @error('disc_tambahan_3_value') <span class="help-block text-danger">{{ $message }}</span> @enderror
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="price-rule-card price-rule-additional">
+                                <div class="row">
+                                    <div class="col-sm-4">
+                                        <h4 style="margin-top:0"><span class="label label-success">5</span> Diskon Tambahan 4</h4>
+                                        <p class="text-muted small">Potongan bertingkat setelah Diskon Tambahan 3 dan sebelum margin.</p>
+                                    </div>
+                                    <div class="col-sm-4 form-group">
+                                        <label for="disc_tambahan_4_type">Tipe Potongan</label>
+                                        <select id="disc_tambahan_4_type" name="disc_tambahan_4_type" class="form-control select2 price-type" style="width:100%">
+                                            <option value="nominal" {{ $additionalType4 === 'nominal' ? 'selected' : '' }}>Rp — Nominal</option>
+                                            <option value="percentage" {{ $additionalType4 === 'percentage' ? 'selected' : '' }}>% — Persentase</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-sm-4 form-group">
+                                        <label for="disc_tambahan_4_value">Nilai Diskon Tambahan 4</label>
+                                        <div class="input-group">
+                                            <span class="input-group-addon price-prefix" data-for="disc_tambahan_4_type">Rp</span>
+                                            <input id="disc_tambahan_4_value" name="disc_tambahan_4_value" type="text" inputmode="decimal" data-currency-input data-currency-toggle="disc_tambahan_4_type" data-currency-decimals="0" min="0" step="0.01" class="form-control price-value"
+                                                value="{{ old('disc_tambahan_4_value', $price->disc_tambahan_4_value ?? 0) }}" placeholder="0">
+                                        </div>
+                                        @error('disc_tambahan_4_value') <span class="help-block text-danger">{{ $message }}</span> @enderror
+                                    </div>
+                                </div>
+                            </div>
+
                             <div class="price-rule-card price-rule-margin">
                                 <div class="row">
                                     <div class="col-sm-4">
-                                        <h4 style="margin-top:0"><span class="label label-success">3</span> Margin</h4>
+                                        <h4 style="margin-top:0"><span class="label label-success">6</span> Margin</h4>
                                         <p class="text-muted small">Keuntungan dihitung dari Harga Dasar setelah dua diskon.</p>
                                     </div>
                                     <div class="col-sm-4 form-group">
@@ -374,7 +497,7 @@
                             <div class="price-rule-card price-rule-store">
                                 <div class="row">
                                     <div class="col-sm-4">
-                                        <h4 style="margin-top:0"><span class="label label-warning">4</span> Diskon Toko</h4>
+                                        <h4 style="margin-top:0"><span class="label label-warning">7</span> Diskon Toko</h4>
                                         <p class="text-muted small">Dipotong dari Harga Aktif untuk mendapatkan Harga Netto.</p>
                                     </div>
                                     <div class="col-sm-4 form-group">
@@ -412,7 +535,7 @@
                             <div class="price-rule-card price-rule-tax">
                                 <div class="row">
                                     <div class="col-sm-4">
-                                        <h4 style="margin-top:0"><span class="label label-danger">5</span> Pajak</h4>
+                                        <h4 style="margin-top:0"><span class="label label-danger">8</span> Pajak</h4>
                                         <p class="text-muted small">Ditambahkan ke HPP sebelum diskon dan margin dihitung.</p>
                                     </div>
                                     <div class="col-sm-4 form-group">
@@ -499,13 +622,26 @@
                         </div>
                         <div class="box-body">
                             <div class="form-group">
-                                <label for="preview_hpp">HPP Terbaru</label>
+                                <label for="preview_hpp">HPP Terbaru <span id="hpp-label-unit" class="text-muted"></span></label>
+                                <div id="hpp-unit-toggle" class="btn-group btn-group-sm" style="display:none;margin-bottom:8px;width:100%">
+                                    <button type="button" class="btn btn-primary active" data-unit="kecil" style="width:50%">Input per <span class="hpp-name-kecil">satuan kecil</span></button>
+                                    <button type="button" class="btn btn-default" data-unit="besar" style="width:50%">Input per <span class="hpp-name-besar">satuan besar</span></button>
+                                </div>
+                                <input type="hidden" name="hpp_unit" id="hpp_unit" value="kecil">
+                                <div id="hpp-besar-group" style="display:none;margin-bottom:8px">
+                                    <label for="preview_hpp_besar" class="small text-muted" style="font-weight:normal">HPP per <span class="hpp-name-besar">satuan besar</span></label>
+                                    <div class="input-group">
+                                        <span class="input-group-addon">Rp</span>
+                                        <input id="preview_hpp_besar" name="hpp_besar" type="text" inputmode="decimal" data-currency-input data-currency-decimals="2" class="form-control" value="" placeholder="0">
+                                    </div>
+                                </div>
                                 <div class="input-group">
                                     <span class="input-group-addon">Rp</span>
-                                    <input id="preview_hpp" name="hpp" type="text" inputmode="numeric" data-currency-input data-currency-decimals="0" min="0" step="1" class="form-control" value="{{ old('hpp', $previewHpp ?? 0) }}">
+                                    <input id="preview_hpp" name="hpp" type="text" inputmode="decimal" data-currency-input data-currency-decimals="2" min="0" step="0.01" class="form-control" value="{{ old('hpp', $previewHpp ?? 0) }}">
                                     <input type="hidden" name="hpp_changed" id="hpp_changed" value="0">
                                 </div>
-                                <p class="help-block">Diisi otomatis dari HPP terbaru produk di outlet ini. Jika angka ini diubah, HPP terbarunya ikut diperbarui saat aturan harga disimpan.</p>
+                                <p class="help-block" id="hpp-unit-hint" style="display:none"></p>
+                                <p class="help-block">Diisi otomatis dari HPP terbaru produk. Jika angka ini diubah, HPP terbarunya ikut diperbarui saat aturan harga disimpan. Harga jual selalu dihitung per satuan kecil.</p>
                             </div>
                             <div class="price-preview-list">
                                 <div><span>HPP</span><strong id="preview-hpp">Rp0</strong></div>
@@ -513,7 +649,10 @@
                                 <div><span>HPP Setelah Pajak</span><strong id="preview-after-tax">Rp0</strong></div>
                                 <div><span>Diskon Reguler</span><strong id="preview-brand">Rp0</strong></div>
                                 <div><span>Harga Akhir</span><strong id="preview-final">Rp0</strong></div>
-                                <div><span>Diskon Tambahan</span><strong id="preview-additional">Rp0</strong></div>
+                                <div><span>Diskon Tambahan 1</span><strong id="preview-additional">Rp0</strong></div>
+                                <div><span>Diskon Tambahan 2</span><strong id="preview-additional-2">Rp0</strong></div>
+                                <div><span>Diskon Tambahan 3</span><strong id="preview-additional-3">Rp0</strong></div>
+                                <div><span>Diskon Tambahan 4</span><strong id="preview-additional-4">Rp0</strong></div>
                                 <div><span>Harga Dasar</span><strong id="preview-base">Rp0</strong></div>
                                 <div><span>Margin</span><strong id="preview-margin">Rp0</strong></div>
                                 <div><span>Harga Aktif</span><strong id="preview-active">Rp0</strong></div>
@@ -590,15 +729,26 @@
                 $toggleBtn.attr('aria-expanded', 'true');
             }
 
-            function closePanel() {
-                $panel.slideUp(150);
+            function closePanel(done) {
+                $panel.slideUp(150, function () {
+                    if (typeof done === 'function') { done(); }
+                });
                 $toggleBtn.attr('aria-expanded', 'false');
             }
 
+            // Edit Barang memakai panel yang sama: tombol "Daftarkan Produk Baru" selalu membuka mode tambah yang bersih.
             $toggleBtn.on('click', function () {
+                if (isEditMode()) {
+                    enterCreateMode();
+                    openPanel();
+                    return;
+                }
                 $panel.is(':visible') ? closePanel() : openPanel();
             });
-            $('#close-new-product-form, #cancel-new-product-form').on('click', closePanel);
+            // Tutup / batal saat mode edit: kembali ke mode tambah (form dikosongkan) setelah panel menutup.
+            $('#close-new-product-form, #cancel-new-product-form').on('click', function () {
+                closePanel(function () { if (isEditMode()) { enterCreateMode(); } });
+            });
 
             $('#toggle-new-product-extra').on('click', function (e) {
                 e.preventDefault();
@@ -694,9 +844,225 @@
             $('#np-status-produk').on('change', refreshStatusNote);
             refreshStatusNote();
 
-            // Outlet diambil dari pilihan outlet di form harga; cegah klik ganda saat menyimpan
-            $('#new-product-form').on('submit', function () {
+            // ======== Mode "Edit Barang" (panel yang sama dengan Daftarkan Produk Baru) ========
+            var productsBase = @json(route('outlet-prices.products.store')); // /outlet-prices/products
+            var editState = { id: null, listingMode: 'closed', listingNominal: null };
+            var flashTimer = null;
+            var $codeInput = $('#product-code-input');
+            var $npForm = $('#new-product-form');
+
+            // function declaration: sudah dipakai handler di atas sebelum baris ini dijalankan (hoisting)
+            function isEditMode() { return editState.id !== null; }
+
+            function showFlash(type, message) {
+                var $flash = $('#np-flash');
+                $flash.attr('class', 'alert alert-' + type).text(message).show();
+                clearTimeout(flashTimer);
+                flashTimer = setTimeout(function () { $flash.fadeOut(200); }, 7000);
+            }
+
+            function clearAjaxErrors() {
+                $('#np-ajax-errors').hide().empty();
+                $npForm.find('.form-group.has-error').removeClass('has-error');
+            }
+
+            function showAjaxErrors(xhr) {
+                var messages = [];
+                var errors = xhr.responseJSON && xhr.responseJSON.errors;
+                if (xhr.status === 422 && errors) {
+                    Object.keys(errors).forEach(function (key) {
+                        var base = key.split('.')[0];
+                        $npForm.find('[name="' + base + '"], [name="' + base + '[]"]').first()
+                            .closest('.form-group').addClass('has-error');
+                        errors[key].forEach(function (m) { if (messages.indexOf(m) === -1) { messages.push(m); } });
+                    });
+                } else if (xhr.status === 419) {
+                    messages.push('Sesi habis. Muat ulang halaman lalu coba simpan lagi (isian form harga akan hilang bila dimuat ulang).');
+                } else if (xhr.status === 403) {
+                    messages.push('Anda tidak punya akses untuk mengedit barang.');
+                } else {
+                    messages.push('Barang gagal disimpan. Coba lagi.');
+                }
+                var $list = $('<ul style="margin-bottom:0;margin-top:8px"></ul>');
+                messages.forEach(function (m) { $list.append($('<li>').text(m)); });
+                $('#np-ajax-errors').empty()
+                    .append($('<strong>').text('Barang belum tersimpan. Periksa kembali input berikut:'))
+                    .append($list).show();
+                $('html, body').animate({ scrollTop: $panel.offset().top - 60 }, 200);
+            }
+
+            function setStatusProduk(value) {
+                // Event native (bukan jQuery trigger): keterangan Listing di partial memakai addEventListener.
+                var el = document.getElementById('np-status-produk');
+                el.value = value || 'sudah';
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+
+            function setExtraOpen(open) {
+                $('#new-product-extra').toggle(open);
+                $('#toggle-new-product-extra i').toggleClass('fa-caret-down', open).toggleClass('fa-caret-right', !open);
+            }
+
+            // Keterangan Listing mode edit, mengikuti kondisi produk (sama dengan halaman edit Product)
+            function renderListingEditInfo() {
+                var $box = $('#np-listing-edit-info');
+                if (!isEditMode() || $('#np-status-produk').val() !== 'listing') { $box.hide(); return; }
+
+                var $alert = $('#np-listing-edit-alert').empty();
+                var cls = 'alert-warning';
+                var html;
+                if (editState.listingMode === 'trigger' && editState.listingNominal) {
+                    cls = 'alert-info';
+                    html = 'Produk ini akan mencatat Other Income Listing sebesar <strong>Rp '
+                        + Number(editState.listingNominal).toLocaleString('id-ID', { maximumFractionDigits: 0 })
+                        + '</strong> (sekali saja).';
+                } else if (editState.listingMode === 'trigger') {
+                    cls = 'alert-danger';
+                    html = 'Nominal Listing belum diatur, sehingga produk <strong>tidak bisa disimpan</strong> dengan status Listing. '
+                        + 'Atur dulu di Other Income &gt; Kategori.';
+                } else if (editState.listingMode === 'recorded') {
+                    html = 'Income Listing produk ini sudah tercatat sebelumnya, jadi tidak akan tercatat lagi.';
+                } else {
+                    html = 'Produk ini sudah tidak memicu Other Income (hanya saat dibuat atau disimpan pertama kali), '
+                        + 'jadi mengubah status ke Listing tidak mencatat income.';
+                }
+                $alert.attr('class', 'alert ' + cls).html('<i class="fa fa-info-circle"></i> ' + html);
+                $box.show();
+            }
+            $('#np-status-produk').on('change', renderListingEditInfo);
+
+            function resetNewProductForm() {
+                $npForm.find('input[name="name"], #product-code-input, #np-satuan-besar, #np-satuan, #np-konversi, '
+                    + '#np-harga-beli, #np-harga-beli-besar, #np-status-note, input[name="brand"], '
+                    + 'input[name="warna"], input[name="ukuran"], input[name="model"], input[name="lokasi"]').val('');
+                $npForm.find('input[name="min_stock"]').val(0);
+                $('#np-harga-per').val('besar');
+                $npForm.find('select[name="category_id"]').val('').trigger('change');
+                $npForm.find('select[name="supplier_ids[]"]').val(null).trigger('change');
+                setStatusProduk('sudah');
+                setExtraOpen(false);
+                refreshHarga();
+            }
+
+            function fillEditForm(data) {
+                $npForm.find('input[name="name"]').val(data.name || '');
+                $codeInput.attr('data-ignore-id', data.id).val(data.code || '');
+                $('#np-satuan-besar').val(data.satuan_besar || '');
+                $('#np-satuan').val(data.satuan || '');
+                $('#np-konversi').val(data.konversi_qty ? String(data.konversi_qty) : '');
+                // Harga kecil (products.harga_beli) adalah acuan; besar dihitung ulang dari kecil x konversi.
+                // Memakai "kecil" supaya produk yang tidak diubah harganya tidak bergeser karena pembulatan.
+                $('#np-harga-per').val('kecil');
+                $('#np-harga-beli').val(fmt(round2(Number(data.harga_beli) || 0)));
+                $('#np-harga-beli-besar').val('');
+                $npForm.find('select[name="category_id"]').val(data.category_id ? String(data.category_id) : '').trigger('change');
+                $npForm.find('select[name="supplier_ids[]"]').val((data.supplier_ids || []).map(String)).trigger('change');
+                setStatusProduk(data.status_produk);
+                $('#np-status-note').val(data.status_produk_note || '');
+                $npForm.find('input[name="brand"]').val(data.brand || '');
+                $npForm.find('input[name="min_stock"]').val(data.min_stock != null ? data.min_stock : 0);
+                $npForm.find('input[name="warna"]').val(data.warna || '');
+                $npForm.find('input[name="ukuran"]').val(data.ukuran || '');
+                $npForm.find('input[name="model"]').val(data.model || '');
+                $npForm.find('input[name="lokasi"]').val(data.lokasi || '');
+                setExtraOpen(!!(data.brand || data.warna || data.ukuran || data.model || data.lokasi));
+                refreshHarga();
+            }
+
+            function enterEditMode(data) {
+                clearAjaxErrors();
+                editState = { id: data.id, listingMode: data.listing_mode, listingNominal: data.listing_nominal };
+                $panel.addClass('np-mode-edit');
+                $('#np-title').text('Edit Barang');
+                $('#np-title-icon').attr('class', 'fa fa-pencil');
+                $('#np-submit-label').text('Simpan Perubahan');
+                $npForm.attr('action', productsBase + '/' + data.id);
+                $('#np-method').prop('disabled', false);
+                fillEditForm(data);
+                renderListingEditInfo();
+                $codeInput.trigger('barcode:recheck'); // cek barcode dengan mengecualikan produk ini sendiri
+            }
+
+            function enterCreateMode() {
+                if (!isEditMode()) { return; }
+                clearAjaxErrors();
+                editState = { id: null, listingMode: 'closed', listingNominal: null };
+                $panel.removeClass('np-mode-edit');
+                $('#np-title').text('Daftarkan Produk Baru');
+                $('#np-title-icon').attr('class', 'fa fa-plus-square');
+                $('#np-submit-label').text('Simpan & Atur Harga');
+                $npForm.attr('action', productsBase);
+                $('#np-method').prop('disabled', true);
+                $codeInput.removeAttr('data-ignore-id');
+                resetNewProductForm();
+                renderListingEditInfo();
+                $codeInput.trigger('barcode:recheck'); // kode kosong = status cek barcode dibersihkan
+            }
+
+            // Tombol "Edit Barang" aktif hanya setelah produk dipilih
+            function syncEditButton() {
+                var hasProduct = !!$('#product_id').val();
+                $('#edit-product-btn').prop('disabled', !hasProduct);
+                $('#edit-product-hint').toggle(!hasProduct);
+            }
+            $('#product_id').on('change', function () {
+                syncEditButton();
+                // Ganti produk saat panel masih mode edit: tutup supaya tidak mengedit produk yang salah.
+                if (isEditMode() && String($(this).val()) !== String(editState.id)) {
+                    closePanel(enterCreateMode);
+                }
+            });
+            syncEditButton();
+
+            $('#edit-product-btn').on('click', function () {
+                var productId = $('#product_id').val();
+                if (!productId) { return; }
+
+                // Panel masih berisi isian "Daftarkan Produk Baru": jangan timpa diam-diam.
+                if ($panel.is(':visible') && !isEditMode()
+                    && ($.trim($npForm.find('input[name="name"]').val()) !== '' || $.trim($codeInput.val()) !== '')
+                    && !window.confirm('Isian "Daftarkan Produk Baru" akan diganti dengan data barang yang dipilih. Lanjutkan?')) {
+                    return;
+                }
+
+                var $btn = $(this).prop('disabled', true);
+                $('#np-flash').hide();
+                $.getJSON(productsBase + '/' + productId)
+                    .done(function (data) {
+                        enterEditMode(data);
+                        openPanel();
+                    })
+                    .fail(function () { showFlash('danger', 'Data barang gagal dimuat. Coba lagi.'); })
+                    .always(syncEditButton);
+            });
+
+            function submitEdit() {
+                var $submit = $('#submit-new-product-form').prop('disabled', true);
+                clearAjaxErrors();
+                $.ajax({
+                    url: $npForm.attr('action'),
+                    method: 'POST', // _method=PUT ikut terkirim di data form
+                    data: $npForm.serialize(),
+                    dataType: 'json',
+                    headers: { 'Accept': 'application/json' }
+                }).done(function (res) {
+                    // Produk tetap terpilih; panel menutup tanpa reload sehingga isian form harga aman.
+                    closePanel(enterCreateMode);
+                    showFlash('success', res.message || 'Barang berhasil diperbarui.');
+                    if (window.outletPriceProductUpdated) { window.outletPriceProductUpdated(res.product); }
+                }).fail(showAjaxErrors)
+                  .always(function () { $submit.prop('disabled', false); });
+            }
+
+            // Outlet diambil dari pilihan outlet di form harga; cegah klik ganda saat menyimpan.
+            // (Handler cek barcode duplikat terpasang lebih dulu dan menahan submit bila barcode bentrok.)
+            $npForm.on('submit', function (e) {
                 $('#new-product-outlet-id').val($('#outlet_id').val() || '');
+                if (isEditMode()) {
+                    e.preventDefault();
+                    submitEdit();
+                    return;
+                }
                 $('#submit-new-product-form').prop('disabled', true);
             });
 
@@ -713,6 +1079,10 @@
     </script>
     @endif
     <style>
+        /* Panel barang dipakai untuk dua mode: tambah (default) dan edit (kelas np-mode-edit dari JS) */
+        #new-product-panel .np-edit-only { display: none; }
+        #new-product-panel.np-mode-edit .np-edit-only { display: block; }
+        #new-product-panel.np-mode-edit .np-create-only { display: none !important; }
         .price-rule-card {
             border: 1px solid #e5e7eb;
             border-left: 4px solid #3c8dbc;
@@ -956,7 +1326,14 @@
                 const brand = round(discount(hppSetelahPajak, $('#disc_brand_type').val(), number('#disc_brand_value')));
                 const hargaAkhir = Math.max(0, round(hppSetelahPajak - brand));
                 const additional = round(discount(hargaAkhir, $('#disc_tambahan_type').val(), number('#disc_tambahan_value')));
-                const hargaDasar = Math.max(0, round(hargaAkhir - additional));
+                let hargaDasar = Math.max(0, round(hargaAkhir - additional));
+                // Diskon Tambahan 2-4 bertingkat: masing-masing dari harga setelah diskon sebelumnya.
+                const additionalExtra = {};
+                [2, 3, 4].forEach(function (n) {
+                    const amount = round(discount(hargaDasar, $('#disc_tambahan_' + n + '_type').val(), number('#disc_tambahan_' + n + '_value')));
+                    additionalExtra[n] = amount;
+                    hargaDasar = Math.max(0, round(hargaDasar - amount));
+                });
                 const margin = $('#margin_type').val() === 'percentage'
                     ? round(hargaDasar * number('#margin_value') / 100)
                     : round(number('#margin_value'));
@@ -973,6 +1350,7 @@
                 $('#preview-brand').text(money(brand));
                 $('#preview-final').text(money(hargaAkhir));
                 $('#preview-additional').text(money(additional));
+                [2, 3, 4].forEach(function (n) { $('#preview-additional-' + n).text(money(additionalExtra[n])); });
                 $('#preview-base').text(money(hargaDasar));
                 $('#preview-margin').text(money(margin));
                 $('#preview-active').text(money(hargaAktif));
@@ -1003,23 +1381,131 @@
             // untuk menentukan apakah HPP terbaru perlu diperbarui.
             let loadedHpp = Number(@json((float) ($previewHpp ?? 0)));
             $('#price-rule-form').on('submit', function () {
-                const changed = Math.round(number('#preview_hpp')) !== Math.round(loadedHpp);
+                const changed = Math.round((number('#preview_hpp') || 0) * 100) !== Math.round(loadedHpp * 100);
                 $('#hpp_changed').val(changed ? '1' : '0');
             });
-            $('#outlet_id, #product_id').on('change', function () {
+            // ===== Input HPP per satuan kecil / besar =====
+            // Harga jual tetap dihitung per satuan kecil; di mode besar, HPP kecil = HPP besar / konversi.
+            let unitInfo = null; // { satuan, satuan_besar, konversi_qty } bila produk punya satuan besar
+            const fmtId = (n) => Number(n).toLocaleString('id-ID', { maximumFractionDigits: 2 });
+            const round2c = (n) => Math.round(n * 100) / 100;
+            const unitKonversi = () => (unitInfo ? Number(unitInfo.konversi_qty) || 0 : 0);
+
+            function updateHppUnitHint() {
+                const $hint = $('#hpp-unit-hint');
+                if (!unitInfo) { $hint.hide(); return; }
+                const konv = unitKonversi();
+                if ($('#hpp_unit').val() === 'besar') {
+                    $hint.text('1 ' + unitInfo.satuan_besar + ' = ' + konv + ' ' + unitInfo.satuan + '. HPP per ' + unitInfo.satuan
+                        + ' = HPP per ' + unitInfo.satuan_besar + ' ÷ ' + konv + ' (otomatis).').show();
+                } else {
+                    $hint.text('≈ ' + rupiah((number('#preview_hpp') || 0) * konv) + ' per ' + unitInfo.satuan_besar
+                        + ' (1 ' + unitInfo.satuan_besar + ' = ' + konv + ' ' + unitInfo.satuan + ').').show();
+                }
+            }
+
+            function setHppUnit(unit) {
+                if (unit === 'besar' && unitKonversi() < 1) { unit = 'kecil'; }
+                const isBesar = unit === 'besar';
+                $('#hpp_unit').val(unit);
+                $('#hpp-unit-toggle button').removeClass('active btn-primary').addClass('btn-default');
+                $('#hpp-unit-toggle button[data-unit="' + unit + '"]').removeClass('btn-default').addClass('active btn-primary');
+                $('#hpp-besar-group').toggle(isBesar);
+                $('#preview_hpp').prop('readonly', isBesar);
+                if (isBesar) {
+                    $('#preview_hpp_besar').val(fmtId(Math.round((number('#preview_hpp') || 0) * unitKonversi())));
+                    window.initCurrencyInputs?.($('#preview_hpp_besar')[0]);
+                } else {
+                    $('#preview_hpp_besar').val('');
+                }
+                updateHppUnitHint();
+            }
+
+            function setUnitInfo(data) {
+                unitInfo = data && data.satuan_besar && Number(data.konversi_qty) >= 1
+                    ? { satuan: data.satuan || 'satuan kecil', satuan_besar: data.satuan_besar, konversi_qty: Number(data.konversi_qty) }
+                    : null;
+                $('#hpp-unit-toggle').toggle(!!unitInfo);
+                $('#hpp-label-unit').text(data && data.satuan ? '(per ' + data.satuan + ')' : '');
+                $('.hpp-name-kecil').text(data && data.satuan ? data.satuan : 'satuan kecil');
+                $('.hpp-name-besar').text(unitInfo ? unitInfo.satuan_besar : 'satuan besar');
+                setHppUnit('kecil');
+            }
+
+            $('#hpp-unit-toggle button').on('click', function () { setHppUnit($(this).data('unit')); });
+
+            $('#preview_hpp_besar').on('input', function () {
+                const konv = unitKonversi();
+                if (konv < 1) { return; }
+                const kecil = round2c((number('#preview_hpp_besar') || 0) / konv);
+                $('#preview_hpp').val(fmtId(kecil));
+                window.initCurrencyInputs?.($('#preview_hpp')[0]);
+                $('#preview_hpp').trigger('input');
+            });
+            $('#preview_hpp').on('input', updateHppUnitHint);
+
+            // Info HPP kecil/besar, satuan & konversi. HPP sama di semua outlet,
+            // jadi cukup produk yang dipilih; outlet hanya dikirim bila sudah dipilih.
+            const rupiah = (v) => 'Rp' + Math.round(Number(v) || 0).toLocaleString('id-ID');
+
+            function renderProductInfo(data) {
+                setUnitInfo(data);
+                if (!data) {
+                    $('#product-unit-info').hide();
+                    return;
+                }
+                const hasBesar = !!data.satuan_besar;
+                $('#pui-hpp-kecil').text(rupiah(data.hpp_kecil) + (data.satuan ? ' / ' + data.satuan : ''));
+                $('#pui-hpp-besar').text(hasBesar ? rupiah(data.hpp_besar) + ' / ' + data.satuan_besar : '-');
+                $('#pui-satuan').text((data.satuan || '-') + (hasBesar ? ' / ' + data.satuan_besar : ''));
+                $('#pui-konversi').text(hasBesar ? data.konversi_text : '-');
+                $('#product-unit-info').show();
+            }
+
+            function loadProductHpp(fillHpp) {
                 const outletId = $('#outlet_id').val();
                 const productId = $('#product_id').val();
-                if (!outletId || !productId) {
+                if (!productId) {
+                    renderProductInfo(null);
                     updatePreview();
                     return;
                 }
-                $.get('{{ route('outlet-prices.preview-hpp') }}', { outlet_id: outletId, product_id: productId })
+                const params = { product_id: productId };
+                if (outletId) {
+                    params.outlet_id = outletId;
+                }
+                $.get('{{ route('outlet-prices.preview-hpp') }}', params)
                     .done(function (data) {
-                        loadedHpp = Number(data.hpp) || 0;
-                        $('#preview_hpp').val(data.hpp).trigger('input');
+                        renderProductInfo(data);
+                        if (fillHpp) {
+                            loadedHpp = Number(data.hpp) || 0;
+                            $('#preview_hpp').val(data.hpp);
+                            window.initCurrencyInputs?.($('#preview_hpp')[0]);
+                            $('#preview_hpp').trigger('input');
+                        }
                     });
                 updatePreview();
+            }
+
+            $('#outlet_id, #product_id').on('change', function () {
+                loadProductHpp(true);
             });
+            // Dipanggil panel "Edit Barang" setelah barang tersimpan: kode/nama di pilihan produk ikut berubah dan
+            // info HPP, satuan & konversi dimuat ulang. HPP di kalkulator ikut data baru hanya bila belum diubah manual,
+            // supaya angka yang sedang diketik tidak tertimpa.
+            window.outletPriceProductUpdated = function (product) {
+                const $select = $('#product_id');
+                $select.find('option[value="' + product.id + '"]').text(product.code + ' — ' + product.name);
+                $select.trigger('change.select2'); // segarkan tampilan select2 tanpa memicu pemuatan HPP otomatis
+                const untouched = Math.round((number('#preview_hpp') || 0) * 100) === Math.round(loadedHpp * 100);
+                loadProductHpp(untouched);
+            };
+            // Saat halaman dibuka dengan produk sudah terpilih (edit / setelah daftar produk baru):
+            // tampilkan info; isi HPP hanya bila ini form baru dan HPP-nya masih kosong.
+            if ($('#product_id').val()) {
+                const emptyHpp = Math.round(number('#preview_hpp')) === 0;
+                loadProductHpp(!{{ $price->exists ? 'true' : 'false' }} && emptyHpp);
+            }
             updatePrefixes();
             applyOutletAdjustmentDefault(true);
         });
