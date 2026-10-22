@@ -24,11 +24,13 @@ class DbSyncRun extends Command
             $this->option('group') ? $sync->tablesForGroups($this->option('group')) : []
         );
 
+        $reported = [];
         $result = $sync->run(
             $tables,
             (bool) $this->option('force'),
             (bool) $this->option('dry-run'),
-            function (string $table, array $stats) use ($verbose) {
+            function (string $table, array $stats) use ($verbose, &$reported) {
+                $reported[$table] = true;
                 foreach (array_merge($stats['errors'] ?? [], $stats['warnings'] ?? []) as $error) {
                     $this->warn("[$table] $error");
                 }
@@ -43,6 +45,13 @@ class DbSyncRun extends Command
                 }
             }
         );
+
+        // Tabel yang gagal sebelum disinkron (mis. struktur kolom berbeda) tidak lewat callback di atas.
+        foreach (array_diff_key($result['tables'] ?? [], $reported) as $table => $stats) {
+            foreach ($stats['errors'] ?? [] as $error) {
+                $this->warn("[$table] $error");
+            }
+        }
 
         if ($result['error']) {
             $this->error('Sinkron gagal: '.$result['error']);

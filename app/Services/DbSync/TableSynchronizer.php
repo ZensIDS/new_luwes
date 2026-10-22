@@ -432,7 +432,14 @@ class TableSynchronizer
             throw new SyncDeferred;
         }
 
-        if (array_key_exists('created_at', $local) && ! RowMerger::same($local['created_at'], $server['created_at'] ?? null)) {
+        // created_at beda DAN ada kolom data lain yang beda -> kemungkinan dua baris berbeda memakai id sama.
+        // Bila yang beda hanya created_at/updated_at, itu baris yang sama: menang yang terbaru.
+        $dataDiffers = ! RowMerger::sameRow(
+            array_diff_key($local, array_flip(RowMerger::TIMESTAMPS)),
+            array_diff_key($server, array_flip(RowMerger::TIMESTAMPS))
+        );
+
+        if ($dataDiffers && array_key_exists('created_at', $local) && ! RowMerger::same($local['created_at'], $server['created_at'] ?? null)) {
             throw new SyncConflict(
                 'data berbeda di lokal & hosting (created_at berbeda) — kemungkinan id bentrok. '
                 .'Pastikan DB_AUTO_INCREMENT_OFFSET lokal & hosting berbeda.'
@@ -512,6 +519,12 @@ class TableSynchronizer
 
         $this->syncRow($id, $action, $l['__h'] ?? null, $s['__h'] ?? null);
 
+        return $this->stats;
+    }
+
+    /** Statistik kumulatif instance ini (untuk menyelesaikan banyak konflik berurutan). */
+    public function stats(): array
+    {
         return $this->stats;
     }
 

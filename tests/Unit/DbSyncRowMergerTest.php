@@ -111,4 +111,31 @@ class DbSyncRowMergerTest extends TestCase
             'id' => 'same',
         ], $this->merger()->columnStates($local, $server, $base));
     }
+
+    public function test_timestamp_only_difference_is_not_a_conflict_and_newest_wins()
+    {
+        $local = ['id' => 7, 'name' => 'Gula', 'created_at' => '2026-09-25 13:12:07', 'updated_at' => '2026-09-25 13:12:07'];
+        $server = ['created_at' => '2026-09-25 13:47:00', 'updated_at' => '2026-09-25 13:47:00'] + $local;
+
+        // belum pernah sinkron (base null) maupun sesudahnya
+        foreach ([null, ['created_at' => '2026-09-25 13:00:00', 'updated_at' => '2026-09-25 13:00:00'] + $local] as $base) {
+            $this->assertSame([], $this->merger()->conflicts($local, $server, $base));
+
+            $states = $this->merger()->columnStates($local, $server, $base);
+            $this->assertSame('merged', $states['created_at']);
+            $this->assertSame('merged', $states['updated_at']);
+
+            $merged = $this->merger()->merge($local, $server, $base);
+            $this->assertSame('2026-09-25 13:47:00', $merged['created_at']);
+            $this->assertSame('2026-09-25 13:47:00', $merged['updated_at']);
+        }
+    }
+
+    public function test_timestamps_with_other_changed_column_is_still_a_conflict()
+    {
+        $local = ['id' => 7, 'name' => 'Gula Lokal', 'created_at' => '2026-09-25 13:12:07', 'updated_at' => '2026-09-25 13:12:07'];
+        $server = ['name' => 'Gula Hosting', 'created_at' => '2026-09-25 13:47:00', 'updated_at' => '2026-09-25 13:47:00'] + $local;
+
+        $this->assertSame(['name'], $this->merger()->conflicts($local, $server, null));
+    }
 }

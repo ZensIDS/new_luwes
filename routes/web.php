@@ -69,6 +69,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::middleware('role:owner|superadmin')->group(function () {
         Route::post('/db-sync/run', [DbSyncStatusController::class, 'run'])->name('db-sync.run');
         Route::post('/db-sync/resolve', [DbSyncStatusController::class, 'resolve'])->name('db-sync.resolve');
+        Route::post('/db-sync/resolve-all', [DbSyncStatusController::class, 'resolveAll'])->name('db-sync.resolve-all');
     });
     Route::get('/setting', [DashboardController::class, 'setting'])->name('setting');
     Route::post('/setting-store', [DashboardController::class, 'store'])->name('setting.store');

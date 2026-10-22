@@ -208,6 +208,44 @@ class DbSyncService
         return $this->tableSynchronizer($table)->resolveConflict($id, $keep);
     }
 
+    /**
+     * Selesaikan banyak konflik sekaligus memakai versi yang sama (lokal / hosting / terbaru).
+     *
+     * @param  array<int, array{table: string, id: int|string}>  $rows
+     * @return array{resolved: string[], failed: array<string, string>} kunci "tabel#id"
+     */
+    public function resolveConflicts(array $rows, string $keep): array
+    {
+        $resolved = [];
+        $failed = [];
+
+        foreach (collect($rows)->groupBy('table') as $table => $tableRows) {
+            try {
+                $synchronizer = $this->tableSynchronizer($table);
+            } catch (Throwable $e) {
+                foreach ($tableRows as $row) {
+                    $failed[$table.'#'.$row['id']] = $e->getMessage();
+                }
+
+                continue;
+            }
+
+            foreach ($tableRows->pluck('id')->unique() as $id) {
+                $key = $table.'#'.$id;
+                $before = $synchronizer->stats();
+                $after = $synchronizer->resolveConflict($id, $keep);
+
+                if ($after['failed'] > $before['failed'] || $after['conflicts'] > $before['conflicts'] || $after['deferred'] > $before['deferred']) {
+                    $failed[$key] = end($after['errors']) ?: (end($after['warnings']) ?: 'Baris sedang diubah saat ini, coba lagi.');
+                } else {
+                    $resolved[] = $key;
+                }
+            }
+        }
+
+        return ['resolved' => $resolved, 'failed' => $failed];
+    }
+
     /** Bandingkan satu baris di lokal & hosting (lihat TableSynchronizer::inspect). */
     public function inspectRow(string $table, int|string $id): array
     {
@@ -324,13 +362,16 @@ class DbSyncService
             $l = $localColumns[$table] ?? null;
             $s = $serverColumns[$table] ?? null;
 
+            $onlyLocal = $l && $s ? array_diff(array_keys($l), array_keys($s)) : [];
+            $onlyServer = $l && $s ? array_diff(array_keys($s), array_keys($l)) : [];
+
             $problem = match (true) {
-                $l === null => 'tabel tidak ada di server lokal',
-                $s === null => 'tabel tidak ada di hosting',
-                array_keys($l) != array_keys($s) => 'kolom berbeda: '.implode(', ', array_merge(
-                    array_diff(array_keys($l), array_keys($s)),
-                    array_diff(array_keys($s), array_keys($l))
-                )),
+                $l === null => 'tabel tidak ada di server lokal (jalankan migrasi di lokal: make migrate)',
+                $s === null => 'tabel tidak ada di hosting (jalankan php artisan migrate --force di hosting)',
+                $onlyLocal || $onlyServer => 'struktur kolom berbeda'
+                    .($onlyLocal ? '; hanya ada di lokal: '.implode(', ', $onlyLocal) : '')
+                    .($onlyServer ? '; hanya ada di hosting: '.implode(', ', $onlyServer) : '')
+                    .'. Samakan versi aplikasi & migrasi lokal dan hosting.',
                 ! isset($l['id']) => 'tidak punya kolom id',
                 default => null,
             };
@@ -366,6 +407,12 @@ class DbSyncService
         $tables = [];
         foreach ($rows as $row) {
             $tables[$row->t][$row->n] = ['type' => strtolower($row->d), 'generated' => (bool) $row->g];
+        }
+
+        // Urutkan di PHP: MySQL 8 dan MariaDB mengurutkan "_" berbeda (collation information_schema),
+        // jadi urutan ORDER BY tidak bisa dibandingkan antar server.
+        foreach ($tables as &$columns) {
+            ksort($columns, SORT_STRING);
         }
 
         return $tables;

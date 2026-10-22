@@ -85,22 +85,33 @@ class DbSyncStatus
         }
     }
 
-    private function lastRun(): ?array
+    /**
+     * Semua baris konflik dari sinkron terakhir (untuk "selesaikan semua konflik").
+     *
+     * @return array<int, array{table: string, id: int|string, detail: string}>
+     */
+    public function conflictRows(): array
     {
-        $run = rescue(fn () => DB::table('db_sync_runs')
+        $run = $this->latestRun();
+
+        return $run ? $this->collect($run)[1] : [];
+    }
+
+    private function latestRun(): ?object
+    {
+        return rescue(fn () => DB::table('db_sync_runs')
             ->where('status', '!=', 'running')
             ->latest('started_at')
             ->latest('id')
             ->first(), null, false);
+    }
 
-        if (! $run) {
-            return null;
-        }
-
-        $tables = json_decode((string) $run->summary, true) ?: [];
+    /** @return array{0: string[], 1: array[]} [error, konflik] dari ringkasan per tabel */
+    private function collect(object $run): array
+    {
         $errors = [];
         $conflicts = [];
-        foreach ($tables as $table => $stats) {
+        foreach (json_decode((string) $run->summary, true) ?: [] as $table => $stats) {
             foreach ($stats['errors'] ?? [] as $error) {
                 $errors[] = "$table: $error";
             }
@@ -108,6 +119,19 @@ class DbSyncStatus
                 $conflicts[] = ['table' => $table] + $row;
             }
         }
+
+        return [$errors, $conflicts];
+    }
+
+    private function lastRun(): ?array
+    {
+        $run = $this->latestRun();
+
+        if (! $run) {
+            return null;
+        }
+
+        [$errors, $conflicts] = $this->collect($run);
 
         return [
             'status' => $run->status,

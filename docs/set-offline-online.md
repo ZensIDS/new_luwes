@@ -503,6 +503,15 @@ per kolom: nilai **saat sinkron terakhir**, nilai **lokal**, dan nilai **hosting
 Kolom versi yang terakhir diubah ditandai *(terbaru)*. Lalu klik **Lokal**, **Hosting**, atau **Terbaru**
 (khusus owner & superadmin).
 
+Bila hanya `created_at` / `updated_at` yang berbeda, baris **tidak** dianggap konflik: kedua sisi otomatis
+disamakan ke versi terbaru.
+
+**Banyak konflik sekaligus:** tombol **Selesaikan Semua Konflik** (di sebelah *Sinkron Sekarang*) menyamakan
+semua baris konflik dari sinkron terakhir dengan satu pilihan: **Pakai semua dari Hosting**, **Pakai semua dari
+Lokal**, atau **Pakai yang terbaru (per baris)**. Bila ada modul yang dipilih, hanya konflik di tabel modul itu
+yang diproses. Pilihan ini menimpa data sisi lain dan tidak bisa dibatalkan, jadi lihat dulu beberapa
+perbedaannya.
+
 **Dari terminal PC server:** pilih versi yang benar, lalu jalankan:
 
 ```bash

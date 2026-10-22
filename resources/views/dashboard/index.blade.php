@@ -510,6 +510,19 @@
                                 <button type="button" class="btn btn-primary btn-sm" id="dbSyncBtnRun">
                                     <i class="fa fa-refresh"></i> Sinkron Sekarang
                                 </button>
+                                <div class="btn-group">
+                                    <button type="button" class="btn btn-warning btn-sm dropdown-toggle" id="dbSyncBtnBulk" data-toggle="dropdown" disabled
+                                        title="Samakan semua baris konflik dari sinkron terakhir sekaligus">
+                                        <i class="fa fa-random"></i> Selesaikan Semua Konflik
+                                        <span class="badge" id="dbSyncBulkCount">0</span> <span class="caret"></span>
+                                    </button>
+                                    <ul class="dropdown-menu">
+                                        <li><a href="#" class="dbsync-bulk" data-keep="server"><i class="fa fa-cloud-download"></i> Pakai semua dari Hosting</a></li>
+                                        <li><a href="#" class="dbsync-bulk" data-keep="local"><i class="fa fa-hdd-o"></i> Pakai semua dari Lokal</a></li>
+                                        <li class="divider"></li>
+                                        <li><a href="#" class="dbsync-bulk" data-keep="newest"><i class="fa fa-clock-o"></i> Pakai yang terbaru (per baris)</a></li>
+                                    </ul>
+                                </div>
                             </div>
                             <p id="dbSyncScope" class="small text-muted" style="margin:6px 0 0"></p>
                             <div id="dbSyncResult" style="display:none;margin-top:10px"></div>
@@ -821,6 +834,7 @@
             let canManage = false;
             let groups = {};
             let resolved = { run: null, keys: new Set() };   // konflik yang sudah diselesaikan sejak sinkron terakhir
+            let conflicts = [];                               // konflik yang masih tampil
 
             function render(s) {
                 const h = HEALTH[s.health] || HEALTH.unconfigured;
@@ -879,7 +893,9 @@
                 }
             }
 
-            function renderConflicts(conflicts) {
+            function renderConflicts(list) {
+                conflicts = list;
+                updateBulk();
                 $('#dbSyncConflicts').toggle(conflicts.length > 0);
                 $('#dbSyncConflictRows').html(conflicts.map((c) => {
                     const data = 'data-table="' + esc(c.table) + '" data-id="' + esc(String(c.id)) + '"';
@@ -930,7 +946,21 @@
                 $('#dbSyncActions button, .dbsync-keep').prop('disabled', on);
                 if (on) {
                     $('#dbSyncResult').show().html('<p class="text-muted"><i class="fa fa-spinner fa-spin"></i> ' + esc(text) + '</p>');
+                } else {
+                    updateBulk();
                 }
+            }
+
+            // Konflik yang ikut "Selesaikan Semua Konflik" (bila modul dipilih: hanya tabel modul itu).
+            function bulkConflicts() {
+                const tables = selectedTables();
+                return tables.length ? conflicts.filter((c) => tables.includes(c.table)) : conflicts;
+            }
+
+            function updateBulk() {
+                const n = bulkConflicts().length;
+                $('#dbSyncBulkCount').text(n);
+                $('#dbSyncBtnBulk').prop('disabled', n === 0);
             }
 
             function post(url, data) {
@@ -952,7 +982,7 @@
                     : '<i class="fa fa-info-circle"></i> Tidak memilih modul = semua tabel disinkron. Hanya baris yang berubah yang dikirim, jadi tetap cepat.');
             }
 
-            $('#dbSyncGroups').on('change', renderScope);
+            $('#dbSyncGroups').on('change', () => { renderScope(); updateBulk(); });
 
             function runSync(dryRun) {
                 const keys = $('#dbSyncGroups').val() || [];
@@ -972,6 +1002,37 @@
                     .fail((xhr) => $('#dbSyncResult').show().html('<div class="alert alert-danger" style="padding:8px 12px">' + esc(failMessage(xhr)) + '</div>'))
                     .always(() => busy(false));
             }
+
+            $(document).on('click', '.dbsync-bulk', function (e) {
+                e.preventDefault();
+                const keep = $(this).data('keep');
+                const keys = $('#dbSyncGroups').val() || [];
+                const n = bulkConflicts().length;
+                const label = {
+                    server: 'versi HOSTING (data lokal pada baris itu ditimpa)',
+                    local: 'versi LOKAL (data hosting pada baris itu ditimpa)',
+                    newest: 'versi yang TERAKHIR diubah di tiap baris',
+                }[keep];
+
+                if (!n || !confirm('Samakan ' + n + ' baris konflik' + (keys.length ? ' di modul terpilih' : '') + ' memakai ' + label + '?\n\nTidak bisa dibatalkan.')) {
+                    return;
+                }
+
+                busy(true, 'Menyelesaikan ' + n + ' konflik…');
+                post(@json(route('db-sync.resolve-all')), { keep, groups: keys })
+                    .done((r) => {
+                        (r.resolved || []).forEach((key) => resolved.keys.add(key));
+                        $('#dbSyncConflictRows tr').filter((i, tr) => resolved.keys.has($(tr).data('key'))).remove();
+                        renderConflicts(conflicts.filter((c) => !resolved.keys.has(c.table + '#' + c.id)));
+                        const failed = Object.entries(r.failed || {});
+                        $('#dbSyncResult').show().html('<div class="alert alert-' + (failed.length ? 'warning' : 'success') + '" style="padding:8px 12px">'
+                            + esc(r.message)
+                            + (failed.length ? '<br><small>' + failed.slice(0, 10).map(([k, m]) => esc(k + ': ' + m)).join('<br>') + '</small>' : '')
+                            + '</div>');
+                    })
+                    .fail((xhr) => $('#dbSyncResult').show().html('<div class="alert alert-danger" style="padding:8px 12px">' + esc(failMessage(xhr)) + '</div>'))
+                    .always(() => busy(false));
+            });
 
             $('#dbSyncBtnStatus').on('click', load);
             $('#dbSyncBtnDry').on('click', () => runSync(true));
@@ -1061,6 +1122,7 @@
                     .done((r) => {
                         resolved.keys.add(table + '#' + id);
                         $row.remove();
+                        conflicts = conflicts.filter((c) => !resolved.keys.has(c.table + '#' + c.id));
                         $('#dbSyncConflicts').toggle($('#dbSyncConflictRows tr').length > 0);
                         $('#dbSyncResult').show().html('<div class="alert alert-success" style="padding:8px 12px">' + esc(r.message) + '</div>');
                     })

@@ -11,9 +11,15 @@ namespace App\Services\DbSync;
  *  - kolom penghitung (additive)          -> lokal + hosting - dasar (stok terjual di dua tempat tetap terhitung)
  *  - kolom max                            -> nilai terbesar
  *  - selain itu                           -> menang baris dengan updated_at terbaru
+ *
+ * created_at / updated_at yang berbeda TANPA perubahan kolom lain yang bentrok tidak dianggap
+ * konflik: kedua sisi disamakan ke baris dengan updated_at terbaru.
  */
 class RowMerger
 {
+    /** Kolom waktu yang beda nilainya saja tidak membuat konflik. */
+    public const TIMESTAMPS = ['created_at', 'updated_at'];
+
     /**
      * @param  string[]  $additive
      * @param  string[]  $max
@@ -63,7 +69,7 @@ class RowMerger
 
     /**
      * Kolom yang benar-benar bentrok: diubah di dua sisi ke nilai berbeda dan bukan
-     * kolom penghitung / max / updated_at (yang bisa digabung tanpa kehilangan data).
+     * kolom penghitung / max / created_at / updated_at (yang bisa digabung tanpa kehilangan data).
      *
      * @return string[]
      */
@@ -99,7 +105,7 @@ class RowMerger
             $b = $base[$column] ?? null;
             $localChanged = $base === null || ! self::same($l, $b);
             $serverChanged = $base === null || ! self::same($s, $b);
-            $mergeable = $column === 'updated_at' || ($base !== null && (
+            $mergeable = in_array($column, self::TIMESTAMPS, true) || ($base !== null && (
                 in_array($column, $this->max, true)
                 || (in_array($column, $this->additive, true) && self::numeric($l, $s, $b))
             ));

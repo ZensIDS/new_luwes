@@ -81,6 +81,47 @@ class DbSyncStatusController extends Controller
         return response()->json(['message' => "Baris {$data['table']} #{$data['id']} disamakan memakai versi {$data['keep']}."]);
     }
 
+    /**
+     * Selesaikan SEMUA konflik dari sinkron terakhir sekaligus memakai versi lokal / hosting
+     * (bila modul dipilih: hanya konflik di tabel modul itu).
+     */
+    public function resolveAll(Request $request, DbSyncService $sync, DbSyncStatus $status): JsonResponse
+    {
+        abort_unless($this->canManage($request), 403);
+
+        $data = $request->validate([
+            'keep' => ['required', Rule::in(['local', 'server', 'newest'])],
+            'groups' => ['nullable', 'array'],
+            'groups.*' => ['string', Rule::in(array_keys($sync->groups()))],
+        ]);
+
+        $rows = $status->conflictRows();
+        if ($data['groups'] ?? []) {
+            $tables = $sync->tablesForGroups($data['groups']);
+            $rows = array_values(array_filter($rows, fn ($row) => in_array($row['table'], $tables, true)));
+        }
+
+        if (! $rows) {
+            return response()->json(['message' => 'Tidak ada konflik untuk diselesaikan.', 'resolved' => [], 'failed' => []]);
+        }
+
+        set_time_limit(0);
+        ignore_user_abort(true);
+
+        try {
+            $result = $sync->resolveConflicts($rows, $data['keep']);
+        } catch (Throwable $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        $label = ['local' => 'LOKAL', 'server' => 'HOSTING', 'newest' => 'TERBARU'][$data['keep']];
+
+        return response()->json($result + [
+            'message' => count($result['resolved'])." konflik disamakan memakai versi $label"
+                .($result['failed'] ? ', '.count($result['failed']).' gagal.' : '.'),
+        ]);
+    }
+
     /** Perbedaan data satu baris (lokal vs hosting vs sinkron terakhir) untuk modal konflik di dashboard. */
     public function conflict(Request $request, DbSyncService $sync): JsonResponse
     {
