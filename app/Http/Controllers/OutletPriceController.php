@@ -533,6 +533,11 @@ class OutletPriceController extends Controller
             'method' => 'PUT',
             'action' => route('outlet-prices.update', $outletPrice),
             'previewHpp' => app(LatestHpp::class)->forProduct((int) $outletPrice->outlet_id, (int) $outletPrice->product_id),
+            // Panel "Edit Barang" (sama seperti di form tambah; tombol Daftarkan Produk Baru tidak ditampilkan di sini)
+            'categories' => Category::orderBy('name')->get(['id', 'name']),
+            'suppliers' => Supplier::orderBy('name')->get(['id', 'name']),
+            'statusProdukOptions' => Product::STATUS_PRODUK,
+            'listingNominal' => app(OtherIncomeService::class)->listingNominal(),
         ]);
     }
 
