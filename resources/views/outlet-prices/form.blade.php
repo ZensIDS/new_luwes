@@ -1,6 +1,9 @@
 @extends('layouts.master')
 
 @php
+    // Diskon Tambahan yang disembunyikan sementara (nilai tetap tersimpan & ikut terkirim, hanya tidak tampil).
+    // Untuk menampilkan lagi, kosongkan array ini: $hiddenAdditional = [];
+    $hiddenAdditional = [3, 4];
     $brandType = old('disc_brand_type', $price->disc_brand_type ?: 'percentage');
     $additionalType = old('disc_tambahan_type', $price->disc_tambahan_type ?: 'percentage');
     $additionalType2 = old('disc_tambahan_2_type', $price->disc_tambahan_2_type ?: 'percentage');
@@ -11,7 +14,7 @@
     $taxType = old('pajak_type', $price->pajak_type ?: 'percentage');
     $adjustmentType = old('outlet_adjustment_type', $price->outlet_adjustment_type ?: 'nominal');
     // Panel "Daftarkan Produk Baru" otomatis terbuka lagi bila validasinya gagal.
-    $openNewProduct = $errors->newProduct->any() && old('_new_product');
+    $openNewProduct = ! $price->exists && $errors->newProduct->any() && old('_new_product');
 @endphp
 
 @section('title', $price->exists ? 'Edit Aturan Harga Jual' : 'Tambah Aturan Harga Jual')
@@ -37,7 +40,8 @@
             </div>
         @endif
 
-        @if (! $price->exists && isset($categories))
+        @if (isset($categories))
+            @unless ($price->exists)
             <div style="margin-bottom:15px;">
                 <button type="button" class="btn btn-primary" id="toggle-new-product-form"
                     aria-controls="new-product-panel" aria-expanded="{{ $openNewProduct ? 'true' : 'false' }}">
@@ -45,6 +49,7 @@
                 </button>
                 <span class="text-muted" style="margin-left:8px;">Barangnya belum ada di daftar produk? Daftarkan dulu di sini.</span>
             </div>
+            @endunless
             {{-- Pesan hasil Edit Barang (AJAX): tampil di sini karena panel menutup setelah simpan --}}
             <div class="alert alert-success" id="np-flash" role="status" style="display:none;"></div>
         {{-- Form daftar produk baru: tersembunyi sampai tombol "Daftarkan Produk Baru" diklik (bukan popup) --}}
@@ -305,7 +310,7 @@
                                         <input type="hidden" name="product_id" value="{{ $price->product_id }}">
                                     @endif
                                     @error('product_id') <span class="help-block text-danger">{{ $message }}</span> @enderror
-                                    @if (! $price->exists && isset($categories))
+                                    @if (isset($categories))
                                         <button type="button" class="btn btn-default btn-xs" id="edit-product-btn" disabled
                                             style="margin-top:6px;" title="Edit data barang yang dipilih">
                                             <i class="fa fa-pencil"></i> Edit Barang
@@ -362,7 +367,7 @@
                                         <div class="input-group">
                                             <span class="input-group-addon price-prefix" data-for="disc_brand_type">Rp</span>
                                             <input id="disc_brand_value" name="disc_brand_value" type="text" inputmode="decimal" data-currency-input data-currency-toggle="disc_brand_type" data-currency-decimals="0" min="0" step="0.01" class="form-control price-value"
-                                                value="{{ old('disc_brand_value', $price->disc_brand_value ?? 0) }}" placeholder="0">
+                                                value="{{ old('disc_brand_value', $price->exists ? ($price->disc_brand_value ?? 0) : '') }}" placeholder="0">
                                         </div>
                                         @error('disc_brand_value') <span class="help-block text-danger">{{ $message }}</span> @enderror
                                     </div>
@@ -387,7 +392,7 @@
                                         <div class="input-group">
                                             <span class="input-group-addon price-prefix" data-for="disc_tambahan_type">Rp</span>
                                             <input id="disc_tambahan_value" name="disc_tambahan_value" type="text" inputmode="decimal" data-currency-input data-currency-toggle="disc_tambahan_type" data-currency-decimals="0" min="0" step="0.01" class="form-control price-value"
-                                                value="{{ old('disc_tambahan_value', $price->disc_tambahan_value ?? 0) }}" placeholder="0">
+                                                value="{{ old('disc_tambahan_value', $price->exists ? ($price->disc_tambahan_value ?? 0) : '') }}" placeholder="0">
                                         </div>
                                         @error('disc_tambahan_value') <span class="help-block text-danger">{{ $message }}</span> @enderror
                                     </div>
@@ -412,14 +417,14 @@
                                         <div class="input-group">
                                             <span class="input-group-addon price-prefix" data-for="disc_tambahan_2_type">Rp</span>
                                             <input id="disc_tambahan_2_value" name="disc_tambahan_2_value" type="text" inputmode="decimal" data-currency-input data-currency-toggle="disc_tambahan_2_type" data-currency-decimals="0" min="0" step="0.01" class="form-control price-value"
-                                                value="{{ old('disc_tambahan_2_value', $price->disc_tambahan_2_value ?? 0) }}" placeholder="0">
+                                                value="{{ old('disc_tambahan_2_value', $price->exists ? ($price->disc_tambahan_2_value ?? 0) : '') }}" placeholder="0">
                                         </div>
                                         @error('disc_tambahan_2_value') <span class="help-block text-danger">{{ $message }}</span> @enderror
                                     </div>
                                 </div>
                             </div>
 
-                            <div class="price-rule-card price-rule-additional">
+                            <div class="price-rule-card price-rule-additional"{{ in_array(3, $hiddenAdditional) ? ' style=display:none' : '' }}>
                                 <div class="row">
                                     <div class="col-sm-4">
                                         <h4 style="margin-top:0"><span class="label label-success">4</span> Diskon Tambahan 3</h4>
@@ -437,14 +442,14 @@
                                         <div class="input-group">
                                             <span class="input-group-addon price-prefix" data-for="disc_tambahan_3_type">Rp</span>
                                             <input id="disc_tambahan_3_value" name="disc_tambahan_3_value" type="text" inputmode="decimal" data-currency-input data-currency-toggle="disc_tambahan_3_type" data-currency-decimals="0" min="0" step="0.01" class="form-control price-value"
-                                                value="{{ old('disc_tambahan_3_value', $price->disc_tambahan_3_value ?? 0) }}" placeholder="0">
+                                                value="{{ old('disc_tambahan_3_value', $price->exists ? ($price->disc_tambahan_3_value ?? 0) : '') }}" placeholder="0">
                                         </div>
                                         @error('disc_tambahan_3_value') <span class="help-block text-danger">{{ $message }}</span> @enderror
                                     </div>
                                 </div>
                             </div>
 
-                            <div class="price-rule-card price-rule-additional">
+                            <div class="price-rule-card price-rule-additional"{{ in_array(4, $hiddenAdditional) ? ' style=display:none' : '' }}>
                                 <div class="row">
                                     <div class="col-sm-4">
                                         <h4 style="margin-top:0"><span class="label label-success">5</span> Diskon Tambahan 4</h4>
@@ -462,7 +467,7 @@
                                         <div class="input-group">
                                             <span class="input-group-addon price-prefix" data-for="disc_tambahan_4_type">Rp</span>
                                             <input id="disc_tambahan_4_value" name="disc_tambahan_4_value" type="text" inputmode="decimal" data-currency-input data-currency-toggle="disc_tambahan_4_type" data-currency-decimals="0" min="0" step="0.01" class="form-control price-value"
-                                                value="{{ old('disc_tambahan_4_value', $price->disc_tambahan_4_value ?? 0) }}" placeholder="0">
+                                                value="{{ old('disc_tambahan_4_value', $price->exists ? ($price->disc_tambahan_4_value ?? 0) : '') }}" placeholder="0">
                                         </div>
                                         @error('disc_tambahan_4_value') <span class="help-block text-danger">{{ $message }}</span> @enderror
                                     </div>
@@ -472,7 +477,7 @@
                             <div class="price-rule-card price-rule-margin">
                                 <div class="row">
                                     <div class="col-sm-4">
-                                        <h4 style="margin-top:0"><span class="label label-success">6</span> Margin</h4>
+                                        <h4 style="margin-top:0"><span class="label label-success">{{ 6 - count($hiddenAdditional) }}</span> Margin</h4>
                                         <p class="text-muted small">Keuntungan dihitung dari Harga Dasar setelah dua diskon.</p>
                                     </div>
                                     <div class="col-sm-4 form-group">
@@ -487,7 +492,7 @@
                                         <div class="input-group">
                                             <span class="input-group-addon price-prefix" data-for="margin_type">%</span>
                                             <input id="margin_value" name="margin_value" type="text" inputmode="decimal" data-currency-input data-currency-toggle="margin_type" data-currency-decimals="0" min="0" step="0.01" class="form-control price-value"
-                                                value="{{ old('margin_value', $price->margin_value ?? 0) }}" placeholder="0">
+                                                value="{{ old('margin_value', $price->exists ? ($price->margin_value ?? 0) : '') }}" placeholder="0">
                                         </div>
                                         @error('margin_value') <span class="help-block text-danger">{{ $message }}</span> @enderror
                                     </div>
@@ -512,7 +517,7 @@
                                         <div class="input-group">
                                             <span class="input-group-addon price-prefix" data-for="disc_toko_type">Rp</span>
                                             <input id="disc_toko_value" name="disc_toko_value" type="text" inputmode="decimal" data-currency-input data-currency-toggle="disc_toko_type" data-currency-decimals="0" min="0" step="0.01" class="form-control price-value"
-                                                value="{{ old('disc_toko_value', $price->disc_toko_value ?? 0) }}" placeholder="0">
+                                                value="{{ old('disc_toko_value', $price->exists ? ($price->disc_toko_value ?? 0) : '') }}" placeholder="0">
                                         </div>
                                         @error('disc_toko_value') <span class="help-block text-danger">{{ $message }}</span> @enderror
                                     </div>
@@ -550,7 +555,7 @@
                                         <div class="input-group">
                                             <span class="input-group-addon price-prefix" data-for="pajak_type">%</span>
                                             <input id="pajak_value" name="pajak_value" type="text" inputmode="decimal" data-currency-input data-currency-toggle="pajak_type" data-currency-decimals="0" min="0" step="0.01" class="form-control price-value"
-                                                value="{{ old('pajak_value', $price->pajak_value ?? 0) }}" placeholder="0">
+                                                value="{{ old('pajak_value', $price->exists ? ($price->pajak_value ?? 0) : '') }}" placeholder="0">
                                         </div>
                                         @error('pajak_value') <span class="help-block text-danger">{{ $message }}</span> @enderror
                                     </div>
@@ -575,7 +580,7 @@
                                         <div class="input-group">
                                             <span class="input-group-addon price-prefix" data-for="outlet_adjustment_type">Rp</span>
                                             <input id="outlet_adjustment_value" name="outlet_adjustment_value" type="text" inputmode="decimal" data-currency-input data-currency-toggle="outlet_adjustment_type" data-currency-decimals="0" min="0" step="0.01" class="form-control price-value"
-                                                value="{{ old('outlet_adjustment_value', $price->outlet_adjustment_value ?? 0) }}" placeholder="0">
+                                                value="{{ old('outlet_adjustment_value', $price->exists ? ($price->outlet_adjustment_value ?? 0) : '') }}" placeholder="0">
                                         </div>
                                         @error('outlet_adjustment_value') <span class="help-block text-danger">{{ $message }}</span> @enderror
                                     </div>
@@ -651,8 +656,8 @@
                                 <div><span>Harga Akhir</span><strong id="preview-final">Rp0</strong></div>
                                 <div><span>Diskon Tambahan 1</span><strong id="preview-additional">Rp0</strong></div>
                                 <div><span>Diskon Tambahan 2</span><strong id="preview-additional-2">Rp0</strong></div>
-                                <div><span>Diskon Tambahan 3</span><strong id="preview-additional-3">Rp0</strong></div>
-                                <div><span>Diskon Tambahan 4</span><strong id="preview-additional-4">Rp0</strong></div>
+                                <div{{ in_array(3, $hiddenAdditional) ? ' style=display:none' : '' }}><span>Diskon Tambahan 3</span><strong id="preview-additional-3">Rp0</strong></div>
+                                <div{{ in_array(4, $hiddenAdditional) ? ' style=display:none' : '' }}><span>Diskon Tambahan 4</span><strong id="preview-additional-4">Rp0</strong></div>
                                 <div><span>Harga Dasar</span><strong id="preview-base">Rp0</strong></div>
                                 <div><span>Margin</span><strong id="preview-margin">Rp0</strong></div>
                                 <div><span>Harga Aktif</span><strong id="preview-active">Rp0</strong></div>
@@ -700,7 +705,7 @@
 @endsection
 
 @section('page-script')
-    @if (! $price->exists && isset($categories))
+    @if (isset($categories))
     {{-- Dipasang sebelum script panel supaya submit duplikat ditahan lebih dulu --}}
     @include('products._barcode-check', ['input' => '#new-product-form #product-code-input', 'url' => route('product.check-barcode'), 'ignoreId' => null])
     <script>
@@ -1063,6 +1068,7 @@
                     submitEdit();
                     return;
                 }
+                if (window.saveOutletPriceDraft) { window.saveOutletPriceDraft(); }
                 $('#submit-new-product-form').prop('disabled', true);
             });
 
@@ -1157,7 +1163,7 @@
             }
 
             function number(id) {
-                return window.parseIdNumber ? window.parseIdNumber($(id).val()) : (Number.parseFloat($(id).val()) || 0);
+                return (window.parseIdNumber ? window.parseIdNumber($(id).val()) : Number.parseFloat($(id).val())) || 0;
             }
 
             function discount(base, type, value) {
@@ -1308,7 +1314,7 @@
                     window.initCurrencyInputs?.($value[0]);
                     adjustmentAutoFilled = true;
                 } else if (adjustmentAutoFilled) {
-                    $value.val('0');
+                    $value.val('');
                     window.initCurrencyInputs?.($value[0]);
                     adjustmentAutoFilled = false;
                 }
@@ -1506,6 +1512,50 @@
                 const emptyHpp = Math.round(number('#preview_hpp')) === 0;
                 loadProductHpp(!{{ $price->exists ? 'true' : 'false' }} && emptyHpp);
             }
+            // ===== Draft komponen harga =====
+            // "Daftarkan Produk Baru" menyimpan lewat redirect penuh (halaman dimuat ulang). Supaya komponen harga yang
+            // sudah diisi tidak hilang, isiannya disimpan sementara di sessionStorage lalu dipulihkan setelah halaman
+            // kembali (hanya bila ada product_id di URL, outlet sama, dan belum lewat 5 menit).
+            const DRAFT_KEY = 'outlet_price_draft';
+            const DRAFT_FIELDS = /^(disc_|pajak_|margin_|outlet_adjustment_|effective_|note$)/;
+
+            window.saveOutletPriceDraft = function () {
+                try {
+                    const values = {};
+                    $('#price-rule-form').find('input[name], select[name], textarea[name]').each(function () {
+                        if (DRAFT_FIELDS.test(this.name) && this.type !== 'hidden') { values[this.name] = $(this).val(); }
+                    });
+                    sessionStorage.setItem(DRAFT_KEY, JSON.stringify({
+                        at: Date.now(),
+                        outlet: String($('#outlet_id').val() || ''),
+                        values: values
+                    }));
+                } catch (e) { /* sessionStorage tidak tersedia: abaikan */ }
+            };
+
+            (function restoreOutletPriceDraft() {
+                if (!IS_CREATE_MODE) { return; }
+                let draft = null;
+                try {
+                    draft = JSON.parse(sessionStorage.getItem(DRAFT_KEY) || 'null');
+                    sessionStorage.removeItem(DRAFT_KEY); // sekali pakai
+                } catch (e) { return; }
+                if (!draft || !draft.values) { return; }
+                const fresh = Date.now() - draft.at < 5 * 60 * 1000;
+                const hasProduct = new URLSearchParams(window.location.search).has('product_id');
+                if (!fresh || !hasProduct || draft.outlet !== String($('#outlet_id').val() || '')) { return; }
+
+                Object.keys(draft.values).forEach(function (name) {
+                    const $el = $('#price-rule-form').find('[name="' + name + '"]').not('[type=hidden]').first();
+                    if (!$el.length) { return; }
+                    $el.val(draft.values[name]);
+                    if ($el.is('select')) { $el.trigger('change.select2'); }
+                });
+                syncPrefixes();
+                window.initCurrencyInputs?.(document.getElementById('price-rule-form'));
+                updatePreview();
+            })();
+
             updatePrefixes();
             applyOutletAdjustmentDefault(true);
         });
