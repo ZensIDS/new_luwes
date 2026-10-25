@@ -130,8 +130,7 @@
                                                             class="form-control input-sm input-sku"
                                                             placeholder="SKU"
                                                             value="{{ old('items.' . $loop->parent?->index . '_' . $stockIndex . '.sku', $skuValue) }}"
-                                                            readonly
-                                                            required>
+                                                            readonly>
                                                     @endif
                                                 </td>
                                                 <td>
@@ -165,8 +164,7 @@
                                                             class="form-control input-sm text-center input-qty"
                                                             min="0" max="{{ $item->qty }}"
                                                             value="{{ old('items.' . $loop->parent?->index . '_' . $stockIndex . '.qty_diterima', $stock->qty ?? $item->qty) }}"
-                                                            {{ $stock ? 'readonly' : '' }}
-                                                            required>
+                                                            {{ $stock ? 'readonly' : '' }}>
                                                     @endif
                                                 </td>
                                                 <td class="text-center">
@@ -316,6 +314,11 @@
     // disinkronkan ulang berdasarkan status checkbox yang SEBENARNYA saat itu.
     // Ini mencegah item yang sudah dicentang user tapi AJAX-nya belum sempat
     // selesai dibalas server (race condition) ikut ter-skip / tidak tersimpan.
+    // Simpan nilai expired awal supaya bisa dibandingkan saat submit.
+    $('.input-expired').each(function() {
+        $(this).data('orig', $(this).val());
+    });
+
     $('form').on('submit', function() {
         $(this).find('.chk-autosave').each(function() {
             let $chk = $(this);
@@ -323,6 +326,26 @@
             let $confirmed = $(`#confirmed-${rowIndex}`);
             if ($confirmed.length) {
                 $confirmed.val($chk.is(':checked') ? 1 : 0);
+            }
+
+            // Kurangi jumlah field yang dikirim (PHP max_input_vars default 1000
+            // memotong field di PO besar sehingga SKU/qty baris terakhir "hilang").
+            //  - Baris TIDAK dicentang  -> tidak diterima, tidak perlu dikirim.
+            //  - Baris sudah tersimpan lewat autosave & expired tidak berubah
+            //    -> tidak ada yang perlu diproses ulang.
+            let $row = $chk.closest('tr');
+            let stockIdVal = $(`#stock-id-${rowIndex}`).val();
+            let skip = false;
+
+            if (!$chk.is(':checked')) {
+                skip = true;
+            } else if (stockIdVal) {
+                let $exp = $row.find('.input-expired');
+                skip = ($exp.val() || '') === ($exp.data('orig') || '');
+            }
+
+            if (skip) {
+                $row.find('input[name^="items["]').prop('disabled', true);
             }
         });
     });

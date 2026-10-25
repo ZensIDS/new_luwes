@@ -854,16 +854,25 @@ class PembelianController extends Controller
 
     public function storePenerimaan(Request $request, Pembelian $pembelian)
     {
+        // Hanya baris yang dicentang/dikonfirmasi yang divalidasi & diproses.
+        // Baris yang tidak dicentang (atau tidak dikirim sama sekali oleh form)
+        // dianggap "tidak diterima" dan tidak boleh menggagalkan penyimpanan,
+        // termasuk saat status penerimaan diubah menjadi completed.
+        $confirmedItems = collect($request->input('items', []))
+            ->filter(fn ($row) => is_array($row) && ! empty($row['confirmed']))
+            ->all();
+        $request->merge(['items' => $confirmedItems]);
+
         $request->validate([
             'receipt_date' => 'nullable|date',
             'receipt_pic' => 'nullable|string',
             'receipt_status' => 'nullable|in:draft,validated,completed',
             'receipt_photo' => 'nullable|image|max:2048',
-            'items' => 'required|array',
+            'items' => 'nullable|array',
             'items.*.stock_id' => 'nullable|exists:stocks,id',
             'items.*.product_id' => 'required|exists:products,id',
             'items.*.sku' => 'required|string',
-            'items.*.qty_diterima' => 'required|integer',
+            'items.*.qty_diterima' => 'required|integer|min:0',
             'items.*.expired_at' => 'nullable|date',
             'items.*.confirmed' => 'nullable|boolean',
         ], [
@@ -872,7 +881,6 @@ class PembelianController extends Controller
             'receipt_status.in' => 'Status penerimaan harus dipilih antara draft, validated, atau completed.',
             'receipt_photo.image' => 'Foto penerimaan harus berupa gambar.',
             'receipt_photo.max' => 'Ukuran foto penerimaan maksimal 2MB.',
-            'items.required' => 'Item barang harus diisi.',
             'items.array' => 'Item barang harus berupa array.',
             'items.*.stock_id.exists' => 'Stock ID yang dipilih tidak valid.',
             'items.*.product_id.required' => 'Produk harus dipilih.',
@@ -882,7 +890,7 @@ class PembelianController extends Controller
             'items.*.sku.unique' => 'SKU ":input" sudah digunakan.',
             'items.*.qty_diterima.required' => 'Jumlah diterima harus diisi.',
             'items.*.qty_diterima.integer' => 'Jumlah diterima harus berupa angka.',
-            // 'items.*.qty_diterima.min' => 'Jumlah diterima minimal 1.',
+            'items.*.qty_diterima.min' => 'Jumlah diterima tidak boleh negatif.',
             'items.*.expired_at.date' => 'Tanggal kadaluarsa harus berupa tanggal yang valid.',
         ]);
 
