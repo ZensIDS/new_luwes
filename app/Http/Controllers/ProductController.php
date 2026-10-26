@@ -246,7 +246,8 @@ class ProductController extends Controller
                     $query->whereHas('pembelian', fn($pembelian) => $pembelian->where('owner_approval_status', 'approved'));
                 },
             ], 'qty')
-            ->orderBy('code')
+            ->orderBy('products.name')
+            ->orderBy('products.id')
             ->paginate(10)
             ->withQueryString();
 

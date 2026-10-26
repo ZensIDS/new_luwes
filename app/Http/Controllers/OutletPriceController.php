@@ -146,6 +146,7 @@ class OutletPriceController extends Controller
      * "Deferred join": query pengurutan HANYA mengambil kolom id (sort kecil, tidak membebani memori
      * walau satu outlet punya puluhan ribu aturan harga); baris lengkap + relasi baru dimuat untuk
      * 25 id di halaman ini. Search berbasis AWALAN (LIKE 'kata%') lewat subquery IN.
+     * Urutan: abjad nama produk (A-Z), juga saat search/filter outlet dipakai.
      */
     private function pricePage(int $outletId, string $search): LengthAwarePaginator
     {
@@ -159,8 +160,9 @@ class OutletPriceController extends Controller
                 ->where(fn ($productQuery) => $productQuery
                     ->where('name', 'like', $prefix)
                     ->orWhere('code', 'like', $prefix))))
-            ->orderByDesc('outlet_prices.updated_at')
-            ->orderByDesc('outlet_prices.id')
+            ->leftJoin('products', 'products.id', '=', 'outlet_prices.product_id')
+            ->orderBy('products.name')
+            ->orderBy('outlet_prices.id')
             ->paginate(25)
             ->withQueryString()
             ->appends(['outlet_id' => $outletId, 'search' => $search]);

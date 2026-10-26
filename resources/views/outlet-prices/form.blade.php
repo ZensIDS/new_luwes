@@ -95,7 +95,7 @@
                     <div class="row">
                         <div class="col-md-6 form-group {{ $errors->newProduct->has('name') ? 'has-error' : '' }}">
                             <label>Nama <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" name="name" value="{{ old('name') }}" placeholder="Masukkan Nama">
+                            <input type="text" class="form-control" name="name" value="{{ old('name') }}" placeholder="Masukkan Nama" autocomplete="on">
                             @error('name', 'newProduct')<span class="help-block">{{ $message }}</span>@enderror
                         </div>
                         <div class="col-md-6 form-group {{ $errors->newProduct->has('code') ? 'has-error' : '' }}">
@@ -983,6 +983,7 @@
                 $('#np-submit-label').text('Simpan Perubahan');
                 $npForm.attr('action', productsBase + '/' + data.id);
                 $('#np-method').prop('disabled', false);
+                $npForm.find('input[name="name"]').attr('autocomplete', 'off'); // riwayat browser hanya untuk mode tambah
                 fillEditForm(data);
                 renderListingEditInfo();
                 $codeInput.trigger('barcode:recheck'); // cek barcode dengan mengecualikan produk ini sendiri
@@ -998,6 +999,7 @@
                 $('#np-submit-label').text('Simpan & Atur Harga');
                 $npForm.attr('action', productsBase);
                 $('#np-method').prop('disabled', true);
+                $npForm.find('input[name="name"]').attr('autocomplete', 'on');
                 $codeInput.removeAttr('data-ignore-id');
                 resetNewProductForm();
                 renderListingEditInfo();
