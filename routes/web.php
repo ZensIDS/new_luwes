@@ -121,6 +121,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::resource('/outlet-prices', App\Http\Controllers\OutletPriceController::class)->except(['show']);
     Route::post('/outlet-prices/products', [App\Http\Controllers\OutletPriceController::class, 'storeProduct'])->name('outlet-prices.products.store');
     Route::get('/outlet-prices/products/search', [App\Http\Controllers\OutletPriceController::class, 'searchProducts'])->middleware('throttle:120,1,search')->name('outlet-prices.products.search');
+    Route::get('/outlet-prices/existing', [App\Http\Controllers\OutletPriceController::class, 'existingRule'])->name('outlet-prices.existing');
     Route::get('/outlet-prices/preview-hpp', [App\Http\Controllers\OutletPriceController::class, 'previewHpp'])->name('outlet-prices.preview-hpp');
     Route::get('/outlet-prices/products/{product}', [App\Http\Controllers\OutletPriceController::class, 'editProduct'])->whereNumber('product')->name('outlet-prices.products.show');
     Route::put('/outlet-prices/products/{product}', [App\Http\Controllers\OutletPriceController::class, 'updateProduct'])->whereNumber('product')->name('outlet-prices.products.update');

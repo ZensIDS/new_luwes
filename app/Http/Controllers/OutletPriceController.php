@@ -344,9 +344,66 @@ class OutletPriceController extends Controller
         ]);
     }
 
+    /**
+     * Aturan harga yang sudah ada untuk kombinasi outlet + produk (JSON), supaya form tambah
+     * bisa langsung memuat isian lama. Menyimpan form lalu memperbarui aturan itu (lihat store()).
+     */
+    public function existingRule(Request $request)
+    {
+        $this->ensureManagementAccess();
+        $request->validate([
+            'outlet_id' => 'required|integer|exists:outlets,id',
+            'product_id' => 'required|integer|exists:products,id',
+        ]);
+
+        $outletId = (int) $request->outlet_id;
+        if (! OutletAccess::outlets()->contains('id', $outletId)) {
+            return response()->json(['exists' => false]);
+        }
+
+        $price = OutletPrice::where('outlet_id', $outletId)
+            ->where('product_id', (int) $request->product_id)
+            ->first();
+
+        if (! $price) {
+            return response()->json(['exists' => false]);
+        }
+
+        return response()->json([
+            'exists' => true,
+            'updated_at' => $price->updated_at?->format('d M Y H:i'),
+            'rule' => [
+                'disc_brand_type' => $price->disc_brand_type,
+                'disc_brand_value' => (float) $price->disc_brand_value,
+                'pajak_type' => $price->pajak_type,
+                'pajak_value' => (float) $price->pajak_value,
+                'disc_tambahan_type' => $price->disc_tambahan_type,
+                'disc_tambahan_value' => (float) $price->disc_tambahan_value,
+                'disc_tambahan_2_type' => $price->disc_tambahan_2_type,
+                'disc_tambahan_2_value' => (float) $price->disc_tambahan_2_value,
+                'disc_tambahan_3_type' => $price->disc_tambahan_3_type,
+                'disc_tambahan_3_value' => (float) $price->disc_tambahan_3_value,
+                'disc_tambahan_4_type' => $price->disc_tambahan_4_type,
+                'disc_tambahan_4_value' => (float) $price->disc_tambahan_4_value,
+                'margin_type' => $price->margin_type,
+                'margin_value' => (float) $price->margin_value,
+                'disc_toko_type' => $price->disc_toko_type,
+                'disc_toko_value' => (float) $price->disc_toko_value,
+                'outlet_adjustment_type' => $price->outlet_adjustment_type,
+                'outlet_adjustment_value' => (float) $price->outlet_adjustment_value,
+                'effective_from' => $price->effective_from?->format('Y-m-d'),
+                'effective_until' => $price->effective_until?->format('Y-m-d'),
+                'note' => $price->note,
+                'is_active' => (bool) $price->is_active,
+            ],
+        ]);
+    }
+
     public function store(OutletPriceRequest $request)
     {
-        DB::transaction(function () use ($request) {
+        $wasUpdate = false;
+
+        DB::transaction(function () use ($request, &$wasUpdate) {
             $price = OutletPrice::withTrashed()->firstOrNew([
                 'outlet_id' => $request->outlet_id,
                 'product_id' => $request->product_id,
@@ -359,6 +416,8 @@ class OutletPriceController extends Controller
             if ($price->trashed()) {
                 $price->restore();
             }
+            // Aturan untuk outlet + produk ini sudah ada: simpan = perbarui aturan lama (bukan buat baru).
+            $wasUpdate = $price->exists;
             if ($price->exists) {
                 // Simpan ulang data lama selalu memperbarui updated_at, walau isinya sama.
                 $price->setUpdatedAt(now());
@@ -370,7 +429,9 @@ class OutletPriceController extends Controller
 
         return redirect()
             ->route('outlet-prices.index', $this->indexParams((int) $request->outlet_id))
-            ->with('toast_success', 'Master harga outlet berhasil disimpan.');
+            ->with('toast_success', $wasUpdate
+                ? 'Aturan harga yang sudah ada berhasil diperbarui.'
+                : 'Master harga outlet berhasil disimpan.');
     }
 
     /**

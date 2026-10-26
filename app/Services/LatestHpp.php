@@ -52,6 +52,7 @@ class LatestHpp
     {
         $base = fn () => OwnerStock::where('product_id', $productId)
             ->notDeficit()
+            ->where('hpp', '>', 0)
             ->orderByDesc('created_at')
             ->orderByDesc('id');
 
@@ -63,7 +64,7 @@ class LatestHpp
             ->first(['id', 'product_id', 'hpp'])
             ?? $base()->first(['id', 'product_id', 'hpp']);
 
-        if ($stock && $stock->hpp !== null) {
+        if ($stock && (float) $stock->hpp > 0) {
             return (float) $stock->hpp;
         }
 
@@ -93,6 +94,7 @@ class LatestHpp
                 OwnerStock::where('owner_id', $outletId)
                     ->whereIn('product_id', $ids->all())
                     ->notDeficit()
+                    ->where('hpp', '>', 0)
                     ->where('qty', '>', 0)
                     ->where(function ($query) {
                         $query->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
@@ -108,6 +110,7 @@ class LatestHpp
                     OwnerStock::where('owner_id', $outletId)
                         ->whereIn('product_id', $missing->all())
                         ->notDeficit()
+                        ->where('hpp', '>', 0)
                         ->orderByDesc('created_at')->orderByDesc('id')
                         ->get(['id', 'product_id', 'hpp'])
                 );
@@ -133,7 +136,7 @@ class LatestHpp
      */
     public function fromLoaded(?Collection $stocks, float|int|string|null $hargaBeli = null): float
     {
-        $newest = $stocks?->reduce(function ($carry, $stock) {
+        $newest = $stocks?->filter(fn ($stock) => (float) $stock->hpp > 0)->reduce(function ($carry, $stock) {
             if (! $carry) {
                 return $stock;
             }
