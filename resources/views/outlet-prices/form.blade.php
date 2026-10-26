@@ -274,6 +274,7 @@
                             <p class="text-muted" style="margin:6px 0 0">Tentukan aturan harga yang akan digunakan POS untuk kombinasi ini.</p>
                         </div>
                         <div class="box-body">
+                            <div id="existing-rule-alert" class="alert alert-info" style="display:none"></div>
                             <div class="row">
                                 <div class="col-md-6 form-group">
                                     <label for="outlet_id">Outlet <span class="text-danger">*</span></label>
@@ -1470,7 +1471,9 @@
                 $('#product-unit-info').show();
             }
 
+            let hppRequestSeq = 0;
             function loadProductHpp(fillHpp) {
+                const seq = ++hppRequestSeq;
                 const outletId = $('#outlet_id').val();
                 const productId = $('#product_id').val();
                 if (!productId) {
@@ -1484,10 +1487,11 @@
                 }
                 $.get('{{ route('outlet-prices.preview-hpp') }}', params)
                     .done(function (data) {
+                        if (seq !== hppRequestSeq) { return; } // respons lama (produk/outlet sudah berganti)
                         renderProductInfo(data);
                         if (fillHpp) {
                             loadedHpp = Number(data.hpp) || 0;
-                            $('#preview_hpp').val(data.hpp);
+                            $('#preview_hpp').val(fmtId(Number(data.hpp) || 0));
                             window.initCurrencyInputs?.($('#preview_hpp')[0]);
                             $('#preview_hpp').trigger('input');
                         }
@@ -1514,6 +1518,73 @@
                 const emptyHpp = Math.round(number('#preview_hpp')) === 0;
                 loadProductHpp(!{{ $price->exists ? 'true' : 'false' }} && emptyHpp);
             }
+            // ===== Aturan harga lama otomatis terambil (mode tambah) =====
+            // Pilih outlet + produk yang aturan harganya sudah ada -> isian lama dimuat ke form.
+            // Saat disimpan, server memperbarui aturan lama itu (store() memakai outlet + produk sebagai kunci).
+            const HAS_OLD_INPUT = @json($errors->any());
+            const RULE_TYPE_DEFAULTS = {
+                disc_brand_type: 'percentage', pajak_type: 'percentage',
+                disc_tambahan_type: 'percentage', disc_tambahan_2_type: 'percentage',
+                disc_tambahan_3_type: 'percentage', disc_tambahan_4_type: 'percentage',
+                margin_type: 'percentage', disc_toko_type: 'percentage', outlet_adjustment_type: 'nominal'
+            };
+            const RULE_VALUE_FIELDS = ['disc_brand_value', 'pajak_value', 'disc_tambahan_value', 'disc_tambahan_2_value',
+                'disc_tambahan_3_value', 'disc_tambahan_4_value', 'margin_value', 'disc_toko_value', 'outlet_adjustment_value'];
+            let existingRuleSeq = 0;
+            let existingRuleLoaded = false;
+
+            function applyRuleFields(rule) {
+                Object.keys(RULE_TYPE_DEFAULTS).forEach(function (name) {
+                    $('#' + name).val(rule[name] || RULE_TYPE_DEFAULTS[name]).trigger('change');
+                });
+                RULE_VALUE_FIELDS.forEach(function (name) {
+                    $('#' + name).val(String(rule[name] != null ? rule[name] : 0));
+                    window.initCurrencyInputs?.($('#' + name)[0]);
+                });
+                $('#effective_from').val(rule.effective_from || '');
+                $('#effective_until').val(rule.effective_until || '');
+                $('#note').val(rule.note || '');
+                $('#price-rule-form input[name="is_active"]').prop('checked', rule.is_active !== false);
+                clearTarget();
+                adjustmentAutoFilled = false;
+                syncPrefixes();
+                updatePreview();
+            }
+
+            function clearExistingRule() {
+                $('#existing-rule-alert').hide().text('');
+                if (!existingRuleLoaded) { return; }
+                existingRuleLoaded = false;
+                // Kembali ke isian bawaan form baru (bukan sisa aturan produk sebelumnya).
+                applyRuleFields({ is_active: true });
+                applyOutletAdjustmentDefault(true);
+            }
+
+            function loadExistingRule() {
+                if (!IS_CREATE_MODE) { return; }
+                const outletId = $('#outlet_id').val();
+                const productId = $('#product_id').val();
+                const seq = ++existingRuleSeq;
+                if (!outletId || !productId) { clearExistingRule(); return; }
+
+                $.get('{{ route('outlet-prices.existing') }}', { outlet_id: outletId, product_id: productId })
+                    .done(function (res) {
+                        if (seq !== existingRuleSeq) { return; } // respons lama (pilihan sudah berganti)
+                        if (!res || !res.exists) { clearExistingRule(); return; }
+                        applyRuleFields(res.rule);
+                        existingRuleLoaded = true;
+                        $('#existing-rule-alert')
+                            .text('Aturan harga untuk produk ini di outlet ini sudah ada' + (res.updated_at ? ' (terakhir diubah ' + res.updated_at + ')' : '')
+                                + '. Isiannya sudah dimuat otomatis; menyimpan akan memperbarui aturan lama, bukan membuat yang baru.')
+                            .show();
+                    });
+            }
+
+            $('#outlet_id, #product_id').on('change', loadExistingRule);
+            if (IS_CREATE_MODE && !HAS_OLD_INPUT && $('#outlet_id').val() && $('#product_id').val()) {
+                loadExistingRule();
+            }
+
             // ===== Draft komponen harga =====
             // "Daftarkan Produk Baru" menyimpan lewat redirect penuh (halaman dimuat ulang). Supaya komponen harga yang
             // sudah diisi tidak hilang, isiannya disimpan sementara di sessionStorage lalu dipulihkan setelah halaman
