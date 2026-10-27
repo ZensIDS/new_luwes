@@ -183,30 +183,46 @@ class PenjualanController extends Controller
             ->values();
 
         $data = $penjualans->map(function ($value) use ($canManageSales, $cancellation, $user) {
-            $aksi = '<a class="btn btn-info" href="' . e(route('penjualan.show', $value->id)) . '">Show</a> '
-                . '<a class="btn btn-warning" href="' . e(route('penjualan.print', $value->id)) . '">Re-Print</a>';
+            $aksi = '<div class="btn-group">'
+                . '<button type="button" class="btn btn-default btn-sm btn-toggle-detail" title="Lihat rincian barang"><i class="fa fa-chevron-down"></i> Detail</button>'
+                . '<a class="btn btn-info btn-sm" href="' . e(route('penjualan.show', $value->id)) . '" title="Buka halaman penjualan"><i class="fa fa-eye"></i> Show</a>'
+                . '<a class="btn btn-warning btn-sm" href="' . e(route('penjualan.print', $value->id)) . '" title="Cetak ulang nota"><i class="fa fa-print"></i> Re-Print</a>';
             if ($canManageSales) {
                 $block = $cancellation->blockReason($value, $user);
                 if ($block) {
-                    $aksi .= ' <button type="button" class="border-0 btn btn-danger" disabled title="' . e($block) . '">Hapus</button>';
+                    $aksi .= '<button type="button" class="btn btn-danger btn-sm" disabled title="' . e($block) . '"><i class="fa fa-trash"></i> Hapus</button>';
                 } else {
-                    $aksi .= ' <form action="' . e(route('penjualan.destroy', $value->id)) . '" method="post" class="form-delete-sale" style="display:inline;"'
-                        . ' data-code="' . e($value->code) . '"'
-                        . ' data-items="' . (int) $value->items->count() . '"'
-                        . ' data-qty="' . (int) $value->items->sum('qty') . '">'
-                        . method_field('delete') . csrf_field()
-                        . '<input type="hidden" name="reason" value="">'
-                        . '<button type="button" class="border-0 btn btn-danger btn-delete-sale">Hapus</button></form>';
+                    $aksi .= '<button type="button" class="btn btn-danger btn-sm btn-delete-sale"><i class="fa fa-trash"></i> Hapus</button>';
                 }
             }
+            $aksi .= '</div>';
+
+            // Bila boleh dihapus, grup tombol dibungkus form hapus (.btn-delete-sale mencari form terdekat).
+            if ($canManageSales && ! ($block ?? null)) {
+                $aksi = '<form action="' . e(route('penjualan.destroy', $value->id)) . '" method="post" class="form-delete-sale" style="display:inline;"'
+                    . ' data-code="' . e($value->code) . '"'
+                    . ' data-items="' . (int) $value->items->count() . '"'
+                    . ' data-qty="' . (int) $value->items->sum('qty') . '">'
+                    . method_field('delete') . csrf_field()
+                    . '<input type="hidden" name="reason" value="">'
+                    . $aksi . '</form>';
+            }
+
+            $code = e($value->code);
+            if ((int) $value->refund_penjualans_count > 0) {
+                $code .= ' <span class="label label-warning" title="Penjualan ini punya retur / ganti barang">Retur</span>';
+            }
+
+            $total = (float) ($value->grand_total ?? $value->total ?? 0);
 
             return [
                 '',
                 e($value->created_at?->format('d/m/Y H:i')),
-                e($value->code),
-                e($value->outlet->name ?? '___customer'),
-                e($value->kasir->name ?? '___customer'),
+                $code,
+                e($value->outlet->name ?? '—'),
+                e($value->kasir->name ?? '—'),
                 e($value->cashierShift?->name ?? '—'),
+                'Rp ' . number_format($total, 0, ',', '.'),
                 view('penjualan._detail', ['value' => $value])->render(),
                 $aksi,
             ];

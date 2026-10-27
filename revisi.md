@@ -102,11 +102,11 @@ Catatan: awalnya tahap ini berupa halaman print A4; atas permintaan user diganti
 - [x] 6.5 Query ringan: daftar id diurutkan di muka (`orderedPriceIds`), baris + HPP + stok dimuat per 200 id; perhitungan harga memakai `decoratePrices` yang sama dengan index
 - [ ] 6.6 Uji (PHP tidak tersedia di sini, belum dijalankan): export semua barang & satu folder, folder "#/Lainnya", outlet besar (kecepatan & memori), harga/stok di Excel sama dengan index, persen vs nominal tampil benar, barcode tidak jadi notasi ilmiah, staff-outlet tidak bisa export outlet lain, buka di Excel + cetak (A4 landscape)
 
-## TAHAP 7 — Rapikan index penjualan
+## TAHAP 7 — Rapikan index penjualan — KODE SELESAI, menunggu uji user
 
-- [ ] 7.1 Tinjau `penjualan/index.blade.php` + `getIndexData` (tombol, filter, tabel)
-- [ ] 7.2 Rapikan layout header/tombol, filter, dan tabel (kolom, spasi, status, responsif)
-- [ ] 7.3 Uji tampilan desktop & mobile
+- [x] 7.1 Tinjau `penjualan/index.blade.php` + `getIndexData`: tiap baris memuat tabel rincian barang penuh di kolom "Detail" (baris sangat tinggi), tidak ada kolom total, tombol aksi tidak seragam, teks "___customer" tampil mentah
+- [x] 7.2 Rapikan: judul halaman (content-header) + box primary; tombol header dirapikan urutannya; filter Akun Kasir & Tanggal dalam satu baris rapi (label di atas, otomatis turun baris di layar kecil); kolom baru "Total" (grand total, rata kanan); rincian barang disembunyikan dan dibuka lewat tombol "Detail" per baris (child row, tanpa request tambahan karena data sudah dikirim server); tombol aksi satu grup kecil dengan ikon (Detail, Show, Re-Print, Hapus); label "Retur" di kode invoice bila penjualan punya retur; teks DataTables berbahasa Indonesia; kolom kosong tampil "—"
+- [ ] 7.3 Uji tampilan desktop & mobile (PHP tidak tersedia di sini, belum dijalankan): filter kasir/tanggal, pencarian awalan invoice/produk, urut tanggal/kode, tombol Detail buka-tutup (juga setelah pindah halaman/urut ulang), Show/Re-Print, Hapus (dialog alasan tetap jalan, tombol Hapus nonaktif saat diblokir), kasir & staff-outlet (tanpa tombol Hapus/Buat Penjualan), label Retur, tabel bisa digeser di layar kecil
 
 ## TAHAP 8 — Desain label harga (cetak label produk) — L1+L2+L3 dikerjakan, menunggu uji user
 
