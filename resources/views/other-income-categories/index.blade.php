@@ -1,10 +1,10 @@
 @extends('layouts.master')
 
-@section('title', 'Kategori Other Income')
+@section('title', 'Kategori Pendapatan Lain')
 
 @section('container')
     <section class="content-header">
-        <h1>Kategori Other Income <small>Kelola kategori dan Nominal Listing</small></h1>
+        <h1>Kategori Pendapatan Lain <small>Kelola kategori dan Nominal Listing</small></h1>
     </section>
 
     <section class="content">
@@ -106,9 +106,13 @@
                                         <input type="hidden" name="_rename_id" value="{{ $category->id }}">
                                         <div class="form-group {{ $renameErrors->has('name') ? 'has-error' : '' }}">
                                             <input type="text" class="form-control input-sm" name="name" maxlength="100"
-                                                value="{{ (int) old('_rename_id') === $category->id ? old('name') : $category->name }}">
+                                                value="{{ (int) old('_rename_id') === $category->id ? old('name') : $category->name }}"
+                                                {{ $category->isSewa() ? 'readonly' : '' }}>
                                         </div>
-                                        <button type="submit" class="btn btn-default btn-sm">Simpan nama</button>
+                                        <button type="submit" class="btn btn-default btn-sm" {{ $category->isSewa() ? 'disabled' : '' }}>Simpan nama</button>
+                                        @if ($category->isSewa())
+                                            <small class="text-muted" style="margin-left:6px;">Terkunci: memicu isian periode, supplier, dan produk.</small>
+                                        @endif
                                         @if ($renameErrors->has('name'))
                                             <span class="text-danger" style="margin-left:6px;">{{ $renameErrors->first('name') }}</span>
                                         @endif
@@ -119,7 +123,7 @@
                                     <form action="{{ route('other-income.categories.destroy', $category) }}" method="POST" style="display:inline;">
                                         @csrf
                                         @method('DELETE')
-                                        <button class="btn btn-danger btn-sm"
+                                        <button class="btn btn-danger btn-sm" @if ($category->isSewa()) disabled title="Kategori Sewa terkunci" @endif
                                             onclick="return confirm('Hapus kategori ini? Income lama tetap tampil dengan nama kategorinya.')">Hapus</button>
                                     </form>
                                 </td>

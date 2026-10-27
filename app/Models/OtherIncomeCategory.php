@@ -14,6 +14,7 @@ class OtherIncomeCategory extends Model
     use SoftDeletes;
 
     public const LISTING_SLUG = 'listing-product';
+    public const SEWA_SLUG = 'sewa';
 
     protected $fillable = [
         'name',
@@ -53,13 +54,19 @@ class OtherIncomeCategory extends Model
             ->first();
     }
 
+    /** Kategori Sewa: memunculkan isian periode, supplier, dan produk di form. */
+    public function isSewa(): bool
+    {
+        return ! $this->is_system && $this->slug === self::SEWA_SLUG;
+    }
+
     public function getActivitylogOptions(): LogOptions
     {
         return LogOptions::defaults()
             ->logOnly(['name', 'slug', 'is_system', 'nominal'])
             ->logOnlyDirty()
             ->dontSubmitEmptyLogs()
-            ->setDescriptionForEvent(fn (string $eventName) => "Kategori Other Income telah {$eventName}")
+            ->setDescriptionForEvent(fn (string $eventName) => "Kategori Pendapatan Lain telah {$eventName}")
             ->useLogName('OtherIncome');
     }
 }

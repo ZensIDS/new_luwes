@@ -10,9 +10,10 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
 /**
- * Kategori Other Income. Hanya superadmin dan owner (route middleware, K11).
+ * Kategori Pendapatan Lain. Hanya superadmin dan owner (route middleware, K11).
  *
  * - Kategori manual: tambah, ubah nama, hapus (soft delete; income lama tetap menampilkan nama kategorinya).
+ *   Kecuali kategori Sewa: terkunci (nama dan hapus) karena memicu isian khusus di form.
  * - Kategori sistem "Listing Product": nama, hapus, dan nonaktif terkunci. Hanya Nominal Listing yang bisa diatur.
  */
 class OtherIncomeCategoryController extends Controller
@@ -49,6 +50,10 @@ class OtherIncomeCategoryController extends Controller
             return $blocked;
         }
 
+        if ($blocked = $this->guardSewa($otherIncomeCategory, 'Nama kategori Sewa tidak bisa diubah.')) {
+            return $blocked;
+        }
+
         $request->merge(['name' => trim((string) $request->input('name'))]);
 
         $data = $request->validateWithBag('rename' . $otherIncomeCategory->id, [
@@ -69,6 +74,10 @@ class OtherIncomeCategoryController extends Controller
             return $blocked;
         }
 
+        if ($blocked = $this->guardSewa($otherIncomeCategory, 'Kategori Sewa tidak bisa dihapus.')) {
+            return $blocked;
+        }
+
         // Soft delete: income lama tetap ada dan tetap menampilkan nama kategorinya.
         $otherIncomeCategory->delete();
 
@@ -81,7 +90,7 @@ class OtherIncomeCategoryController extends Controller
     public function updateListingNominal(Request $request): RedirectResponse
     {
         $listing = OtherIncomeCategory::listing();
-        abort_unless($listing, 404, 'Kategori Listing Product belum tersedia. Jalankan migrasi Other Income.');
+        abort_unless($listing, 404, 'Kategori Listing Product belum tersedia. Jalankan migrasi Pendapatan Lain.');
 
         $request->merge(['nominal' => IndonesianNumber::parse($request->input('nominal'))]);
 
@@ -102,6 +111,19 @@ class OtherIncomeCategoryController extends Controller
     private function guardSystem(OtherIncomeCategory $category, string $message): ?RedirectResponse
     {
         if ($category->is_system) {
+            return redirect()->route('other-income.categories.index')->with('toast_error', $message);
+        }
+
+        return null;
+    }
+
+    /**
+     * Kategori Sewa dikenali form Pendapatan Lain lewat namanya (slug), jadi tidak boleh diubah nama / dihapus
+     * supaya isian periode, supplier, dan produk sewa tidak hilang diam-diam.
+     */
+    private function guardSewa(OtherIncomeCategory $category, string $message): ?RedirectResponse
+    {
+        if ($category->isSewa()) {
             return redirect()->route('other-income.categories.index')->with('toast_error', $message);
         }
 

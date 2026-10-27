@@ -25,12 +25,18 @@ class OtherIncome extends Model
         'source_type',
         'source_id',
         'product_name_snapshot',
+        'sewa_mulai',
+        'sewa_selesai',
+        'supplier_id',
+        'product_id',
         'created_by',
     ];
 
     protected $casts = [
         'tanggal' => 'date',
         'jumlah' => 'float',
+        'sewa_mulai' => 'date',
+        'sewa_selesai' => 'date',
     ];
 
     /** Outlet kosong = pemasukan umum. */
@@ -43,6 +49,18 @@ class OtherIncome extends Model
     public function category()
     {
         return $this->belongsTo(OtherIncomeCategory::class, 'other_income_category_id')->withTrashed();
+    }
+
+    /** Supplier penyewa (kategori Sewa). withTrashed: data lama tetap menampilkan nama supplier. */
+    public function supplier()
+    {
+        return $this->belongsTo(Supplier::class)->withTrashed();
+    }
+
+    /** Produk yang disewa (kategori Sewa). */
+    public function product()
+    {
+        return $this->belongsTo(Product::class)->withTrashed();
     }
 
     public function creator()
@@ -102,10 +120,14 @@ class OtherIncome extends Model
                 'source_type',
                 'source_id',
                 'product_name_snapshot',
+                'sewa_mulai',
+                'sewa_selesai',
+                'supplier_id',
+                'product_id',
             ])
             ->logOnlyDirty()
             ->dontSubmitEmptyLogs()
-            ->setDescriptionForEvent(fn (string $eventName) => "Other Income telah {$eventName}")
+            ->setDescriptionForEvent(fn (string $eventName) => "Pendapatan Lain telah {$eventName}")
             ->useLogName('OtherIncome');
     }
 }

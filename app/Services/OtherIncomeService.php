@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Pencatatan Other Income otomatis.
+ * Pencatatan Pendapatan Lain otomatis.
  *
  * Saat ini hanya satu jenis: Listing Product (produk berstatus Listing).
  * Aturan "kapan boleh memicu" (create / update pertama) ada di controller (tahap B);
@@ -19,7 +19,7 @@ use Illuminate\Validation\ValidationException;
  */
 class OtherIncomeService
 {
-    public const NOMINAL_BELUM_DIATUR = 'Nominal Listing belum diatur. Atur dulu di Other Income > Kategori.';
+    public const NOMINAL_BELUM_DIATUR = 'Nominal Listing belum diatur. Atur dulu di Pendapatan Lain > Kategori.';
 
     /**
      * Catat Listing income untuk satu produk.
@@ -43,7 +43,7 @@ class OtherIncomeService
 
             if (! $category) {
                 throw ValidationException::withMessages([
-                    'status_produk' => 'Kategori Listing Product belum tersedia. Jalankan migrasi Other Income terlebih dahulu.',
+                    'status_produk' => 'Kategori Listing Product belum tersedia. Jalankan migrasi Pendapatan Lain terlebih dahulu.',
                 ]);
             }
 

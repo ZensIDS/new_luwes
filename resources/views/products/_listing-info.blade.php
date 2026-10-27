@@ -19,14 +19,14 @@
     @if ($mode === 'trigger' && $nominal)
         <div class="alert alert-info" style="margin-bottom:15px;">
             <i class="fa fa-info-circle"></i>
-            Produk ini akan mencatat Other Income Listing sebesar
+            Produk ini akan mencatat Pendapatan Lain Listing sebesar
             <strong>Rp {{ number_format($nominal, 0, ',', '.') }}</strong> (sekali saja).
         </div>
     @elseif ($mode === 'trigger')
         <div class="alert alert-danger" style="margin-bottom:15px;">
             <i class="fa fa-exclamation-triangle"></i>
             Nominal Listing belum diatur, sehingga produk <strong>tidak bisa disimpan</strong> dengan status Listing.
-            Atur dulu di Other Income &gt; Kategori.
+            Atur dulu di Pendapatan Lain &gt; Kategori.
         </div>
     @elseif ($mode === 'recorded')
         <div class="alert alert-warning" style="margin-bottom:15px;">
@@ -36,7 +36,7 @@
     @else
         <div class="alert alert-warning" style="margin-bottom:15px;">
             <i class="fa fa-info-circle"></i>
-            Produk ini sudah tidak memicu Other Income (hanya saat dibuat atau disimpan pertama kali),
+            Produk ini sudah tidak memicu Pendapatan Lain (hanya saat dibuat atau disimpan pertama kali),
             jadi mengubah status ke Listing tidak mencatat income.
         </div>
     @endif
