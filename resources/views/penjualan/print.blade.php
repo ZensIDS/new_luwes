@@ -7,17 +7,17 @@
     <title>Struk {{ $penjualan->code }}</title>
     <script>
         // Ingat pilihan kertas per-perangkat, jadi cetak otomatis dari kasir & Re-Print
-        // selalu langsung memakai ukuran terakhir (58 / 80) tanpa harus klik lagi.
+        // selalu langsung memakai ukuran terakhir (58 / 68 / 80) tanpa harus klik lagi.
         (function () {
             try {
                 var url = new URL(window.location.href);
                 var chosen = url.searchParams.get('paper');
-                if (chosen === '58' || chosen === '80') {
+                if (chosen === '58' || chosen === '68' || chosen === '80') {
                     window.localStorage.setItem('receipt-paper', chosen);
                     return;
                 }
                 var saved = window.localStorage.getItem('receipt-paper');
-                if (saved === '58' || saved === '80') {
+                if (saved === '58' || saved === '68' || saved === '80') {
                     url.searchParams.set('paper', saved);
                     window.location.replace(url.toString());
                 }
@@ -27,18 +27,29 @@
     @php
         // Ukuran default kalau belum pernah memilih (ubah ke '80' jika mayoritas printer 80mm).
         $defaultPaper = '58';
-        $paper = in_array(request('paper'), ['58', '80'], true) ? request('paper') : $defaultPaper;
+
+        // Profil per ukuran kertas. Untuk menambah ukuran lain cukup tambah satu baris di sini
+        // (lalu satu tombol di bagian bawah halaman).
+        //   printable = lebar area cetak NYATA printer thermal (POS-58 = 384 dot ~48mm, POS-80 = 576 dot ~72mm;
+        //               kertas 68mm diperkirakan ~58mm, sesuaikan di sini bila hasil cetak masih terpotong / terlalu sempit)
+        //   font      = ukuran huruf dalam pt
+        $paperProfiles = [
+            '58' => ['printable' => '48mm', 'base' => '7.5pt', 'small' => '6.75pt', 'title' => '10.5pt', 'tiny' => '6pt', 'item' => '7pt', 'total' => '9.5pt', 'logo' => '28mm'],
+            '68' => ['printable' => '58mm', 'base' => '8.25pt', 'small' => '7.1pt', 'title' => '12pt', 'tiny' => '6.4pt', 'item' => '7.5pt', 'total' => '10.5pt', 'logo' => '34mm'],
+            '80' => ['printable' => '72mm', 'base' => '9pt', 'small' => '7.5pt', 'title' => '13.5pt', 'tiny' => '6.75pt', 'item' => '8pt', 'total' => '11.5pt', 'logo' => '40mm'],
+        ];
+        $requestedPaper = request('paper');
+        $paper = is_string($requestedPaper) && isset($paperProfiles[$requestedPaper]) ? $requestedPaper : $defaultPaper;
+        $profile = $paperProfiles[$paper];
         $paperWidth = $paper . 'mm';
-        // Lebar area cetak NYATA printer thermal: POS-58 = 384 dot (~48mm), POS-80 = 576 dot (~72mm).
-        // Kertas 58mm tidak bisa dicetak penuh 58mm, makanya sebelumnya sisi kanan terpotong / tidak pas.
-        $printable = $paper === '58' ? '48mm' : '72mm';
-        // Ukuran font dalam pt (58mm | 80mm).
-        $baseFont = $paper === '58' ? '7.5pt' : '9pt';
-        $smallFont = $paper === '58' ? '6.75pt' : '7.5pt';
-        $titleFont = $paper === '58' ? '10.5pt' : '13.5pt';
-        $tinyFont = $paper === '58' ? '6pt' : '6.75pt';
-        $itemNameFont = $paper === '58' ? '7pt' : '8pt';
-        $totalFont = $paper === '58' ? '9.5pt' : '11.5pt';
+        $printable = $profile['printable'];
+        $baseFont = $profile['base'];
+        $smallFont = $profile['small'];
+        $titleFont = $profile['title'];
+        $tinyFont = $profile['tiny'];
+        $itemNameFont = $profile['item'];
+        $totalFont = $profile['total'];
+        $logoMaxWidth = $profile['logo'];
         $items = $penjualan->displayItems();
         $itemCount = $items->sum(fn ($item) => (int) $item->qty);
         // Rincian per item dihitung dari satu sumber supaya semua angka di struk saling menjumlah:
@@ -90,7 +101,7 @@
         }
         .center { text-align: center; }
         .bold { font-weight: bold; }
-        .store-logo { max-width: {{ $paper === '58' ? '28mm' : '40mm' }}; max-height: 18mm; margin-bottom: 1mm; filter: grayscale(1) contrast(1.6); }
+        .store-logo { max-width: {{ $logoMaxWidth }}; max-height: 18mm; margin-bottom: 1mm; filter: grayscale(1) contrast(1.6); }
         .store-name { font-size: {{ $titleFont }}; font-weight: bold; letter-spacing: .5px; word-break: break-word; }
         .small { font-size: {{ $smallFont }}; }
         .tiny { font-size: {{ $tinyFont }}; line-height: 1.25; word-break: break-word; }
@@ -209,6 +220,7 @@
         <button type="button" class="primary" onclick="window.print(); return false;">Print {{ $paper }}mm</button>
         <div class="papers">
             <a href="{{ route('penjualan.print', [$penjualan, 'paper' => '58']) }}" class="{{ $paper === '58' ? 'active' : '' }}">Kertas 58mm</a>
+            <a href="{{ route('penjualan.print', [$penjualan, 'paper' => '68']) }}" class="{{ $paper === '68' ? 'active' : '' }}">Kertas 68mm</a>
             <a href="{{ route('penjualan.print', [$penjualan, 'paper' => '80']) }}" class="{{ $paper === '80' ? 'active' : '' }}">Kertas 80mm</a>
         </div>
         <div class="tips">

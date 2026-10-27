@@ -171,7 +171,7 @@
 
         {{-- Stok Toko (superadmin, admin-gudang, staff-outlet, owner, kasir) --}}
         @if (in_array($role, ['superadmin', 'admin-gudang', 'staff-outlet', 'owner', 'kasir']))
-        <li class="treeview {{ request()->is('owner-stock*') || request()->is('owner-stocks*') || request()->is('stok-minus*') || request()->is('stok-expired*') ? 'active' : '' }}">
+        <li class="treeview {{ request()->is('owner-stock*') || request()->is('owner-stocks*') || request()->is('stok-minus*') || request()->is('stok-expired*') || request()->is('set-stock*') ? 'active' : '' }}">
             <a href="#"><i class="fa fa-cubes"></i><span>Stok Toko</span><i class="fa fa-angle-left pull-right"></i></a>
             <ul class="treeview-menu">
                 <li class="{{ request()->is('owner-stocks*') ? 'active' : '' }}">
@@ -183,6 +183,11 @@
                 <li class="{{ request()->is('owner-stock-opname*') ? 'active' : '' }}">
                     <a href="{{ route('owner-stock-opname') }}"><i class="fa fa-cube"></i><span>Opname Toko</span></a>
                 </li>
+                @if (in_array($role, ['superadmin', 'staff-outlet']))
+                <li class="{{ request()->is('set-stock*') ? 'active' : '' }}">
+                    <a href="{{ route('set-stock.index') }}"><i class="fa fa-barcode"></i><span>Set Stock</span></a>
+                </li>
+                @endif
                 @if (in_array($role, ['superadmin', 'owner', 'staff-outlet']))
                 <li class="{{ request()->is('stok-minus*') ? 'active' : '' }}">
                     <a href="{{ route('deficit-stocks.index') }}">

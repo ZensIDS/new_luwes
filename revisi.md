@@ -1,4 +1,4 @@
-# TODOLIST — Revisi Set Stock, Pembulatan, Nota 68, Pendapatan Lain, Master Harga Jual, Index Penjualan
+# TODOLIST — Revisi Set Stock, Pembulatan, Nota 68, Pendapatan Lain, Master Harga Jual, Index Penjualan, Desain Label Harga
 
 Status: `[ ]` belum · `[~]` dikerjakan · `[x]` selesai
 Aturan kerja: bertahap · tiap tahap hanya kirim file yang berubah/baru (file card, bukan zip, tidak ditempel di chat) · todolist ini di-update tiap tahap selesai.
@@ -24,6 +24,13 @@ Revisi ini mandiri (tidak terkait revisi MMC).
 | K12 | Draft Set Stock: SATU keranjang per toko (dipakai bersama) agar tidak terjadi konflik input |
 | K13 | Folder nama berawalan angka/simbol digabung ke folder "#/Lainnya" |
 | K14 | Print master harga jual: kolom sama seperti tabel index saat ini (tanpa kolom Action) |
+| K15 | Desain label harga mengikuti gambar referensi: nama produk, badge HARGA PROMO, harga jual besar, Harga Normal dicoret, lingkaran DISKON %, barcode + angka kode |
+| K16 | Persen diskon = (harga coret − harga jual) ÷ harga coret × 100, dibulatkan ke bilangan bulat; bila 0% atau tidak ada harga coret, badge/lingkaran/harga normal tidak ditampilkan |
+| K17 | Label punya opsi "Mode cetak": Thermal (hitam putih, default) atau Warna (pink); layout satu template, beda hanya variabel warna. Ukuran kertas 58/68/80 mm + A4 (label 95 mm) untuk printer warna |
+| K18 | Set Stock "menimpa": seluruh qty ditaruh di batch yang jadi HPP terbaru (sama dengan LatestHpp), batch lain produk itu di toko yang sama dijadikan 0 (tercatat adjustment + movement); HPP batch lama tidak diubah; batch MINUS tidak disentuh (ditutup lewat Stok Minus) |
+| K19 | Produk belum punya batch: dibuat batch baru bernomor otomatis `SET-YYYYMMDD-{id produk}` dengan HPP = HPP terbaru (K7) |
+| K20 | Simpan Set Stock = satu transaksi; bila ada satu item gagal, SEMUA dibatalkan, daftar item gagal ditampilkan, keranjang tetap utuh |
+| K21 | Konflik keranjang bersama: tiap item punya nomor versi; mengubah item yang baru diubah orang lain ditolak (409) sampai dicek ulang |
 
 ---
 
@@ -37,13 +44,13 @@ Revisi ini mandiri (tidak terkait revisi MMC).
 - [x] 1.6 Artisan `outlet-prices:round-report` (menggantikan rencana `round-all`): harga netto tidak disimpan di tabel aturan, tapi dihitung dari aturan + HPP terbaru, jadi SEMUA aturan lama otomatis terbulatkan begitu kode baru aktif; command hanya membaca & melaporkan sebelum→sesudah (`--outlet=`, `--detail`, `--csv=`, chunk)
 - [~] 1.7 Uji: logika pembulatan + penyelesai target netto sudah disimulasikan (19.870→19.900, 4.510→4.600, 5.000→5.000, dengan penyesuaian nominal/persen); uji di aplikasi (PHP tidak tersedia di sini): form aturan harga, kasir, nota baru & lama, `php artisan outlet-prices:round-report`
 
-## TAHAP 2 — Nota 68mm
+## TAHAP 2 — Nota 68mm — SELESAI, menunggu uji user
 
-- [ ] 2.1 `penjualan/print.blade.php`: konfigurasi ukuran per kertas (array 58/68/80: lebar area cetak, font, logo), tombol "Kertas 68mm", ukuran terakhir diingat per perangkat seperti sekarang
-- [ ] 2.2 `cashier/print-vouchers.blade.php` & `print-products.blade.php`: dukung 68mm
-- [ ] 2.3 Uji tampilan 58/68/80 (area cetak 68mm perlu dites di printer user)
+- [x] 2.1 `penjualan/print.blade.php`: profil ukuran per kertas (array 58/68/80: area cetak, font, logo), tombol "Kertas 68mm", ukuran terakhir diingat per perangkat (localStorage) seperti sebelumnya
+- [x] 2.2 `cashier/print-vouchers.blade.php` (opsi 68mm di pilihan ukuran) & `cashier/print-products.blade.php` (sebelumnya terkunci 80mm; kini ada pilihan 80/68/58mm, ukuran huruf & padding label menyesuaikan)
+- [~] 2.3 Uji tampilan 58/68/80: perlu dites di printer user (area cetak 68mm diperkirakan 58mm; bisa disesuaikan di array `$paperProfiles`)
 
-## TAHAP 3 — Set Stock (Stock Toko)
+## TAHAP 3 — Set Stock (Stock Toko) — KODE SELESAI, menunggu uji user
 
 Rancangan:
 - Draft (keranjang) disimpan di database, SATU per toko (bersama, K12) — karena dipakai bersama, tampilkan siapa yang terakhir mengubah tiap item, kunci per baris (item yang sama tidak ditimpa diam-diam bila 2 orang scan bersamaan), dan opsi "muat ulang" daftar; otomatis tersimpan tiap scan/ubah qty → aman saat logout / perangkat mati / lupa simpan
@@ -52,14 +59,14 @@ Rancangan:
 - Tombol anti klik ganda (token idempotensi), draft ditandai selesai setelah sukses
 
 Tugas:
-- [ ] 3.1 Migration `set_stock_drafts` (unik per outlet berstatus aktif) + `set_stock_draft_items` (unik per draft+produk, kolom qty, jumlah scan, waktu scan, user terakhir mengubah)
-- [ ] 3.2 `OutletStockService::setInitialStock()`: batch otomatis (SKU/batch number generate) bila belum ada, menimpa bila sudah ada, catat StockAdjustment + StockMovement, HPP dari LatestHpp
-- [ ] 3.3 `SetStockController` + route + akses (superadmin, staff-outlet) + menu "Set Stock" di treeview Stock Toko
-- [ ] 3.4 Endpoint scan (cari persis by barcode, ringan) + autosave draft + simpan massal
-- [ ] 3.5 View: pilih toko di awal → halaman scan; kartu info produk (barcode, nama, HPP, diskon dll seperti master harga jual); input qty autofokus setelah scan; Enter = tambah ke draft, fokus balik ke scan
-- [ ] 3.6 Daftar draft di panel samping/tombol "Isi Keranjang (n)" yang bisa dibuka-tutup (tidak mengotori halaman); edit qty, hapus item, cari di keranjang
-- [ ] 3.7 Pulihkan draft otomatis saat halaman dibuka kembali
-- [ ] 3.8 Uji: scan ganda, 300+ item, logout lalu masuk lagi, simpan gagal sebagian, klik ganda, produk belum punya batch, produk sudah punya batch
+- [x] 3.1 Migration `set_stock_drafts` (unik per outlet berstatus aktif) + `set_stock_draft_items` (unik per draft+produk, kolom qty, jumlah scan, waktu scan, user terakhir mengubah)
+- [x] 3.2 `OutletStockService::setInitialStock()`: batch otomatis (SKU/batch number generate) bila belum ada, menimpa bila sudah ada, catat StockAdjustment + StockMovement, HPP dari LatestHpp
+- [x] 3.3 `SetStockController` + route + akses (superadmin, staff-outlet) + menu "Set Stock" di treeview Stock Toko
+- [x] 3.4 Endpoint scan (cari persis by barcode, ringan) + autosave draft + simpan massal
+- [x] 3.5 View: pilih toko di awal → halaman scan; kartu info produk (barcode, nama, HPP, diskon dll seperti master harga jual); input qty autofokus setelah scan; Enter = tambah ke draft, fokus balik ke scan
+- [x] 3.6 Daftar draft di panel samping/tombol "Isi Keranjang (n)" yang bisa dibuka-tutup (tidak mengotori halaman); edit qty, hapus item, cari di keranjang
+- [x] 3.7 Pulihkan draft otomatis saat halaman dibuka kembali
+- [ ] 3.8 Uji (PHP tidak tersedia di sini, belum dijalankan; jalankan `php artisan migrate` dulu): scan ganda, 300+ item, logout lalu masuk lagi, simpan gagal sebagian, klik ganda, produk belum punya batch, produk sudah punya batch
 
 ## TAHAP 4 — Pendapatan Lain (ganti nama dari Other Income)
 
@@ -91,8 +98,15 @@ Tugas:
 - [ ] 7.2 Rapikan layout header/tombol, filter, dan tabel (kolom, spasi, status, responsif)
 - [ ] 7.3 Uji tampilan desktop & mobile
 
+## TAHAP 8 — Desain label harga (cetak label produk) — L1+L2+L3 dikerjakan, menunggu uji user
+
+- [x] 8.1 `CashierPrintController::products`: tambah `print_discount_percent` (K16) dan baca parameter `mode` (`thermal`/`warna`, default thermal)
+- [x] 8.2 `cashier/print-products.blade.php`: label dibuat ulang sesuai gambar (K15); strip nama outlet dihapus; barcode garis Code 128 (sama seperti voucher); tanggal cetak, qty, dan pilihan produk tetap ada
+- [x] 8.3 Dropdown "Mode cetak" (Thermal / Warna) + pilihan kertas A4 (label 95 mm) di form cetak; ukuran font diskalakan per lebar kertas, ukuran harga mengecil otomatis untuk angka panjang
+- [ ] 8.4 Uji di printer user: label 58/68/80 mm thermal (bar kode terbaca scanner?), mode warna A4, produk tanpa diskon, harga 7 digit ke atas, nama produk panjang (2 baris)
+
 ---
 
 ## Pertanyaan yang masih terbuka
 
-Tidak ada. Semua pertanyaan sudah dijawab dan masuk ke tabel keputusan (K11–K14). Menunggu aba-aba untuk mulai Tahap 1.
+Tidak ada. Semua pertanyaan sudah dijawab dan masuk ke tabel keputusan (K11–K21). Tahap 1–2 dan 8 menunggu uji user; Tahap 3 (Set Stock) kodenya selesai, K18–K21 adalah asumsi saya yang perlu dikonfirmasi.

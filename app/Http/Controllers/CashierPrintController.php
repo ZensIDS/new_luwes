@@ -94,7 +94,15 @@ class CashierPrintController extends Controller
             $product->setAttribute('print_price_margin', $price['margin_amount']);
             $product->setAttribute('print_price_strike', $priceStrike);
             $product->setAttribute('print_price_net', $price['price']);
-            $product->setAttribute('print_has_discount', $priceStrike > $price['price']);
+            // Persen diskon = selisih harga coret terhadap harga jual, dibagi harga coret.
+            // Dibulatkan ke bilangan bulat; bila hasilnya 0% dianggap tidak ada diskon.
+            $discountPercent = $priceStrike > 0
+                ? (int) round((($priceStrike - $price['price']) / $priceStrike) * 100)
+                : 0;
+            $discountPercent = max(0, min(99, $discountPercent));
+            $hasDiscount = $priceStrike > $price['price'] && $discountPercent >= 1;
+            $product->setAttribute('print_has_discount', $hasDiscount);
+            $product->setAttribute('print_discount_percent', $hasDiscount ? $discountPercent : 0);
             $product->setAttribute('print_qty', max(1, min(100, (int) $this->quantityFor($product->id, $request))));
         });
 
@@ -106,6 +114,8 @@ class CashierPrintController extends Controller
             'selectedOutlet' => $selectedOutlet,
             'search' => $request->input('search'),
             'printing' => $printing,
+            // Mode cetak label: thermal (hitam putih) atau warna.
+            'mode' => in_array($request->input('mode'), ['thermal', 'warna'], true) ? $request->input('mode') : 'thermal',
             // Tanggal saat user menekan tombol cetak label (request POST print=1).
             'printedAt' => $printing ? now()->timezone('Asia/Jakarta') : null,
         ]);

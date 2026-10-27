@@ -143,6 +143,16 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/owner-stock-opname/data', [App\Http\Controllers\OwnerStockController::class, 'getOpnameData'])->name('owner-stock-opname.data');
     Route::post('/owner-stock-opname/save', [App\Http\Controllers\OwnerStockController::class, 'saveOpname'])->name('owner-stock-opname.save');
 
+    // Set Stock (isi / koreksi stok toko dengan scan barcode): hanya superadmin + staff-outlet.
+    Route::middleware('role:superadmin|staff-outlet')->prefix('set-stock')->name('set-stock.')->group(function () {
+        Route::get('/', [\App\Http\Controllers\SetStockController::class, 'index'])->name('index');
+        Route::get('/scan', [\App\Http\Controllers\SetStockController::class, 'scan'])->middleware('throttle:240,1,setstockscan')->name('scan');
+        Route::get('/draft', [\App\Http\Controllers\SetStockController::class, 'draft'])->name('draft');
+        Route::post('/item', [\App\Http\Controllers\SetStockController::class, 'storeItem'])->name('item.store');
+        Route::delete('/item/{item}', [\App\Http\Controllers\SetStockController::class, 'destroyItem'])->name('item.destroy');
+        Route::post('/save', [\App\Http\Controllers\SetStockController::class, 'save'])->middleware('throttle:10,1,setstocksave')->name('save');
+    });
+
     // Stok Minus (penjualan melebihi stok sistem): hanya admin outlet / owner / superadmin.
     Route::middleware('role:superadmin|owner|staff-outlet')->group(function () {
         Route::get('/stok-minus', [DeficitStockController::class, 'index'])->name('deficit-stocks.index');
