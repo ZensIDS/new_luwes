@@ -49,6 +49,7 @@ return [
         'cart_storage',
         'db_sync_runs',
         'db_sync_rows',
+        'db_sync_conflicts',
     ], array_filter(explode(',', (string) env('DB_SYNC_EXCLUDE_TABLES', '')))),
 
     /*

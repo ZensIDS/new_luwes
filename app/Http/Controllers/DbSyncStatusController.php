@@ -122,33 +122,34 @@ class DbSyncStatusController extends Controller
         ]);
     }
 
-    /** Perbedaan data satu baris (lokal vs hosting vs sinkron terakhir) untuk modal konflik di dashboard. */
+    /**
+     * Perbedaan data satu baris (lokal vs hosting vs sinkron terakhir) untuk modal konflik di dashboard.
+     * Server lokal membaca kedua database langsung; hosting tidak bisa menjangkau database lokal,
+     * jadi memakai salinan yang disimpan sinkron terakhir (db_sync_conflicts).
+     */
     public function conflict(Request $request, DbSyncService $sync): JsonResponse
     {
-        abort_unless(DbSyncService::isConfigured(), 404);
-
         $data = $request->validate([
             'table' => ['required', 'string', Rule::in($sync->syncableTables())],
             'id' => ['required', 'string', 'max:64'],
         ]);
 
+        if (! DbSyncService::isConfigured()) {
+            $row = rescue(fn () => $sync->storedConflict($data['table'], $data['id']), null, false);
+
+            return $row
+                ? response()->json($row + ['stored' => true])
+                : response()->json(['message' => 'Data perbedaan baris ini tidak tersedia di hosting (konflik sudah diselesaikan, '
+                    .'atau server lokal belum sinkron ulang). Buka dashboard di server lokal untuk melihat & menyelesaikannya.'], 404);
+        }
+
         try {
-            $row = $sync->inspectRow($data['table'], $data['id']);
+            $row = $sync->tableSynchronizer($data['table'])->snapshot($data['id']);
         } catch (Throwable $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        // Nilai panjang (mis. JSON activity_log) dipotong supaya modal tetap ringan.
-        $short = fn (?array $values) => $values === null ? null : array_map(
-            fn ($v) => is_string($v) ? mb_strimwidth($v, 0, 2000, '…') : $v,
-            $values
-        );
-
-        return response()->json([
-            'local' => $short($row['local']),
-            'server' => $short($row['server']),
-            'base' => $short($row['base']),
-        ] + $row);
+        return response()->json($row);
     }
 
     private function canManage(Request $request): bool

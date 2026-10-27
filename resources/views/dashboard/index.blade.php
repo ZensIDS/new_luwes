@@ -832,6 +832,7 @@
             const STATUS = { success: 'Berhasil', partial: 'Sebagian gagal', failed: 'Gagal', running: 'Berjalan' };
             const esc = (s) => $('<div>').text(s ?? '').html();
             let canManage = false;
+            let node = null;
             let groups = {};
             let resolved = { run: null, keys: new Set() };   // konflik yang sudah diselesaikan sejak sinkron terakhir
             let conflicts = [];                               // konflik yang masih tampil
@@ -874,6 +875,7 @@
                     .html(errors.map((e) => '<li>' + esc(e) + '</li>').join(''));
 
                 canManage = !!s.can_manage;
+                node = s.node;
                 if (resolved.run !== run?.started_at) {
                     resolved = { run: run?.started_at, keys: new Set() };
                 }
@@ -903,7 +905,9 @@
                         ? '<button class="btn btn-xs btn-default dbsync-keep" data-keep="local" ' + data + '>Lokal</button> '
                             + '<button class="btn btn-xs btn-default dbsync-keep" data-keep="server" ' + data + '>Hosting</button> '
                             + '<button class="btn btn-xs btn-default dbsync-keep" data-keep="newest" ' + data + '>Terbaru</button>'
-                        : '<small class="text-muted">Hubungi owner / superadmin</small>';
+                        : '<small class="text-muted">' + (node === 'hosting'
+                            ? 'Selesaikan dari dashboard server lokal'
+                            : 'Hubungi owner / superadmin') + '</small>';
 
                     return '<tr data-key="' + esc(c.table + '#' + c.id) + '"><td>' + esc(c.table) + '</td><td>' + esc(String(c.id)) + '</td>'
                         + '<td><small>' + esc(c.detail) + '</small><br>'
@@ -1083,6 +1087,11 @@
                         : '<tr><td colspan="5" class="text-center text-success">Data lokal & hosting sekarang sudah sama. Konflik akan hilang pada sinkron berikutnya.</td></tr>')
                     + '</tbody></table>'
                     + '<p class="small text-muted" style="margin:8px 0 0">Versi terbaru (berdasarkan <code>updated_at</code>): <b>' + newest + '</b>.</p>'
+                    + (diff.stored
+                        ? '<p class="small text-warning" style="margin:4px 0 0"><i class="fa fa-info-circle"></i> Data diambil saat sinkron terakhir'
+                            + (diff.detected_at ? ' (' + esc(diff.detected_at) + ')' : '')
+                            + '. Konflik hanya bisa diselesaikan dari dashboard server lokal.</p>'
+                        : '')
                 );
             }
 

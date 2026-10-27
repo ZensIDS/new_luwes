@@ -40,6 +40,8 @@ class TableSynchronizer
         'errors' => [],
         'warnings' => [],
         'conflict_rows' => [],
+        // id => data inspect() saat konflik terdeteksi (disimpan ke hosting, lihat DbSyncService::storeConflicts).
+        'conflict_snapshots' => [],
     ];
 
     /**
@@ -386,6 +388,7 @@ class TableSynchronizer
             $this->stats['conflicts']++;
             if (count($this->stats['conflict_rows']) < 50) {
                 $this->stats['conflict_rows'][] = ['id' => $id, 'detail' => $e->getMessage()];
+                $this->stats['conflict_snapshots'][(string) $id] = rescue(fn () => $this->snapshot($id), null, false);
             }
             if (count($this->stats['warnings']) < 20) {
                 $this->stats['warnings'][] = sprintf(
@@ -497,6 +500,19 @@ class TableSynchronizer
             'states' => $states,
             'newest' => $local && $server ? $this->merger->newerWins($local, $server) : ($local ? 'local' : 'server'),
         ];
+    }
+
+    /** inspect() dengan nilai panjang (mis. JSON activity_log) dipotong, untuk disimpan / ditampilkan di modal. */
+    public function snapshot(int|string $id): array
+    {
+        $row = $this->inspect($id);
+        foreach (['local', 'server', 'base'] as $side) {
+            if ($row[$side] !== null) {
+                $row[$side] = array_map(fn ($v) => is_string($v) ? mb_strimwidth($v, 0, 2000, '…') : $v, $row[$side]);
+            }
+        }
+
+        return $row;
     }
 
     /**

@@ -54,6 +54,7 @@ class DbSyncService
         ]);
 
         $summary = [];
+        $synced = [];
         $fatal = null;
         $lockName = 'dbsync:'.$server->getDatabaseName();
         $locked = false;
@@ -66,6 +67,7 @@ class DbSyncService
 
             $this->preflight($local, $server, $dryRun);
             $columns = $this->compareSchema($local, $server, $onlyTables, $summary);
+            $synced = array_keys($columns);
             foreach ($columns as $table => $schema) {
                 try {
                     $summary[$table] = $this->synchronizer($local, $server, $table, $schema, $force, $dryRun)->run();
@@ -83,6 +85,13 @@ class DbSyncService
             if ($locked) {
                 rescue(fn () => $server->select('SELECT RELEASE_LOCK(?)', [$lockName]), report: false);
             }
+        }
+
+        // Data perbedaan konflik disimpan terpisah (db_sync_conflicts), bukan di ringkasan riwayat sinkron.
+        $snapshots = [];
+        foreach ($summary as $table => $stats) {
+            $snapshots[$table] = $stats['conflict_snapshots'] ?? [];
+            unset($summary[$table]['conflict_snapshots']);
         }
 
         $summary = array_filter($summary, fn ($s) => $this->changedRows($s) > 0
@@ -104,6 +113,7 @@ class DbSyncService
 
         if (! $dryRun) {
             $this->recordRun($local, $server, $runId, $result);
+            $this->storeConflicts($server, $synced, $summary, $snapshots);
         }
 
         return $result;
@@ -205,7 +215,13 @@ class DbSyncService
      */
     public function resolveConflict(string $table, int|string $id, string $keep): array
     {
-        return $this->tableSynchronizer($table)->resolveConflict($id, $keep);
+        $stats = $this->tableSynchronizer($table)->resolveConflict($id, $keep);
+
+        if (! $stats['failed'] && ! $stats['conflicts'] && ! $stats['deferred']) {
+            $this->forgetConflicts([[$table, $id]]);
+        }
+
+        return $stats;
     }
 
     /**
@@ -243,16 +259,28 @@ class DbSyncService
             }
         }
 
+        $this->forgetConflicts(array_map(fn ($key) => explode('#', $key, 2), $resolved));
+
         return ['resolved' => $resolved, 'failed' => $failed];
     }
 
-    /** Bandingkan satu baris di lokal & hosting (lihat TableSynchronizer::inspect). */
-    public function inspectRow(string $table, int|string $id): array
+    /**
+     * Data perbedaan konflik yang disimpan sinkron terakhir (db_sync_conflicts). Dipakai di hosting,
+     * yang tidak bisa membaca database lokal secara langsung.
+     */
+    public function storedConflict(string $table, int|string $id): ?array
     {
-        return $this->tableSynchronizer($table)->inspect($id);
+        $row = DB::table('db_sync_conflicts')
+            ->where('table_name', $table)
+            ->where('row_id', (string) $id)
+            ->first();
+
+        $snapshot = $row ? json_decode((string) $row->snapshot, true) : null;
+
+        return $snapshot ? $snapshot + ['detected_at' => $row->detected_at] : null;
     }
 
-    private function tableSynchronizer(string $table): TableSynchronizer
+    public function tableSynchronizer(string $table): TableSynchronizer
     {
         if (! self::isConfigured()) {
             throw new RuntimeException('DB_SERVER_HOST / DB_SERVER_DATABASE belum diisi di .env.');
@@ -423,6 +451,61 @@ class DbSyncService
         return array_sum(array_intersect_key($stats, array_flip([
             'pulled', 'pushed', 'merged', 'deleted_local', 'deleted_server',
         ])));
+    }
+
+    /**
+     * Ganti salinan konflik di hosting untuk tabel yang ikut sinkron kali ini.
+     *
+     * @param  string[]  $tables
+     * @param  array<string, array<string, array|null>>  $snapshots  tabel => id => data inspect
+     */
+    private function storeConflicts(Connection $server, array $tables, array $summary, array $snapshots): void
+    {
+        if (! $tables) {
+            return;
+        }
+
+        $now = now();
+        $records = [];
+        foreach ($tables as $table) {
+            foreach ($summary[$table]['conflict_rows'] ?? [] as $row) {
+                $snapshot = $snapshots[$table][(string) $row['id']] ?? null;
+                if ($snapshot) {
+                    $records[] = [
+                        'table_name' => $table,
+                        'row_id' => (string) $row['id'],
+                        'detail' => $row['detail'],
+                        'snapshot' => json_encode($snapshot, JSON_INVALID_UTF8_SUBSTITUTE),
+                        'detected_at' => $now,
+                    ];
+                }
+            }
+        }
+
+        rescue(function () use ($server, $tables, $records) {
+            $server->transaction(function () use ($server, $tables, $records) {
+                $server->table('db_sync_conflicts')->whereIn('table_name', $tables)->delete();
+                foreach (array_chunk($records, 50) as $chunk) {
+                    $server->table('db_sync_conflicts')->insert($chunk);
+                }
+            });
+        }, report: false);
+    }
+
+    /** @param  array<int, array{0: string, 1: int|string}>  $rows  [tabel, id] yang konfliknya sudah diselesaikan */
+    private function forgetConflicts(array $rows): void
+    {
+        if (! $rows) {
+            return;
+        }
+
+        rescue(function () use ($rows) {
+            $query = DB::connection(config('dbsync.server_connection'))->table('db_sync_conflicts');
+            foreach ($rows as [$table, $id]) {
+                $query->orWhere(fn ($q) => $q->where('table_name', $table)->where('row_id', (string) $id));
+            }
+            $query->delete();
+        }, report: false);
     }
 
     private function recordRun(Connection $local, Connection $server, ?int $runId, array $result): void
