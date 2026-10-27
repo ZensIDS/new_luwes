@@ -293,6 +293,108 @@ class OutletStockService
         ]);
     }
 
+    /**
+     * Set Stock: qty yang diinput MENIMPA stok produk di outlet (K5).
+     *
+     * - Belum ada batch sama sekali: dibuat batch baru (nomor batch otomatis) dengan HPP yang diberikan.
+     * - Sudah ada batch: seluruh qty ditaruh di batch yang jadi "HPP terbaru" (sama dengan LatestHpp),
+     *   batch lain milik produk itu di outlet yang sama dijadikan 0. HPP batch lama tidak diubah.
+     * - Batch MINUS tidak disentuh (ditutup lewat halaman Stok Minus).
+     * Setiap perubahan dicatat sebagai StockAdjustment + StockMovement. Dipanggil di dalam
+     * transaksi pemanggil, jadi bisa digabung menjadi satu transaksi besar (semua atau tidak sama sekali).
+     *
+     * @return array{before:int,after:int}|null null bila qty sudah sama (tidak ada perubahan)
+     */
+    public function setInitialStock(
+        int $outletId,
+        int $productId,
+        int $targetQty,
+        float $hpp,
+        int $draftId,
+        ?Authenticatable $user = null
+    ): ?array {
+        if ($targetQty < 0) {
+            throw new RuntimeException('Qty Set Stock tidak boleh negatif.');
+        }
+
+        return DB::transaction(function () use ($outletId, $productId, $targetQty, $hpp, $draftId, $user) {
+            $batches = OwnerStock::where('owner_id', $outletId)
+                ->where('product_id', $productId)
+                ->notDeficit()
+                ->lockForUpdate()
+                ->get();
+            $before = (int) $batches->sum('qty');
+
+            if ($batches->isEmpty()) {
+                if ($targetQty < 1) {
+                    return null;
+                }
+
+                $batchNumber = $this->generateSetStockBatchNumber($outletId, $productId);
+                $primary = OwnerStock::create([
+                    'owner_id' => $outletId,
+                    'product_id' => $productId,
+                    'qty' => 0,
+                    'sku' => $batchNumber,
+                    'batch_number' => $batchNumber,
+                    'hpp' => $hpp,
+                    'source_type' => 'set_stock',
+                    'source_id' => $draftId,
+                    'created_by' => $user?->getAuthIdentifier(),
+                ]);
+                $batches = collect([$primary]);
+            } else {
+                $primary = $this->pickPrimaryBatch($batches);
+            }
+
+            $date = today()->toDateString();
+            $notes = 'Set Stock toko (draft #' . $draftId . ')';
+            $changed = false;
+
+            foreach ($batches as $batch) {
+                $target = $batch->is($primary) ? $targetQty : 0;
+                if ($this->adjust($batch, (float) $target, $date, 'Set Stock', $user, $notes)) {
+                    $changed = true;
+                }
+            }
+
+            return $changed ? ['before' => $before, 'after' => $targetQty] : null;
+        });
+    }
+
+    /** Batch tujuan Set Stock: batch tersedia terbaru, kalau tidak ada batch terbaru apa pun (sama dengan LatestHpp). */
+    protected function pickPrimaryBatch($batches): OwnerStock
+    {
+        $sorted = $batches->sortByDesc(fn (OwnerStock $batch) => [
+            $batch->created_at?->getTimestamp() ?? 0,
+            (int) $batch->id,
+        ])->values();
+
+        $available = $sorted->first(fn (OwnerStock $batch) => (int) $batch->qty > 0
+            && (! $batch->expired_at || $batch->expired_at->gte(today())));
+
+        return $available ?? $sorted->first();
+    }
+
+    protected function generateSetStockBatchNumber(int $outletId, int $productId): string
+    {
+        $base = 'SET-' . now()->format('Ymd') . '-' . $productId;
+        $candidate = $base;
+        $suffix = 1;
+
+        // withTrashed(): unique index ikut menghitung baris yang sudah di-soft-delete.
+        while (OwnerStock::withTrashed()
+            ->where('owner_id', $outletId)
+            ->where('product_id', $productId)
+            ->where('batch_number', $candidate)
+            ->exists()) {
+            $suffix++;
+            $candidate = $base . '-' . $suffix;
+        }
+
+        return $candidate;
+    }
+
     public function adjust(
         OwnerStock $ownerStock,
         float $physicalQty,
