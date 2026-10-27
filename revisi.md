@@ -31,6 +31,10 @@ Revisi ini mandiri (tidak terkait revisi MMC).
 | K19 | Produk belum punya batch: dibuat batch baru bernomor otomatis `SET-YYYYMMDD-{id produk}` dengan HPP = HPP terbaru (K7) |
 | K20 | Simpan Set Stock = satu transaksi; bila ada satu item gagal, SEMUA dibatalkan, daftar item gagal ditampilkan, keranjang tetap utuh |
 | K21 | Konflik keranjang bersama: tiap item punya nomor versi; mengubah item yang baru diubah orang lain ditolak (409) sampai dicek ulang |
+| K22 | Pendapatan Lain: kategori Sewa dikenali lewat slug `sewa` (asumsi saya), karena itu kategori Sewa dikunci (tidak bisa diubah nama/dihapus) |
+| K23 | Pendapatan Lain: kolom `tanggal` tetap ada di database (dipakai filter & laporan), diisi otomatis tanggal input; index menampilkan jam input dari created_at (asumsi saya) |
+| K24 | Pendapatan Lain: Sewa lama yang belum punya periode/supplier/produk harus dilengkapi saat diedit (asumsi saya, konsisten dengan "sewa wajib lengkap") |
+| K25 | Index master harga jual: folder = kata pertama nama produk (dipisah spasi); search atas mencari di semua produk dan mengabaikan folder; kotak "Cari folder" (muncul bila folder > 12) adalah tambahan saya (asumsi, perlu dikonfirmasi) |
 
 ---
 
@@ -68,22 +72,23 @@ Tugas:
 - [x] 3.7 Pulihkan draft otomatis saat halaman dibuka kembali
 - [ ] 3.8 Uji (PHP tidak tersedia di sini, belum dijalankan; jalankan `php artisan migrate` dulu): scan ganda, 300+ item, logout lalu masuk lagi, simpan gagal sebagian, klik ganda, produk belum punya batch, produk sudah punya batch
 
-## TAHAP 4 — Pendapatan Lain (ganti nama dari Other Income)
+## TAHAP 4 — Pendapatan Lain (ganti nama dari Other Income) — KODE SELESAI, menunggu uji user
 
-- [ ] 4.1 Ganti label "Other Income" → "Pendapatan Lain" (sidebar, judul, breadcrumb, export, pesan); nama route tidak diubah
-- [ ] 4.2 Migration kolom nullable: `sewa_mulai`, `sewa_selesai`, `supplier_id`, `product_id`
-- [ ] 4.3 Form: kategori Sewa memunculkan Tanggal Dari–Sampai, Select2 Supplier, Select2 Produk (ajax, terhubung supplier terpilih, minimal ketik beberapa karakter, maksimal 20 hasil)
-- [ ] 4.4 Tanggal input disembunyikan, otomatis dari created at; validasi (sewa wajib lengkap, sampai ≥ dari)
-- [ ] 4.5 Index/export Pendapatan Lain menampilkan info sewa
-- [ ] 4.6 Uji: ganti kategori, edit data lama, produk tidak ikut supplier lain
+- [x] 4.1 Label "Other Income" → "Pendapatan Lain": sidebar, judul/tombol index & form, kategori, export (judul laporan, nama sheet, nama file `Laporan-Pendapatan-Lain_...`), pesan error, teks info Listing di form produk & master harga jual, deskripsi activity log. Nama route & URL (`other-income*`) tidak diubah
+- [x] 4.2 Migration `2026_10_27_140000_add_sewa_fields_to_other_incomes_table`: `sewa_mulai`, `sewa_selesai`, `supplier_id`, `product_id` (semua nullable; supplier/produk dihapus → NULL, nama produk tetap di `product_name_snapshot`)
+- [x] 4.3 Form: pilih kategori Sewa → muncul Tanggal Dari–Sampai, Select2 Supplier, Select2 Produk (ajax `other-income.products.search`: hanya produk milik supplier terpilih, minimal 2 huruf, maks 20 hasil); ganti supplier mengosongkan produk; ganti ke kategori lain mengosongkan isian sewa
+- [x] 4.4 Tanggal input disembunyikan: otomatis = waktu input saat simpan, TIDAK berubah saat edit (form menampilkan "Waktu Input" read-only); validasi server: sewa wajib lengkap, sampai ≥ dari, produk harus milik supplier (data lama yang tidak diubah tetap lolos); isian sewa dikosongkan server untuk kategori lain
+- [x] 4.5 Index menampilkan periode sewa, supplier, produk di kolom Keterangan + kolom Tanggal kini tampil tanggal & jam input; Export Excel: kolom baru Sewa Dari, Sewa Sampai, Supplier, Produk Sewa (total Jumlah ikut digeser)
+- [x] 4.5b Kategori Sewa dikunci (nama tidak bisa diubah, tidak bisa dihapus) karena form mengenalinya lewat slug `sewa`
+- [ ] 4.6 Uji (PHP tidak tersedia di sini, belum dijalankan; jalankan `php artisan migrate` dulu): ganti kategori bolak-balik, tambah Sewa lengkap & tidak lengkap, edit data lama (Sewa lama yang belum punya periode/supplier/produk wajib dilengkapi saat diedit), produk dari supplier lain ditolak, export Excel (kolom & total), kategori lain tidak menyimpan isian sewa
 
-## TAHAP 5 — Index master harga jual: card folder
+## TAHAP 5 — Index master harga jual: card folder — KODE SELESAI, menunggu uji user
 
-- [ ] 5.1 Query folder: kata pertama nama produk (`SUBSTRING_INDEX`) + jumlah, per outlet, di-cache dan dibersihkan saat aturan harga berubah; awalan angka/simbol masuk folder "#/Lainnya" (K13)
-- [ ] 5.2 Tampilan awal: card "All Product" lalu card folder (desain modern, ringan, tanpa gambar berat)
-- [ ] 5.3 Klik card → list produk folder tersebut (tampilan tabel sama seperti sekarang), breadcrumb + tombol kembali
-- [ ] 5.4 Search di atas tetap aktif (cari di semua produk)
-- [ ] 5.5 Uji: nama berawalan angka/simbol, huruf besar/kecil, outlet berbeda, data besar
+- [x] 5.1 Service `PriceFolderIndex`: kunci folder = kata pertama nama produk (`SUBSTRING_INDEX`, huruf besar), nama berawalan angka/simbol/kosong → folder "#/Lainnya" (K13); jumlah per outlet di-cache (10 menit) dan dibersihkan otomatis saat aturan harga dibuat/dihapus/dipulihkan/pindah outlet-produk (hook di `OutletPrice`) atau nama produk berubah/dihapus/dipulihkan (hook di `Product`); tombol Kembali yang hanya memperbarui updated_at tidak membersihkan cache
+- [x] 5.2 Tampilan awal index (setelah outlet dipilih): card "All Product" lalu card folder (grid ringan, tanpa gambar, nama + jumlah produk); bila folder lebih dari 12 muncul kotak "Cari folder..." (disaring di browser)
+- [x] 5.3 Klik card → daftar produk folder itu (tabel sama seperti sekarang, urut A-Z, 25 per halaman) dengan breadcrumb + tombol "Kembali ke folder"; "All Product" membuka seluruh produk outlet; setelah simpan/edit/hapus/Kembali, halaman kembali ke folder yang sama
+- [x] 5.4 Search di atas tetap aktif dan mencari di SEMUA produk outlet (folder diabaikan saat ada kata pencarian)
+- [ ] 5.5 Uji (PHP tidak tersedia di sini, belum dijalankan): nama berawalan angka/simbol masuk "#/Lainnya", huruf besar/kecil, ganti outlet, outlet dengan data besar (kecepatan card & isi folder), jumlah di card = jumlah baris di folder, ganti nama produk / tambah / hapus aturan harga → card ikut berubah, kembali ke folder yang sama setelah edit, tombol Cetak label terpilih tetap jalan di dalam folder
 
 ## TAHAP 6 — Print master harga jual
 
@@ -109,4 +114,4 @@ Tugas:
 
 ## Pertanyaan yang masih terbuka
 
-Tidak ada. Semua pertanyaan sudah dijawab dan masuk ke tabel keputusan (K11–K21). Tahap 1–2 dan 8 menunggu uji user; Tahap 3 (Set Stock) kodenya selesai, K18–K21 adalah asumsi saya yang perlu dikonfirmasi.
+Tidak ada. Semua pertanyaan sudah dijawab dan masuk ke tabel keputusan (K11–K21). Tahap 1–2, 4, 5, dan 8 menunggu uji user; Tahap 3 (Set Stock) kodenya selesai, K18–K21 adalah asumsi saya yang perlu dikonfirmasi; Tahap 4: K22–K24 dan Tahap 5: K25 adalah asumsi saya yang perlu dikonfirmasi.

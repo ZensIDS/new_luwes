@@ -6,14 +6,17 @@ use App\Exports\OtherIncomeExport;
 use App\Http\Requests\OtherIncomeRequest;
 use App\Models\OtherIncome;
 use App\Models\OtherIncomeCategory;
+use App\Models\Product;
+use App\Models\Supplier;
 use App\Support\OtherIncomeFilter;
 use App\Support\OutletAccess;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
 use Maatwebsite\Excel\Facades\Excel;
 
 /**
- * Daftar dan input manual Other Income (pemasukan di luar penjualan kasir).
+ * Daftar dan input manual Pendapatan Lain (pemasukan di luar penjualan kasir).
  *
  * - staff-outlet dan kasir hanya melihat/mengisi outlet sendiri (K11, K12); income umum tidak tampil bagi mereka.
  * - Baris otomatis (Listing) tidak bisa diubah atau dihapus: tombol nonaktif di UI dan ditolak di server (D3).
@@ -32,7 +35,7 @@ class OtherIncomeController extends Controller
         $total = (float) (clone $base)->sum('jumlah');
 
         $incomes = $base
-            ->with(['category', 'outlet'])
+            ->with(['category', 'outlet', 'supplier', 'product'])
             ->orderByDesc('tanggal')
             ->orderByDesc('id')
             ->paginate(self::PER_PAGE)
@@ -66,9 +69,15 @@ class OtherIncomeController extends Controller
 
     public function create(Request $request)
     {
+        $income = new OtherIncome();
+        $categories = OtherIncomeCategory::manual()->orderBy('name')->get();
+
         return view('other-incomes.form', [
-            'income' => new OtherIncome(['tanggal' => now()]),
-            'categories' => OtherIncomeCategory::manual()->orderBy('name')->get(),
+            'income' => $income,
+            'categories' => $categories,
+            'sewaCategoryIds' => $this->sewaCategoryIds($categories),
+            'suppliers' => Supplier::orderBy('name')->get(['id', 'name', 'deleted_at']),
+            'selectedProduct' => $this->selectedProduct($request, $income),
             'outlets' => OutletAccess::outlets(),
             'scoped' => $this->isOutletScoped($request->user()),
             'method' => 'POST',
@@ -78,7 +87,9 @@ class OtherIncomeController extends Controller
 
     public function store(OtherIncomeRequest $request): RedirectResponse
     {
-        OtherIncome::create($request->validated() + [
+        // Tanggal tidak diinput: otomatis = waktu input (sama dengan created_at).
+        OtherIncome::create($this->payload($request->validated()) + [
+            'tanggal' => now()->toDateString(),
             'created_by' => $request->user()->id,
         ]);
 
@@ -98,9 +109,18 @@ class OtherIncomeController extends Controller
             ->orderBy('name')
             ->get();
 
+        // Supplier pilihan: yang aktif, ditambah supplier income ini sendiri walau sudah dihapus.
+        $suppliers = Supplier::withTrashed()
+            ->where(fn ($q) => $q->whereNull('deleted_at')->orWhere('id', $otherIncome->supplier_id))
+            ->orderBy('name')
+            ->get(['id', 'name', 'deleted_at']);
+
         return view('other-incomes.form', [
             'income' => $otherIncome,
             'categories' => $categories,
+            'sewaCategoryIds' => $this->sewaCategoryIds($categories),
+            'suppliers' => $suppliers,
+            'selectedProduct' => $this->selectedProduct($request, $otherIncome),
             'outlets' => OutletAccess::outlets(),
             'scoped' => $this->isOutletScoped($request->user()),
             'method' => 'PUT',
@@ -114,7 +134,8 @@ class OtherIncomeController extends Controller
             return $blocked;
         }
 
-        $otherIncome->update($request->validated());
+        // Tanggal tidak ikut diubah: tetap waktu input awal.
+        $otherIncome->update($this->payload($request->validated()));
 
         return redirect()->route('other-income.index')->with('toast_success', 'Berhasil Menyimpan Data!');
     }
@@ -128,6 +149,71 @@ class OtherIncomeController extends Controller
         $otherIncome->delete();
 
         return redirect()->route('other-income.index')->with('toast_success', 'Berhasil Menghapus Data!');
+    }
+
+    /**
+     * Select2 AJAX produk untuk kategori Sewa: hanya produk milik supplier terpilih,
+     * minimal 2 karakter, maksimal 20 hasil.
+     */
+    public function searchProducts(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'supplier_id' => ['required', 'integer'],
+            'q' => ['nullable', 'string', 'max:100'],
+        ]);
+
+        $search = trim((string) ($data['q'] ?? ''));
+
+        if (mb_strlen($search) < 2) {
+            return response()->json(['results' => [], 'pagination' => ['more' => false]]);
+        }
+
+        $like = addcslashes($search, '\\%_');
+
+        $rows = Product::query()
+            ->whereIn('id', fn ($q) => $q
+                ->select('product_id')
+                ->from('product_supplier')
+                ->where('supplier_id', (int) $data['supplier_id']))
+            ->where(function ($q) use ($like) {
+                $q->where('name', 'like', "%{$like}%")
+                    ->orWhere('code', 'like', "{$like}%");
+            })
+            ->orderBy('name')
+            ->limit(20)
+            ->get(['id', 'code', 'name']);
+
+        return response()->json([
+            'results' => $rows->map(fn ($product) => [
+                'id' => $product->id,
+                'text' => "{$product->code} — {$product->name}",
+            ])->values(),
+            'pagination' => ['more' => false],
+        ]);
+    }
+
+    /** ID kategori Sewa di antara kategori yang ditampilkan (dipakai form untuk memunculkan isian sewa). */
+    private function sewaCategoryIds($categories): array
+    {
+        return $categories->filter(fn ($category) => $category->isSewa())->pluck('id')->values()->all();
+    }
+
+    /** Produk terpilih (edit / old input) untuk mengisi Select2 ajax; bukan seluruh katalog. */
+    private function selectedProduct(Request $request, OtherIncome $income): ?Product
+    {
+        $id = $request->old('product_id', $income->product_id);
+
+        return $id ? Product::withTrashed()->select(['id', 'code', 'name'])->find($id) : null;
+    }
+
+    /** Snapshot nama produk sewa disimpan supaya tetap tampil walau produk dihapus; kosong untuk kategori lain. */
+    private function payload(array $data): array
+    {
+        $data['product_name_snapshot'] = ! empty($data['product_id'])
+            ? Product::withTrashed()->whereKey($data['product_id'])->value('name')
+            : null;
+
+        return $data;
     }
 
     /**

@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Maatwebsite\Excel\Concerns\WithMultipleSheets;
 
-/** E1 + E2: Export Other Income (detail + rekap per kategori), membawa filter halaman daftar. */
+/** E1 + E2: Export Pendapatan Lain (detail + rekap per kategori), membawa filter halaman daftar. */
 class OtherIncomeExport implements WithMultipleSheets
 {
     private ?Builder $query = null;
@@ -22,7 +22,7 @@ class OtherIncomeExport implements WithMultipleSheets
 
     public function __construct(private readonly Request $request) {}
 
-    /** Nama file: Laporan-Other-Income_<mulai>_sd_<selesai>.xlsx */
+    /** Nama file: Laporan-Pendapatan-Lain_<mulai>_sd_<selesai>.xlsx */
     public function fileName(): string
     {
         $this->prepare();
@@ -35,8 +35,8 @@ class OtherIncomeExport implements WithMultipleSheets
         $this->prepare();
 
         return [
-            new OtherIncomeSheet($this->metaFor('LAPORAN OTHER INCOME'), $this->query),
-            new OtherIncomeRekapSheet($this->metaFor('REKAP OTHER INCOME PER KATEGORI'), $this->recap()),
+            new OtherIncomeSheet($this->metaFor('LAPORAN PENDAPATAN LAIN'), $this->query),
+            new OtherIncomeRekapSheet($this->metaFor('REKAP PENDAPATAN LAIN PER KATEGORI'), $this->recap()),
         ];
     }
 
@@ -68,7 +68,7 @@ class OtherIncomeExport implements WithMultipleSheets
 
         $this->query = $query;
         $this->info = $info;
-        $this->base = ReportMeta::fromRequest($this->request, 'LAPORAN OTHER INCOME', 'Other-Income', [], null, [$start, $end]);
+        $this->base = ReportMeta::fromRequest($this->request, 'LAPORAN PENDAPATAN LAIN', 'Pendapatan-Lain', [], null, [$start, $end]);
     }
 
     /** ReportMeta per sheet: sama persis, hanya judul dan baris filter yang berbeda. */

@@ -181,7 +181,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
 
     Route::resource('/pengeluaran', PengeluaranController::class);
 
-    // Other Income (pemasukan di luar penjualan kasir). Semua role boleh mengakses; staff-outlet dan kasir
+    // Pendapatan Lain / Other Income (pemasukan di luar penjualan kasir). Semua role boleh mengakses; staff-outlet dan kasir
     // dibatasi ke outlet sendiri di controller. Kategori dan nominal Listing: hanya superadmin dan owner (K11).
     Route::middleware('role:superadmin|owner')
         ->prefix('other-income/categories')
@@ -197,6 +197,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
         Route::get('/', [OtherIncomeController::class, 'index'])->name('index');
         Route::get('/export', [OtherIncomeController::class, 'export'])->name('export');
         Route::get('/create', [OtherIncomeController::class, 'create'])->name('create');
+        Route::get('/products/search', [OtherIncomeController::class, 'searchProducts'])->middleware('throttle:120,1,search')->name('products.search');
         Route::post('/', [OtherIncomeController::class, 'store'])->name('store');
         Route::get('/{otherIncome}/edit', [OtherIncomeController::class, 'edit'])->whereNumber('otherIncome')->name('edit');
         Route::put('/{otherIncome}', [OtherIncomeController::class, 'update'])->whereNumber('otherIncome')->name('update');

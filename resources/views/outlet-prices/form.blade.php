@@ -921,17 +921,17 @@
                 var html;
                 if (editState.listingMode === 'trigger' && editState.listingNominal) {
                     cls = 'alert-info';
-                    html = 'Produk ini akan mencatat Other Income Listing sebesar <strong>Rp '
+                    html = 'Produk ini akan mencatat Pendapatan Lain Listing sebesar <strong>Rp '
                         + Number(editState.listingNominal).toLocaleString('id-ID', { maximumFractionDigits: 0 })
                         + '</strong> (sekali saja).';
                 } else if (editState.listingMode === 'trigger') {
                     cls = 'alert-danger';
                     html = 'Nominal Listing belum diatur, sehingga produk <strong>tidak bisa disimpan</strong> dengan status Listing. '
-                        + 'Atur dulu di Other Income &gt; Kategori.';
+                        + 'Atur dulu di Pendapatan Lain &gt; Kategori.';
                 } else if (editState.listingMode === 'recorded') {
                     html = 'Income Listing produk ini sudah tercatat sebelumnya, jadi tidak akan tercatat lagi.';
                 } else {
-                    html = 'Produk ini sudah tidak memicu Other Income (hanya saat dibuat atau disimpan pertama kali), '
+                    html = 'Produk ini sudah tidak memicu Pendapatan Lain (hanya saat dibuat atau disimpan pertama kali), '
                         + 'jadi mengubah status ke Listing tidak mencatat income.';
                 }
                 $alert.attr('class', 'alert ' + cls).html('<i class="fa fa-info-circle"></i> ' + html);

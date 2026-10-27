@@ -230,13 +230,13 @@
         </li>
         @endif
 
-        {{-- Other Income (tidak ditampilkan untuk admin-gudang & kasir; menu Kategori hanya superadmin & owner) --}}
+        {{-- Pendapatan Lain / Other Income (tidak ditampilkan untuk admin-gudang & kasir; menu Kategori hanya superadmin & owner) --}}
         @if (! in_array($role, ['admin-gudang', 'kasir']))
         <li class="treeview {{ request()->is('other-income*') ? 'active' : '' }}">
-            <a href="#"><i class="fa fa-plus-circle"></i><span>Other Income</span><i class="fa fa-angle-left pull-right"></i></a>
+            <a href="#"><i class="fa fa-plus-circle"></i><span>Pendapatan Lain</span><i class="fa fa-angle-left pull-right"></i></a>
             <ul class="treeview-menu">
                 <li class="{{ request()->is('other-income*') && ! request()->is('other-income/categories*') ? 'active' : '' }}">
-                    <a href="{{ route('other-income.index') }}"><i class="fa fa-list"></i><span>Daftar Other Income</span></a>
+                    <a href="{{ route('other-income.index') }}"><i class="fa fa-list"></i><span>Daftar Pendapatan Lain</span></a>
                 </li>
                 @if (in_array($role, ['superadmin', 'owner']))
                 <li class="{{ request()->is('other-income/categories*') ? 'active' : '' }}">

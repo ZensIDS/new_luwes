@@ -1,6 +1,6 @@
 @extends('layouts.master')
 
-@section('title', 'Other Income')
+@section('title', 'Pendapatan Lain')
 
 @php
     $rp = fn ($value) => 'Rp ' . number_format((float) $value, 0, ',', '.');
@@ -9,7 +9,7 @@
 
 @section('container')
     <section class="content-header">
-        <h1>Other Income <small>Pemasukan di luar penjualan kasir</small></h1>
+        <h1>Pendapatan Lain <small>Pemasukan di luar penjualan kasir</small></h1>
     </section>
 
     <section class="content">
@@ -30,7 +30,7 @@
                     // "tanpa batas tanggal" tidak berubah jadi bulan berjalan.
                     $exportParams = array_map(fn ($value) => $value ?? '', $filters);
                 @endphp
-                <a class="btn btn-success" href="{{ route('other-income.create') }}"><i class="fa fa-plus"></i> Tambah Other Income</a>
+                <a class="btn btn-success" href="{{ route('other-income.create') }}"><i class="fa fa-plus"></i> Tambah Pendapatan Lain</a>
                 <a class="btn btn-primary" href="{{ route('other-income.export', $exportParams) }}"><i class="fa fa-file-excel-o"></i> Export Excel</a>
                 @if ($canManageCategories)
                     <a class="btn btn-default" href="{{ route('other-income.categories.index') }}"><i class="fa fa-tags"></i> Kategori</a>
@@ -86,7 +86,8 @@
                             @forelse ($incomes as $income)
                                 <tr>
                                     <td>{{ $incomes->firstItem() + $loop->index }}</td>
-                                    <td>{{ $income->tanggal->format('d/m/Y') }}</td>
+                                    {{-- Tanggal = waktu input (otomatis). --}}
+                                    <td>{{ ($income->created_at ?? $income->tanggal)->format('d/m/Y H:i') }}</td>
                                     <td>
                                         {{ $income->category?->name ?? '-' }}
                                         @if ($income->category?->trashed())
@@ -99,6 +100,21 @@
                                             Produk: {{ $income->product_name_snapshot ?? '-' }}
                                         @else
                                             {{ $income->keterangan }}
+                                        @endif
+
+                                        {{-- Info Sewa: periode, supplier, produk (hanya muncul bila terisi). --}}
+                                        @if ($income->sewa_mulai || $income->supplier_id || $income->product_id)
+                                            <div class="small text-muted" style="margin-top:3px; line-height:1.5;">
+                                                @if ($income->sewa_mulai && $income->sewa_selesai)
+                                                    <div><i class="fa fa-calendar"></i> Sewa: {{ $income->sewa_mulai->format('d/m/Y') }} – {{ $income->sewa_selesai->format('d/m/Y') }}</div>
+                                                @endif
+                                                @if ($income->supplier)
+                                                    <div><i class="fa fa-truck"></i> Supplier: {{ $income->supplier->name }}</div>
+                                                @endif
+                                                @if ($income->product || $income->product_name_snapshot)
+                                                    <div><i class="fa fa-cube"></i> Produk: {{ $income->product?->name ?? $income->product_name_snapshot }}</div>
+                                                @endif
+                                            </div>
                                         @endif
                                     </td>
                                     <td>
@@ -121,7 +137,7 @@
                                                 @csrf
                                                 @method('delete')
                                                 <button class="btn btn-danger btn-sm"
-                                                    onclick="return confirm('Hapus income ini?')">Hapus</button>
+                                                    onclick="return confirm('Hapus pendapatan lain ini?')">Hapus</button>
                                             </form>
                                         @endif
                                     </td>
