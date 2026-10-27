@@ -40,6 +40,15 @@
         .opf-empty { display:none; padding:20px 0; color:#777; }
         .opf-crumb { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
         .opf-crumb .opf-path { color:#555; }
+
+        /* Popup Export Excel master harga */
+        .pm-option { display:block; margin:0 0 10px; padding:12px 14px; border:1px solid #e5e7eb; border-radius:8px; cursor:pointer; font-weight:normal; transition:border-color .15s, background .15s; }
+        .pm-option:hover { border-color:#b9b6e0; }
+        .pm-option.active { border-color:#605ca8; background:#f6f5fc; }
+        .pm-option input[type=radio] { margin:0 8px 0 0; vertical-align:middle; }
+        .pm-option .pm-title { font-weight:600; vertical-align:middle; }
+        .pm-option .pm-desc { display:block; margin:2px 0 0 22px; color:#777; font-size:12px; }
+        .pm-option .pm-select { margin:8px 0 0 22px; }
     </style>
     <section class="content-header">
         <h1>Master Harga Jual <small>Aturan harga POS per outlet</small></h1>
@@ -57,6 +66,10 @@
                     Harga</a>
                 <a class="btn btn-default" href="{{ route('owner-stocks.index') }}"><i class="fa fa-cubes"></i> Lihat Stock
                     Toko</a>
+                @if ($selectedOutletId)
+                    <button type="button" class="btn btn-default" data-toggle="modal" data-target="#exportMasterModal">
+                        <i class="fa fa-file-excel-o"></i> Export Excel</button>
+                @endif
                 @if ($mode === 'products')
                     <form id="outlet-price-label-print-form" method="POST"
                         action="{{ route('cashier.print.products') }}" target="_blank"
@@ -274,9 +287,99 @@
             @endif
         </div>
     </section>
+
+    @if ($selectedOutletId)
+        {{-- Popup Export Excel master harga: semua barang outlet, atau satu folder. --}}
+        <div class="modal fade" id="exportMasterModal" tabindex="-1">
+            <div class="modal-dialog">
+                <form method="GET" action="{{ route('outlet-prices.export') }}" id="export-master-form">
+                    <input type="hidden" name="outlet_id" value="{{ $selectedOutletId }}">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <button type="button" class="close" data-dismiss="modal">&times;</button>
+                            <h4 class="modal-title"><i class="fa fa-file-excel-o"></i> Export Excel Master Harga Jual</h4>
+                            <small class="text-muted">Outlet: {{ $outlets->firstWhere('id', $selectedOutletId)?->name ?? '-' }}</small>
+                        </div>
+                        <div class="modal-body">
+                            @if ($totalAll > 0)
+                                <label class="pm-option">
+                                    <input type="radio" name="scope" value="all" {{ $activeFolder === null ? 'checked' : '' }}>
+                                    <span class="pm-title">Semua barang (outlet terpilih)</span>
+                                    <span class="pm-desc">{{ number_format($totalAll, 0, ',', '.') }} produk, urut abjad nama produk</span>
+                                </label>
+                                <label class="pm-option">
+                                    <input type="radio" name="scope" value="folder" {{ $activeFolder !== null ? 'checked' : '' }}>
+                                    <span class="pm-title">Barang dalam folder</span>
+                                    <span class="pm-desc">Hanya produk di satu folder (kata pertama nama produk)</span>
+                                    <div class="pm-select">
+                                        <select name="folder" id="export-folder" style="width:100%;" data-placeholder="Pilih folder">
+                                            <option value=""></option>
+                                            @foreach ($folders as $folder)
+                                                <option value="{{ $folder['key'] }}" {{ $activeFolder === $folder['key'] ? 'selected' : '' }}>
+                                                    {{ $folder['label'] }} ({{ number_format($folder['total'], 0, ',', '.') }})</option>
+                                            @endforeach
+                                        </select>
+                                    </div>
+                                </label>
+                                <p class="text-muted small" style="margin:6px 0 0;">
+                                    File Excel (.xlsx) langsung terunduh, kolom sama seperti tabel di halaman ini tanpa kolom Action.
+                                </p>
+                            @else
+                                <p class="text-center text-muted" style="margin:10px 0;">Belum ada master harga untuk outlet ini.</p>
+                            @endif
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-default" data-dismiss="modal">Batal</button>
+                            <button type="submit" class="btn btn-primary" id="export-master-submit" {{ $totalAll > 0 ? '' : 'disabled' }}>
+                                <i class="fa fa-file-excel-o"></i> Export Excel</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    @endif
 @endsection
 
 @section('page-script')
+    @if ($selectedOutletId && $totalAll > 0)
+        <script>
+            $(function () {
+                var $modal = $('#exportMasterModal');
+                var $folder = $('#export-folder');
+
+                $folder.select2({
+                    width: '100%',
+                    placeholder: $folder.data('placeholder'),
+                    allowClear: false,
+                    dropdownParent: $modal
+                });
+
+                function syncExportForm() {
+                    var isFolder = $('#export-master-form input[name=scope]:checked').val() === 'folder';
+                    $folder.prop('disabled', !isFolder);
+                    $('.pm-option').removeClass('active');
+                    $('#export-master-form input[name=scope]:checked').closest('.pm-option').addClass('active');
+                    // Cakupan folder wajib memilih folder dulu.
+                    $('#export-master-submit').prop('disabled', isFolder && !$folder.val());
+                }
+
+                $('#export-master-form input[name=scope]').on('change', syncExportForm);
+                $folder.on('change', function () {
+                    // Memilih folder otomatis memilih cakupan "folder".
+                    if ($folder.val()) {
+                        $('#export-master-form input[name=scope][value=folder]').prop('checked', true);
+                    }
+                    syncExportForm();
+                });
+                syncExportForm();
+
+                // File terunduh dari halaman ini; tutup popup setelah dikirim.
+                $('#export-master-form').on('submit', function () {
+                    setTimeout(function () { $modal.modal('hide'); }, 150);
+                });
+            });
+        </script>
+    @endif
     @if ($mode === 'folders')
         <script>
             $(function () {

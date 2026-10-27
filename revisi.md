@@ -23,7 +23,7 @@ Revisi ini mandiri (tidak terkait revisi MMC).
 | K11 | Strategi pembulatan = A: dibulatkan otomatis di `PriceCalculator` sebagai langkah terakhir; command `round-all` untuk laporan before/after + menyegarkan data turunan |
 | K12 | Draft Set Stock: SATU keranjang per toko (dipakai bersama) agar tidak terjadi konflik input |
 | K13 | Folder nama berawalan angka/simbol digabung ke folder "#/Lainnya" |
-| K14 | Print master harga jual: kolom sama seperti tabel index saat ini (tanpa kolom Action) |
+| K14 | Export master harga jual: kolom sama seperti tabel index saat ini (tanpa kolom Action); HPP dipisah kolom satuan kecil/besar, komponen persen disimpan sebagai angka persen |
 | K15 | Desain label harga mengikuti gambar referensi: nama produk, badge HARGA PROMO, harga jual besar, Harga Normal dicoret, lingkaran DISKON %, barcode + angka kode |
 | K16 | Persen diskon = (harga coret − harga jual) ÷ harga coret × 100, dibulatkan ke bilangan bulat; bila 0% atau tidak ada harga coret, badge/lingkaran/harga normal tidak ditampilkan |
 | K17 | Label punya opsi "Mode cetak": Thermal (hitam putih, default) atau Warna (pink); layout satu template, beda hanya variabel warna. Ukuran kertas 58/68/80 mm + A4 (label 95 mm) untuk printer warna |
@@ -35,6 +35,7 @@ Revisi ini mandiri (tidak terkait revisi MMC).
 | K23 | Pendapatan Lain: kolom `tanggal` tetap ada di database (dipakai filter & laporan), diisi otomatis tanggal input; index menampilkan jam input dari created_at (asumsi saya) |
 | K24 | Pendapatan Lain: Sewa lama yang belum punya periode/supplier/produk harus dilengkapi saat diedit (asumsi saya, konsisten dengan "sewa wajib lengkap") |
 | K25 | Index master harga jual: folder = kata pertama nama produk (dipisah spasi); search atas mencari di semua produk dan mengabaikan folder; kotak "Cari folder" (muncul bila folder > 12) adalah tambahan saya (asumsi, perlu dikonfirmasi) |
+| K26 | Export master harga (menggantikan print): hanya cetak/export "semua barang" atau satu folder, urut abjad nama produk, tabel datar tanpa baris pemisah huruf (agar bisa difilter/diurutkan di Excel), format mengikuti Excel Laporan Toko (kop, info, header berkelompok, baris total), hak akses sama seperti index master harga (asumsi saya, perlu dikonfirmasi) |
 
 ---
 
@@ -90,12 +91,16 @@ Tugas:
 - [x] 5.4 Search di atas tetap aktif dan mencari di SEMUA produk outlet (folder diabaikan saat ada kata pencarian)
 - [ ] 5.5 Uji (PHP tidak tersedia di sini, belum dijalankan): nama berawalan angka/simbol masuk "#/Lainnya", huruf besar/kecil, ganti outlet, outlet dengan data besar (kecepatan card & isi folder), jumlah di card = jumlah baris di folder, ganti nama produk / tambah / hapus aturan harga → card ikut berubah, kembali ke folder yang sama setelah edit, tombol Cetak label terpilih tetap jalan di dalam folder
 
-## TAHAP 6 — Print master harga jual
+## TAHAP 6 — Export Excel master harga jual (sebelumnya Print) — KODE SELESAI, menunggu uji user
 
-- [ ] 6.1 Tombol Print di index + popup modern: "Semua barang (outlet terpilih)" atau "Barang dalam folder" (pilih folder)
-- [ ] 6.2 Route + halaman print: kolom sama seperti tabel index (Barcode, Nama Product, HPP, diskon-diskon, Harga Jual, Penyesuaian, Catatan, Terakhir Update, Stock Outlet; tanpa Action), pemisah per nama awal, desain rapi, siap cetak A4 landscape (K14)
-- [ ] 6.3 Query ringan (per folder/chunk, tanpa memuat semua sekaligus)
-- [ ] 6.4 Uji: outlet besar, folder kosong, halaman terpotong
+Catatan: awalnya tahap ini berupa halaman print A4; atas permintaan user diganti menjadi export Excel. Halaman print (route `outlet-prices.print`, view `outlet-prices/print/*`) dihapus.
+
+- [x] 6.1 Tombol "Export Excel" di index (muncul setelah outlet dipilih, baik di tampilan folder maupun daftar produk) + popup: "Semua barang (outlet terpilih)" atau "Barang dalam folder" (pilih folder, bisa dicari); bila popup dibuka dari dalam folder, folder itu sudah terpilih; folder wajib dipilih sebelum tombol aktif; file langsung terunduh (tanpa tab baru)
+- [x] 6.2 Route `outlet-prices.export` (`GET /outlet-prices/export`, throttle 30/menit) + `OutletPriceController::exportMaster` (validasi cakupan sama seperti print, akses sama dengan index, staff-outlet terkunci ke outlet sendiri)
+- [x] 6.3 `app/Exports/OutletPriceExport.php` memakai kerangka Excel Laporan Toko (`BaseLaporanTokoExport`, `SheetWriter`, `Theme`, `ReportMeta`): kop perusahaan + logo, judul, info (Per Tanggal, Outlet, Cakupan, Total Produk, Waktu Cetak, Dicetak Oleh), header berkelompok (Produk · HPP Terbaru · Komponen Harga · Harga · Keterangan & Stok), zebra, filter + freeze pane, baris TOTAL PRODUK, A4 landscape muat 1 halaman lebar dengan judul berulang. Nama file `Laporan-Master-Harga-Jual-<outlet>[-Folder-<folder>]_<tanggal>.xlsx`
+- [x] 6.4 Kolom (K14): Barcode, Nama Product, Satuan, HPP/Satuan Kecil, HPP/Satuan Besar, Pajak, Disc Reg, Disc 1, Disc 2, Disc Toko, Margin, Harga Jual, Penyesuaian, Catatan, Terakhir Update, Stok Outlet, Konversi Stok. Semua angka tetap angka (persen = format persen, nominal = Rupiah); komponen bernilai 0 dikosongkan; stok minus merah
+- [x] 6.5 Query ringan: daftar id diurutkan di muka (`orderedPriceIds`), baris + HPP + stok dimuat per 200 id; perhitungan harga memakai `decoratePrices` yang sama dengan index
+- [ ] 6.6 Uji (PHP tidak tersedia di sini, belum dijalankan): export semua barang & satu folder, folder "#/Lainnya", outlet besar (kecepatan & memori), harga/stok di Excel sama dengan index, persen vs nominal tampil benar, barcode tidak jadi notasi ilmiah, staff-outlet tidak bisa export outlet lain, buka di Excel + cetak (A4 landscape)
 
 ## TAHAP 7 — Rapikan index penjualan
 
@@ -114,4 +119,4 @@ Tugas:
 
 ## Pertanyaan yang masih terbuka
 
-Tidak ada. Semua pertanyaan sudah dijawab dan masuk ke tabel keputusan (K11–K21). Tahap 1–2, 4, 5, dan 8 menunggu uji user; Tahap 3 (Set Stock) kodenya selesai, K18–K21 adalah asumsi saya yang perlu dikonfirmasi; Tahap 4: K22–K24 dan Tahap 5: K25 adalah asumsi saya yang perlu dikonfirmasi.
+Tidak ada. Semua pertanyaan sudah dijawab dan masuk ke tabel keputusan (K11–K21). Tahap 1–2, 4, 5, 6 (export Excel), dan 8 menunggu uji user; Tahap 3 (Set Stock) kodenya selesai, K18–K21 adalah asumsi saya yang perlu dikonfirmasi; Tahap 4: K22–K24, Tahap 5: K25, dan Tahap 6: K26 adalah asumsi saya yang perlu dikonfirmasi.

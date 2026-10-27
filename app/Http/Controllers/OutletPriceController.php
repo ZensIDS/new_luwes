@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Exports\OutletPriceExport;
 use App\Http\Requests\OutletPriceRequest;
 use App\Http\Requests\NewProductFromPriceRequest;
 use App\Http\Requests\UpdateProductFromPriceRequest;
@@ -21,6 +22,7 @@ use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Maatwebsite\Excel\Facades\Excel;
 use Spatie\Activitylog\Models\Activity;
 
 class OutletPriceController extends Controller
@@ -125,45 +127,16 @@ class OutletPriceController extends Controller
             session([self::LAST_VIEW_SESSION => ['folder' => $activeFolder ?? '', 'all' => $showAll]]);
         }
 
-        $folders = [];
-        $totalAll = 0;
-        if ($mode === 'folders') {
-            $folders = $folderIndex->folders($outletId);
-            $totalAll = $folderIndex->totalOf($folders);
-        }
+        // Daftar folder (dari cache) dipakai kartu folder dan pilihan folder di popup Print.
+        $folders = $outletId ? $folderIndex->folders($outletId) : [];
+        $totalAll = $folderIndex->totalOf($folders);
 
         $prices = $mode === 'products'
             ? $this->pricePage($outletId, $search, $activeFolder)
             : new LengthAwarePaginator([], 0, 25);
 
         if ($mode === 'products') {
-            $latestHpp = app(LatestHpp::class)->forProducts($outletId, $prices->getCollection()->pluck('product_id'));
-
-            // Stok terkini outlet ini per produk (SUM owner_stocks.qty), 1 query untuk satu halaman.
-            $outletStocks = OwnerStock::where('owner_id', $outletId)
-                ->whereIn('product_id', $prices->getCollection()->pluck('product_id'))
-                ->selectRaw('product_id, SUM(qty) as total_qty')
-                ->groupBy('product_id')
-                ->pluck('total_qty', 'product_id');
-
-            $prices->getCollection()->each(function (OutletPrice $price) use ($calculator, $latestHpp, $outletStocks) {
-                $product = $price->product;
-
-                $price->setAttribute('print_hpp', (float) ($latestHpp[$price->product_id] ?? 0));
-                $price->setAttribute('outlet_stock_qty', (int) ($outletStocks[$price->product_id] ?? 0));
-                $calculated = $calculator->calculateItem(
-                    (float) ($latestHpp[$price->product_id] ?? 0),
-                    $price,
-                    $product
-                );
-
-                $price->setAttribute('print_price_hpp_after_tax', $calculated['hpp_setelah_pajak']);
-                $price->setAttribute('print_price_margin', $calculated['margin_amount']);
-                $price->setAttribute('print_price_strike', $calculator->money(
-                    $calculated['hpp_setelah_pajak'] + $calculated['margin_amount']
-                ));
-                $price->setAttribute('print_price_net', $calculated['price']);
-            });
+            $this->decoratePrices($prices->getCollection(), $outletId, $calculator);
         }
 
         return view('outlet-prices.index', [
@@ -177,6 +150,93 @@ class OutletPriceController extends Controller
             'showAll' => $showAll,
             'searchTerm' => $search,
         ]);
+    }
+
+    /**
+     * Lengkapi satu kumpulan aturan harga dengan angka tampilan: HPP terbaru, stok outlet, dan hasil hitung harga
+     * (dipakai index dan halaman Print, 2 query untuk satu kumpulan).
+     *
+     * @param  \Illuminate\Support\Collection<int,OutletPrice>  $prices
+     */
+    private function decoratePrices($prices, int $outletId, PriceCalculator $calculator): void
+    {
+        $productIds = $prices->pluck('product_id');
+        $latestHpp = app(LatestHpp::class)->forProducts($outletId, $productIds);
+
+        // Stok terkini outlet ini per produk (SUM owner_stocks.qty), 1 query untuk satu kumpulan.
+        $outletStocks = OwnerStock::where('owner_id', $outletId)
+            ->whereIn('product_id', $productIds)
+            ->selectRaw('product_id, SUM(qty) as total_qty')
+            ->groupBy('product_id')
+            ->pluck('total_qty', 'product_id');
+
+        $prices->each(function (OutletPrice $price) use ($calculator, $latestHpp, $outletStocks) {
+            $product = $price->product;
+
+            $price->setAttribute('print_hpp', (float) ($latestHpp[$price->product_id] ?? 0));
+            $price->setAttribute('outlet_stock_qty', (int) ($outletStocks[$price->product_id] ?? 0));
+            $calculated = $calculator->calculateItem(
+                (float) ($latestHpp[$price->product_id] ?? 0),
+                $price,
+                $product
+            );
+
+            $price->setAttribute('print_price_hpp_after_tax', $calculated['hpp_setelah_pajak']);
+            $price->setAttribute('print_price_margin', $calculated['margin_amount']);
+            $price->setAttribute('print_price_strike', $calculator->money(
+                $calculated['hpp_setelah_pajak'] + $calculated['margin_amount']
+            ));
+            $price->setAttribute('print_price_net', $calculated['price']);
+        });
+    }
+
+    /**
+     * Export Excel master harga jual: semua barang outlet, atau hanya satu folder.
+     * Kolom sama dengan tabel index (tanpa Action). Perhitungan harga memakai decoratePrices() yang sama
+     * dengan index; baris dimuat per 200 id di dalam export, jadi outlet besar tidak memuat semuanya sekaligus.
+     */
+    public function exportMaster(Request $request, PriceCalculator $calculator)
+    {
+        $this->ensureManagementAccess();
+
+        $data = $request->validate([
+            'scope' => ['required', 'in:all,folder'],
+            'folder' => ['required_if:scope,folder', 'nullable', 'string', 'max:100'],
+        ], [
+            'scope.required' => 'Pilih cakupan export.',
+            'scope.in' => 'Cakupan export tidak valid.',
+            'folder.required_if' => 'Pilih folder yang akan diexport.',
+        ]);
+
+        @set_time_limit(300);
+
+        $outletId = OutletAccess::id($request, true);
+        $folder = $data['scope'] === 'folder' ? PriceFolderIndex::normalize((string) $data['folder']) : null;
+
+        $export = new OutletPriceExport(
+            $request,
+            $outletId,
+            $folder,
+            $this->orderedPriceIds($outletId, $folder),
+            fn ($prices) => $this->decoratePrices($prices, $outletId, $calculator),
+        );
+
+        return Excel::download($export, $export->fileName());
+    }
+
+    /**
+     * Id aturan harga satu outlet, urut abjad nama produk (sama dengan index), opsional dibatasi satu folder.
+     * Hanya kolom id yang diambil supaya ringan walau jumlahnya puluhan ribu.
+     */
+    private function orderedPriceIds(int $outletId, ?string $folder)
+    {
+        return OutletPrice::query()
+            ->where('outlet_prices.outlet_id', $outletId)
+            ->leftJoin('products', 'products.id', '=', 'outlet_prices.product_id')
+            ->when($folder !== null, fn ($query) => app(PriceFolderIndex::class)->constrain($query, $folder))
+            ->orderBy('products.name')
+            ->orderBy('outlet_prices.id')
+            ->pluck('outlet_prices.id');
     }
 
     /**
