@@ -39,14 +39,25 @@
                 @endif
 
                 @if (!empty($r['outlet']))
+                    @php $outletRequired = !empty($r['outlet_required']); @endphp
                     <div class="form-group">
-                        <label>Outlet</label>
-                        <select class="form-control" data-param="outlet_id">
-                            <option value="">Semua outlet</option>
+                        <label>Outlet @if ($outletRequired)<span class="text-red">*</span>@endif</label>
+                        <select class="form-control" data-param="outlet_id" @if ($outletRequired) data-required="1" @endif>
+                            <option value="">{{ $outletRequired ? '-- Pilih outlet --' : 'Semua outlet' }}</option>
                             @foreach ($outlets as $outlet)
-                                <option value="{{ $outlet->id }}">{{ $outlet->name }}</option>
+                                <option value="{{ $outlet->id }}" {{ $outletRequired && $outlets->count() === 1 ? 'selected' : '' }}>{{ $outlet->name }}</option>
                             @endforeach
                         </select>
+                    </div>
+                @endif
+
+                @if (!empty($r['folder']))
+                    <div class="form-group">
+                        <label>Cakupan (nama awal barang)</label>
+                        <select class="form-control js-folder" data-param="folder" data-url="{{ route('laporan.outlet.product-folders') }}" disabled>
+                            <option value="">Semua barang</option>
+                        </select>
+                        <p class="help-block" style="margin:6px 0 0;font-size:12px;">Pilih outlet dulu. Folder = kata pertama nama barang, sama seperti folder di Master Harga Jual.</p>
                     </div>
                 @endif
 
@@ -81,7 +92,8 @@
                     <p class="text-muted" style="margin:0;">Laporan ini tidak memerlukan filter.</p>
                 @endif
 
-                <p class="rpt-error"><i class="fa fa-exclamation-circle"></i> Tanggal mulai tidak boleh lebih besar dari tanggal selesai.</p>
+                <p class="rpt-error rpt-error-date"><i class="fa fa-exclamation-circle"></i> Tanggal mulai tidak boleh lebih besar dari tanggal selesai.</p>
+                <p class="rpt-error rpt-error-outlet"><i class="fa fa-exclamation-circle"></i> Pilih outlet terlebih dahulu.</p>
             </div>
 
             <div class="modal-footer">

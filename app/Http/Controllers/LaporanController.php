@@ -33,6 +33,7 @@ use App\Exports\StockExport;
 use App\Exports\StockOpnameExport;
 use App\Exports\OutletAllStockExport;
 use App\Exports\OutletMinimalStockExport;
+use App\Exports\OutletProductListExport;
 use App\Exports\OutletPenjualanExport;
 use App\Exports\OutletRafaksiExport;
 use App\Exports\OutletReturExport;
@@ -51,6 +52,7 @@ use App\Models\StockMovement;
 use App\Models\Supplier;
 use App\Models\User;
 use App\Services\OutletLaporanService;
+use App\Services\PriceFolderIndex;
 use App\Support\OutletAccess;
 use App\Support\ReportQuery;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -236,6 +238,23 @@ class LaporanController extends Controller
     public function exportOutletAllStock(Request $request)
     {
         return Excel::download(new OutletAllStockExport($request), ReportMeta::fileNameFor($request, 'All-Stock-Toko', now()));
+    }
+
+    /** Daftar barang satu outlet (Barcode + Nama Barang), semua barang atau satu folder nama awal. */
+    public function exportOutletProductList(Request $request)
+    {
+        $export = new OutletProductListExport($request);
+
+        // fileName() memvalidasi outlet lebih dulu (wajib dipilih; staff-outlet terkunci ke outletnya).
+        return Excel::download($export, $export->fileName());
+    }
+
+    /** Daftar folder (kata pertama nama produk) satu outlet untuk pilihan di modal laporan. */
+    public function outletProductFolders(Request $request, PriceFolderIndex $folders)
+    {
+        $outletId = OutletAccess::id($request, true);
+
+        return response()->json(['folders' => $folders->folders($outletId)]);
     }
 
     public function exportReturSupplier(Request $request)

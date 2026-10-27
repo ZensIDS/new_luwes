@@ -115,6 +115,14 @@ Catatan: awalnya tahap ini berupa halaman print A4; atas permintaan user diganti
 - [x] 8.3 Dropdown "Mode cetak" (Thermal / Warna) + pilihan kertas A4 (label 95 mm) di form cetak; ukuran font diskalakan per lebar kertas, ukuran harga mengecil otomatis untuk angka panjang
 - [ ] 8.4 Uji di printer user: label 58/68/80 mm thermal (bar kode terbaca scanner?), mode warna A4, produk tanpa diskon, harga 7 digit ke atas, nama produk panjang (2 baris)
 
+## TAHAP 9 — Laporan Toko: Daftar Barang Outlet (export Excel) — KODE SELESAI, menunggu uji user
+
+- [x] 9.1 Kartu baru "Daftar Barang Outlet" di grup Stok pada Laporan Toko (`laporan/outlet`); modal: Outlet (WAJIB dipilih, tanpa "Semua outlet"; outlet tunggal terpilih otomatis) + Cakupan nama awal (folder = kata pertama nama barang, sama dengan folder Master Harga Jual; default "Semua barang")
+- [x] 9.2 Route `laporan.outlet.product-list` (export, throttle 10/menit) dan `laporan.outlet.product-folders` (JSON daftar folder per outlet, memakai cache `PriceFolderIndex`); folder dimuat ulang saat outlet diganti; akses outlet lewat `OutletAccess` (staff-outlet terkunci ke outletnya)
+- [x] 9.3 `app/Exports/OutletProductListExport.php` (kerangka Excel Laporan Toko): hanya kolom Barcode dan Nama Barang, urut A-Z, baris TOTAL BARANG; nama file `Laporan-Daftar-Barang-Toko-<outlet>[-Folder-<folder>]_<tanggal>.xlsx`
+- [x] 9.4 Asumsi (perlu dikonfirmasi): "semua barang" outlet = produk yang punya aturan harga di Master Harga Jual outlet tsb
+- [ ] 9.5 Uji (PHP tidak tersedia di sini, belum dijalankan): outlet belum dipilih (muncul pesan), ganti outlet (folder ikut berganti), folder "#/Lainnya", outlet dengan banyak barang, barcode tidak jadi notasi ilmiah, staff-outlet tidak bisa mengambil outlet lain, kartu lain di Laporan Toko tetap normal (filter tanggal/outlet/kasir/rafaksi)
+
 ---
 
 ## Pertanyaan yang masih terbuka

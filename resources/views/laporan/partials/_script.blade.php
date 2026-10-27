@@ -35,6 +35,38 @@ $(function () {
         modal.find('.rpt-error').hide();
     });
 
+    // ---- Pilihan folder (nama awal barang) mengikuti outlet terpilih ----
+    function loadFolders(modal) {
+        var $folder = modal.find('.js-folder');
+        if (!$folder.length) { return; }
+
+        var outletId = modal.find('select[data-param=outlet_id]').val() || '';
+        $folder.data('outlet', outletId).prop('disabled', true)
+            .empty().append($('<option>').val('').text('Semua barang'));
+
+        if ($.fn.select2 && !$folder.data('select2')) {
+            $folder.select2({ width: '100%', dropdownParent: modal });
+        }
+        if (!outletId) { return; }
+
+        $.getJSON($folder.data('url'), { outlet_id: outletId }).done(function (res) {
+            if (String($folder.data('outlet')) !== String(outletId)) { return; } // outlet sudah diganti lagi
+            $.each(res.folders || [], function (i, f) {
+                $folder.append($('<option>').val(f.key).text(f.label + ' (' + f.total + ')'));
+            });
+        }).always(function () {
+            if (String($folder.data('outlet')) === String(outletId)) { $folder.prop('disabled', false); }
+        });
+    }
+    $(document).on('change', '.rpt-modal select[data-param=outlet_id]', function () { loadFolders($(this).closest('.modal')); });
+    $(document).on('shown.bs.modal', '.rpt-modal', function () {
+        var modal = $(this);
+        if (modal.find('.js-folder').length && !modal.data('foldersLoaded')) {
+            modal.data('foldersLoaded', true);
+            loadFolders(modal); // outlet sudah terpilih otomatis (mis. staff-outlet) langsung memuat folder
+        }
+    });
+
     // ---- Unduh Excel ----
     $(document).on('click', '.js-export', function (event) {
         event.preventDefault();
@@ -45,8 +77,16 @@ $(function () {
             if (v) params[$(this).data('param')] = v;
         });
 
+        // Outlet wajib (laporan yang menandainya dengan data-required).
+        if (modal.find('[data-required]').length && !params.outlet_id) {
+            modal.find('.rpt-error').hide();
+            modal.find('.rpt-error-outlet').show();
+            return;
+        }
+
         if (params.tanggal_mulai && params.tanggal_selesai && params.tanggal_mulai > params.tanggal_selesai) {
-            modal.find('.rpt-error').show();
+            modal.find('.rpt-error').hide();
+            modal.find('.rpt-error-date').show();
             return;
         }
         modal.find('.rpt-error').hide();
