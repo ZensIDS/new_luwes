@@ -664,6 +664,8 @@
                                 <div><span>Harga Aktif</span><strong id="preview-active">Rp0</strong></div>
                                 <div><span>Diskon Toko</span><strong id="preview-store">Rp0</strong></div>
                                 <div><span>Penyesuaian Outlet</span><strong id="preview-adjustment">Rp0</strong></div>
+                                <div><span>Harga Sebelum Pembulatan</span><strong id="preview-pre-round">Rp0</strong></div>
+                                <div><span>Pembulatan (ke atas Rp100)</span><strong id="preview-rounding">Rp0</strong></div>
                             </div>
                             <div class="price-preview-total">
                                 <span>Harga Netto POS</span>
@@ -1165,6 +1167,14 @@
                 return Math.round(value || 0);
             }
 
+            // Harga netto POS dibulatkan ke ATAS kelipatan 100 (19.870 -> 19.900, 4.510 -> 4.600).
+            // Aturan yang sama dengan PriceCalculator::roundingAmount() di server.
+            const ROUND_STEP = 100;
+            function roundUp(value) {
+                const v = Math.round(value || 0);
+                return v <= 0 ? 0 : Math.ceil(v / ROUND_STEP) * ROUND_STEP;
+            }
+
             function number(id) {
                 return (window.parseIdNumber ? window.parseIdNumber($(id).val()) : Number.parseFloat($(id).val())) || 0;
             }
@@ -1199,6 +1209,17 @@
                 return round(price) + adjustment;
             }
 
+            // Netto akhir di POS (sudah dibulatkan) bila harga sebelum penyesuaian = price.
+            function nettoFinal(price) {
+                return roundUp(nettoFromPreAdjustment(price));
+            }
+
+            // Skor kecocokan terhadap target: utamakan netto akhir (setelah pembulatan) yang tepat,
+            // lalu netto sebelum pembulatan yang paling dekat dengan target (diskon toko sekecil mungkin).
+            function targetScore(preRoundNetto, target) {
+                return Math.abs(roundUp(preRoundNetto) - target) * 1000 + Math.abs(preRoundNetto - target);
+            }
+
             function setTargetHint(kind, text) {
                 $('#target-netto-hint').attr('class', 'help-block text-' + kind).text(text);
             }
@@ -1220,10 +1241,15 @@
 
             // Hitung persen Diskon Toko supaya Harga Netto = target (netto sudah termasuk penyesuaian outlet).
             function applyTargetNetto(hargaAktif) {
-                const target = targetNetto();
+                const targetRaw = targetNetto();
                 const $nominalLink = $('#target-use-nominal').hide();
                 targetNominal = null;
-                if (target === null || applyingTarget) { return; }
+                if (targetRaw === null || applyingTarget) { return; }
+                // Harga netto POS selalu kelipatan 100, jadi target yang tidak bulat ikut dibulatkan ke atas.
+                const target = roundUp(targetRaw);
+                const roundNote = target !== targetRaw
+                    ? ' Target ' + money(targetRaw) + ' dibulatkan ke atas menjadi ' + money(target) + '.'
+                    : '';
                 applyingTarget = true;
                 try {
                     if (hargaAktif <= 0) {
@@ -1232,13 +1258,13 @@
                         return;
                     }
 
-                    const maxNetto = nettoFromPreAdjustment(hargaAktif);   // netto tanpa diskon toko
+                    const maxNetto = nettoFinal(hargaAktif);   // netto akhir (sudah dibulatkan) tanpa diskon toko
                     if (target >= maxNetto) {
                         setStoreDiscount('percentage', '0');
                         setTargetHint(target > maxNetto ? 'warning' : 'success',
                             target > maxNetto
                                 ? 'Netto ' + money(target) + ' lebih tinggi dari netto tanpa diskon toko (' + money(maxNetto) + '). Diskon toko diset 0%.'
-                                : 'Netto ' + money(target) + ' sama dengan netto tanpa diskon toko, diskon toko 0%.');
+                                : 'Netto ' + money(target) + ' sama dengan netto tanpa diskon toko, diskon toko 0%.' + roundNote);
                         return;
                     }
 
@@ -1247,11 +1273,11 @@
                     const adjValue = number('#outlet_adjustment_value');
                     const guess = adjType === 'percentage' ? target / (1 + adjValue / 100) : target - adjValue;
                     let bestPrice = Math.min(hargaAktif, Math.max(0, round(guess)));
-                    let bestDiff = Math.abs(nettoFromPreAdjustment(bestPrice) - target);
+                    let bestDiff = targetScore(nettoFromPreAdjustment(bestPrice), target);
                     for (let d = -3; d <= 3; d++) {
                         const candidate = round(guess) + d;
                         if (candidate < 0 || candidate > hargaAktif) { continue; }
-                        const diff = Math.abs(nettoFromPreAdjustment(candidate) - target);
+                        const diff = targetScore(nettoFromPreAdjustment(candidate), target);
                         if (diff < bestDiff) { bestPrice = candidate; bestDiff = diff; }
                     }
                     const discountAmount = hargaAktif - bestPrice;
@@ -1265,7 +1291,7 @@
                         const candidate = Math.min(100, Math.max(0, Math.round((basePct + delta) * 100) / 100));
                         const store = round(hargaAktif * candidate / 100);
                         const netto = nettoFromPreAdjustment(hargaAktif - store);
-                        if (pctNetto === null || Math.abs(netto - target) < Math.abs(pctNetto - target)) {
+                        if (pctNetto === null || targetScore(netto, target) < targetScore(pctNetto, target)) {
                             pct = candidate;
                             pctNetto = netto;
                         }
@@ -1274,13 +1300,13 @@
                     setStoreDiscount('percentage', String(pct));
                     const storeAmount = round(hargaAktif * pct / 100);
 
-                    if (pctNetto === target) {
+                    if (roundUp(pctNetto) === target) {
                         setTargetHint('success', 'Diskon Toko = ' + percentText(pct) + '% (' + money(storeAmount)
-                            + ' dari Harga Aktif ' + money(hargaAktif) + ') → Netto ' + money(target));
+                            + ' dari Harga Aktif ' + money(hargaAktif) + ') → Netto ' + money(target) + '.' + roundNote);
                     } else {
                         targetNominal = discountAmount;
-                        setTargetHint('warning', 'Dengan persen 2 desimal, netto jadi ' + money(pctNetto) + ' (selisih '
-                            + money(Math.abs(pctNetto - target)) + ' dari target). ');
+                        setTargetHint('warning', 'Dengan persen 2 desimal, netto jadi ' + money(roundUp(pctNetto)) + ' (selisih '
+                            + money(Math.abs(roundUp(pctNetto) - target)) + ' dari target).' + roundNote + ' ');
                         $nominalLink.text('Pakai nominal ' + money(discountAmount) + ' agar netto tepat ' + money(target)).show();
                     }
                 } finally {
@@ -1351,7 +1377,9 @@
                 const store = round(discount(hargaAktif, $('#disc_toko_type').val(), number('#disc_toko_value')));
                 const hargaSebelumPenyesuaian = Math.max(0, round(hargaAktif - store));
                 const adjustment = round(addition(hargaSebelumPenyesuaian, $('#outlet_adjustment_type').val(), number('#outlet_adjustment_value')));
-                const hargaNetto = round(hargaSebelumPenyesuaian + adjustment);
+                const hargaSebelumPembulatan = round(hargaSebelumPenyesuaian + adjustment);
+                const pembulatan = roundUp(hargaSebelumPembulatan) - hargaSebelumPembulatan;
+                const hargaNetto = hargaSebelumPembulatan + pembulatan;
 
                 $('#preview-hpp').text(money(hpp));
                 $('#preview-tax').text(money(tax));
@@ -1365,6 +1393,8 @@
                 $('#preview-active').text(money(hargaAktif));
                 $('#preview-store').text(money(store));
                 $('#preview-adjustment').text(money(adjustment));
+                $('#preview-pre-round').text(money(hargaSebelumPembulatan));
+                $('#preview-rounding').text((pembulatan > 0 ? '+' : '') + money(pembulatan));
                 $('#preview-net').text(money(hargaNetto));
             }
 

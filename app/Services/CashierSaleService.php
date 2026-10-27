@@ -148,10 +148,11 @@ class CashierSaleService
             }
 
             $voucherTotal = array_sum($voucherAmounts);
-            $totalBeforeRounding = max(0, $subtotal - $voucherTotal);
-            // Pembulatan ke atas kelipatan 100; aturan tetap, berlaku untuk semua outlet.
-            $roundingAmount = $this->calculator->roundingAmount($totalBeforeRounding);
-            $grandTotal = $totalBeforeRounding + $roundingAmount;
+            // Tidak ada pembulatan di total transaksi. Pembulatan sudah terjadi di harga jual tiap produk
+            // (PriceCalculator::calculateItem). Kolom rounding_amount dipertahankan (selalu 0 untuk transaksi
+            // baru) agar nota/invoice lama yang punya pembulatan tetap tampil benar.
+            $grandTotal = max(0, $subtotal - $voucherTotal);
+            $roundingAmount = 0.0;
             $paidAmount = (float) ($data['paid_amount'] ?? 0);
             if ($paidAmount < $grandTotal) {
                 throw new RuntimeException('Uang Diterima (F9) kurang dari Grand Total.');

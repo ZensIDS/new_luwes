@@ -15,6 +15,7 @@ class PriceCalculator
         if (! $rule) {
             $active = $this->money($product?->harga_jual ?? $hpp);
             $margin = max(0, $active - $hpp);
+            $activeRounding = $this->roundingAmount($active);
 
             return [
                 'hpp' => $hpp,
@@ -49,7 +50,9 @@ class PriceCalculator
                 'outlet_adjustment_type' => 'nominal',
                 'outlet_adjustment_value' => 0,
                 'outlet_surcharge' => 0,
-                'price' => $active,
+                'price_before_rounding' => $active,
+                'price_rounding' => $activeRounding,
+                'price' => $active + $activeRounding,
             ];
         }
 
@@ -93,7 +96,11 @@ class PriceCalculator
         $adjustmentType = $rule->outlet_adjustment_type ?: 'nominal';
         $adjustmentValue = (float) ($rule->outlet_adjustment_value ?? 0);
         $adjustmentAmount = $this->additionAmount($hargaSebelumPenyesuaian, $adjustmentType, $adjustmentValue);
-        $hargaJual = $this->money($hargaSebelumPenyesuaian + $adjustmentAmount);
+        $hargaJual = max(0, $this->money($hargaSebelumPenyesuaian + $adjustmentAmount));
+
+        // Pembulatan dilakukan di harga jual per produk (bukan di total transaksi), ke ATAS kelipatan
+        // PRICE_ROUNDING_STEP: 19.870 -> 19.900, 4.510 -> 4.600. Selisihnya dikembalikan di 'price_rounding'.
+        $hargaJualRounding = $this->roundingAmount($hargaJual);
 
         return [
             'hpp' => $hpp,
@@ -120,7 +127,9 @@ class PriceCalculator
             'outlet_adjustment_type' => $adjustmentType,
             'outlet_adjustment_value' => $adjustmentValue,
             'outlet_surcharge' => $adjustmentAmount,
-            'price' => max(0, $hargaJual),
+            'price_before_rounding' => $hargaJual,
+            'price_rounding' => $hargaJualRounding,
+            'price' => $hargaJual + $hargaJualRounding,
         ];
     }
 
@@ -167,20 +176,31 @@ class PriceCalculator
         return strtolower(trim((string) $type)) === 'percentage';
     }
 
-    /** Total transaksi selalu dibulatkan ke ATAS kelipatan ini (mis. 19.835 -> 19.900). */
-    public const TOTAL_ROUNDING_STEP = 100;
+    /** Harga jual per produk selalu dibulatkan ke ATAS kelipatan ini (mis. 19.870 -> 19.900). */
+    public const PRICE_ROUNDING_STEP = 100;
 
-    /** Selisih pembulatan yang ditambahkan ke total (0 bila total sudah kelipatan step). */
-    public function roundingAmount(float|int|null $total): float
+    /** @deprecated Pembulatan total transaksi sudah dihapus; dipertahankan agar kode lama tidak error. */
+    public const TOTAL_ROUNDING_STEP = self::PRICE_ROUNDING_STEP;
+
+    /** Selisih pembulatan ke atas kelipatan step (0 bila harga sudah kelipatan step atau <= 0). */
+    public function roundingAmount(float|int|null $price): float
     {
-        $total = $this->money($total);
-        if ($total <= 0) {
+        $price = $this->money($price);
+        if ($price <= 0) {
             return 0.0;
         }
 
-        $step = self::TOTAL_ROUNDING_STEP;
+        $step = self::PRICE_ROUNDING_STEP;
 
-        return (float) ((int) (ceil($total / $step) * $step) - (int) $total);
+        return (float) ((int) (ceil($price / $step) * $step) - (int) $price);
+    }
+
+    /** Harga setelah dibulatkan ke atas kelipatan step. */
+    public function roundPrice(float|int|null $price): float
+    {
+        $price = $this->money($price);
+
+        return $price + $this->roundingAmount($price);
     }
 
     public function money(float|int|null $value): float
