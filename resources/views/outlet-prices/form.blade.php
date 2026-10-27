@@ -689,8 +689,18 @@
                         $backOutletId = $price->outlet_id ?: request('outlet_id');
                         $backSearch = (string) session('outlet_prices.last_search', '');
                         $backParams = array_filter(['outlet_id' => $backOutletId]);
-                        if ($backOutletId && $backSearch !== '' && (int) session('outlet_prices.last_outlet_id', 0) === (int) $backOutletId) {
-                            $backParams['search'] = $backSearch;
+                        if ($backOutletId && (int) session('outlet_prices.last_outlet_id', 0) === (int) $backOutletId) {
+                            if ($backSearch !== '') {
+                                $backParams['search'] = $backSearch;
+                            } else {
+                                // Tanpa pencarian: kembali ke folder / All Product yang tadi dibuka.
+                                $backView = (array) session('outlet_prices.last_view', []);
+                                if (! empty($backView['folder'])) {
+                                    $backParams['folder'] = $backView['folder'];
+                                } elseif (! empty($backView['all'])) {
+                                    $backParams['all'] = 1;
+                                }
+                            }
                         }
                     @endphp
                     <a class="btn btn-default" href="{{ route('outlet-prices.index', $backParams) }}"><i class="fa fa-arrow-left"></i> Kembali</a>

@@ -13,6 +13,7 @@ use App\Models\Product;
 use App\Models\Supplier;
 use App\Services\LatestHpp;
 use App\Services\OtherIncomeService;
+use App\Services\PriceFolderIndex;
 use App\Services\PriceCalculator;
 use App\Support\OutletAccess;
 use Illuminate\Http\Request;
@@ -31,6 +32,9 @@ class OutletPriceController extends Controller
 
     /** Session key: kata pencarian terakhir di outlet tersebut. */
     private const LAST_SEARCH_SESSION = 'outlet_prices.last_search';
+
+    /** Session key: folder / "All Product" terakhir yang dibuka di outlet tersebut (['folder' => string, 'all' => bool]). */
+    private const LAST_VIEW_SESSION = 'outlet_prices.last_view';
 
     /**
      * Penyesuaian Harga Outlet (nominal, Rp) yang otomatis terisi di form saat outlet tertentu dipilih.
@@ -71,8 +75,18 @@ class OutletPriceController extends Controller
         $params = array_filter(['outlet_id' => $outletId]);
         $search = (string) session(self::LAST_SEARCH_SESSION, '');
 
-        if ($outletId && $search !== '' && (int) session(self::LAST_OUTLET_SESSION, 0) === (int) $outletId) {
-            $params['search'] = $search;
+        if ($outletId && (int) session(self::LAST_OUTLET_SESSION, 0) === (int) $outletId) {
+            if ($search !== '') {
+                $params['search'] = $search;
+            } else {
+                // Tanpa pencarian: kembali ke folder / "All Product" yang tadi dibuka.
+                $view = (array) session(self::LAST_VIEW_SESSION, []);
+                if (! empty($view['folder'])) {
+                    $params['folder'] = $view['folder'];
+                } elseif (! empty($view['all'])) {
+                    $params['all'] = 1;
+                }
+            }
         }
 
         return $params;
@@ -90,7 +104,7 @@ class OutletPriceController extends Controller
         return $request->user() && in_array($request->user()->role, ['staff-outlet', 'kasir'], true);
     }
 
-    public function index(Request $request, PriceCalculator $calculator)
+    public function index(Request $request, PriceCalculator $calculator, PriceFolderIndex $folderIndex)
     {
         $this->ensureManagementAccess();
         // Buka tanpa parameter (misal dari menu) = outlet terakhir tetap dipakai, pencarian mulai kosong.
@@ -99,11 +113,30 @@ class OutletPriceController extends Controller
 
         $search = trim((string) $request->input('search', ''));
         session([self::LAST_SEARCH_SESSION => $search]);
-        $prices = $outletId
-            ? $this->pricePage($outletId, $search)
-            : new LengthAwarePaginator([], 0, 25);
+
+        // Tampilan: kartu folder (awal) atau daftar produk. Pencarian selalu mencari di SEMUA produk
+        // outlet, jadi folder diabaikan saat ada kata pencarian.
+        $folderParam = PriceFolderIndex::normalize((string) $request->query('folder', ''));
+        $activeFolder = ($search === '' && $folderParam !== '') ? $folderParam : null;
+        $showAll = $search === '' && $activeFolder === null && $request->boolean('all');
+        $mode = ! $outletId ? 'none' : (($search !== '' || $activeFolder !== null || $showAll) ? 'products' : 'folders');
 
         if ($outletId) {
+            session([self::LAST_VIEW_SESSION => ['folder' => $activeFolder ?? '', 'all' => $showAll]]);
+        }
+
+        $folders = [];
+        $totalAll = 0;
+        if ($mode === 'folders') {
+            $folders = $folderIndex->folders($outletId);
+            $totalAll = $folderIndex->totalOf($folders);
+        }
+
+        $prices = $mode === 'products'
+            ? $this->pricePage($outletId, $search, $activeFolder)
+            : new LengthAwarePaginator([], 0, 25);
+
+        if ($mode === 'products') {
             $latestHpp = app(LatestHpp::class)->forProducts($outletId, $prices->getCollection()->pluck('product_id'));
 
             // Stok terkini outlet ini per produk (SUM owner_stocks.qty), 1 query untuk satu halaman.
@@ -137,6 +170,12 @@ class OutletPriceController extends Controller
             'prices' => $prices,
             'outlets' => OutletAccess::outlets(),
             'selectedOutletId' => $outletId,
+            'mode' => $mode,
+            'folders' => $folders,
+            'totalAll' => $totalAll,
+            'activeFolder' => $activeFolder,
+            'showAll' => $showAll,
+            'searchTerm' => $search,
         ]);
     }
 
@@ -146,9 +185,10 @@ class OutletPriceController extends Controller
      * "Deferred join": query pengurutan HANYA mengambil kolom id (sort kecil, tidak membebani memori
      * walau satu outlet punya puluhan ribu aturan harga); baris lengkap + relasi baru dimuat untuk
      * 25 id di halaman ini. Search berbasis AWALAN (LIKE 'kata%') lewat subquery IN.
-     * Urutan: abjad nama produk (A-Z), juga saat search/filter outlet dipakai.
+     * Urutan: abjad nama produk (A-Z), juga saat search/filter outlet/folder dipakai.
+     * `$folder` (opsional) membatasi ke satu folder kata pertama (lihat PriceFolderIndex).
      */
-    private function pricePage(int $outletId, string $search): LengthAwarePaginator
+    private function pricePage(int $outletId, string $search, ?string $folder = null): LengthAwarePaginator
     {
         $prefix = $search !== '' ? addcslashes($search, '\\%_') . '%' : null;
 
@@ -161,6 +201,8 @@ class OutletPriceController extends Controller
                     ->where('name', 'like', $prefix)
                     ->orWhere('code', 'like', $prefix))))
             ->leftJoin('products', 'products.id', '=', 'outlet_prices.product_id')
+            // Di dalam folder: kunci folder dihitung dari nama produk (sama dengan hitungan card folder).
+            ->when($folder !== null, fn ($query) => app(PriceFolderIndex::class)->constrain($query, $folder))
             ->orderBy('products.name')
             ->orderBy('outlet_prices.id')
             ->paginate(25)

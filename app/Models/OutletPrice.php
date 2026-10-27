@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Services\PriceFolderIndex;
 
 class OutletPrice extends Model
 {
@@ -52,6 +53,30 @@ class OutletPrice extends Model
         'effective_until' => 'date',
         'is_active' => 'boolean',
     ];
+
+    /**
+     * Cache folder index Master Harga Jual dibersihkan saat aturan dibuat, dihapus, dipulihkan,
+     * atau pindah outlet/produk. Simpan biasa (mis. tombol Kembali yang hanya memperbarui updated_at) tidak membersihkan.
+     */
+    protected static function booted(): void
+    {
+        static::saved(function (OutletPrice $price) {
+            if (! $price->wasRecentlyCreated && ! $price->wasChanged(['outlet_id', 'product_id'])) {
+                return;
+            }
+
+            $folders = app(PriceFolderIndex::class);
+            $folders->forget((int) $price->outlet_id);
+
+            $oldOutletId = (int) $price->getOriginal('outlet_id');
+            if ($oldOutletId && $oldOutletId !== (int) $price->outlet_id) {
+                $folders->forget($oldOutletId);
+            }
+        });
+
+        static::deleted(fn (OutletPrice $price) => app(PriceFolderIndex::class)->forget((int) $price->outlet_id));
+        static::restored(fn (OutletPrice $price) => app(PriceFolderIndex::class)->forget((int) $price->outlet_id));
+    }
 
     public function outlet()
     {

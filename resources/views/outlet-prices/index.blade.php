@@ -23,6 +23,23 @@
         /* Header tabel product memakai <td> (tidak tebal); di sini tetap <th> karena DataTables, jadi ketebalannya disamakan. */
         #example1 thead th, #outlet-prices-empty-table thead th { font-weight: normal; }
         #example1 td.op-note { min-width: 160px; white-space: normal; }
+
+        /* Card folder (kata pertama nama produk): ringan, tanpa gambar. */
+        .opf-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+        .opf-toolbar .opf-hint { color:#777; }
+        .opf-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:12px; }
+        .opf-card { display:flex; flex-direction:column; gap:4px; padding:14px; background:#fff; border:1px solid #e5e7eb; border-radius:8px;
+            color:#333; text-decoration:none; transition:box-shadow .15s, border-color .15s, transform .15s; min-width:0; }
+        .opf-card:hover, .opf-card:focus { color:#333; text-decoration:none; border-color:#605ca8; box-shadow:0 3px 10px rgba(96,92,168,.18); transform:translateY(-1px); }
+        .opf-icon { font-size:22px; color:#f0ad4e; line-height:1; }
+        .opf-name { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .opf-count { font-size:12px; color:#777; }
+        .opf-card-all { background:#605ca8; border-color:#605ca8; color:#fff; }
+        .opf-card-all:hover, .opf-card-all:focus { color:#fff; border-color:#4b4787; box-shadow:0 3px 10px rgba(96,92,168,.35); }
+        .opf-card-all .opf-icon, .opf-card-all .opf-count { color:#fff; }
+        .opf-empty { display:none; padding:20px 0; color:#777; }
+        .opf-crumb { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+        .opf-crumb .opf-path { color:#555; }
     </style>
     <section class="content-header">
         <h1>Master Harga Jual <small>Aturan harga POS per outlet</small></h1>
@@ -40,7 +57,7 @@
                     Harga</a>
                 <a class="btn btn-default" href="{{ route('owner-stocks.index') }}"><i class="fa fa-cubes"></i> Lihat Stock
                     Toko</a>
-                @if ($selectedOutletId)
+                @if ($mode === 'products')
                     <form id="outlet-price-label-print-form" method="POST"
                         action="{{ route('cashier.print.products') }}" target="_blank"
                         style="display:inline-block; margin-left:8px;">
@@ -66,7 +83,61 @@
                     <button class="btn btn-primary btn-sm">Filter</button>
                 </form>
             </div>
+            @if ($mode === 'folders')
+                <div class="box-body">
+                    <div class="opf-toolbar">
+                        <span class="opf-hint">
+                            <i class="fa fa-folder-open-o"></i> Pilih folder (kata pertama nama produk), atau ketik awalan nama/kode di kotak pencarian atas untuk mencari di semua produk.
+                        </span>
+                        @if (count($folders) > 12)
+                            <input type="text" id="opf-filter" class="form-control input-sm" style="max-width:240px;"
+                                placeholder="Cari folder..." autocomplete="off">
+                        @endif
+                    </div>
+
+                    @if ($totalAll > 0)
+                        <div class="opf-grid" id="opf-grid">
+                            <a class="opf-card opf-card-all"
+                                href="{{ route('outlet-prices.index', ['outlet_id' => $selectedOutletId, 'all' => 1]) }}">
+                                <span class="opf-icon"><i class="fa fa-th-large"></i></span>
+                                <span class="opf-name">All Product</span>
+                                <span class="opf-count">{{ number_format($totalAll, 0, ',', '.') }} produk</span>
+                            </a>
+                            @foreach ($folders as $folder)
+                                <a class="opf-card" data-name="{{ \Illuminate\Support\Str::lower($folder['label']) }}"
+                                    title="{{ $folder['label'] }}"
+                                    href="{{ route('outlet-prices.index', ['outlet_id' => $selectedOutletId, 'folder' => $folder['key']]) }}">
+                                    <span class="opf-icon"><i class="fa fa-folder"></i></span>
+                                    <span class="opf-name">{{ $folder['label'] }}</span>
+                                    <span class="opf-count">{{ number_format($folder['total'], 0, ',', '.') }} produk</span>
+                                </a>
+                            @endforeach
+                        </div>
+                        <div class="opf-empty" id="opf-empty">Folder tidak ditemukan.</div>
+                    @else
+                        <p class="text-center text-muted" style="padding:20px 0;">Belum ada master harga untuk outlet ini.</p>
+                    @endif
+                </div>
+            @else
             <div class="box-body table-responsive text-nowrap">
+                @if ($mode === 'products')
+                    <div class="opf-crumb">
+                        <a class="btn btn-default btn-sm"
+                            href="{{ route('outlet-prices.index', ['outlet_id' => $selectedOutletId]) }}">
+                            <i class="fa fa-arrow-left"></i> Kembali ke folder</a>
+                        <span class="opf-path">
+                            <i class="fa fa-folder-open-o"></i> Master Harga Jual &rsaquo;
+                            @if ($searchTerm !== '')
+                                Hasil pencarian &ldquo;{{ $searchTerm }}&rdquo; (semua produk)
+                            @elseif ($activeFolder !== null)
+                                Folder <strong>{{ $activeFolder === \App\Services\PriceFolderIndex::OTHER ? \App\Services\PriceFolderIndex::OTHER_LABEL : $activeFolder }}</strong>
+                            @else
+                                All Product
+                            @endif
+                            &middot; {{ number_format($prices->total(), 0, ',', '.') }} produk
+                        </span>
+                    </div>
+                @endif
                 <table id="{{ $selectedOutletId ? 'example1' : 'outlet-prices-empty-table' }}" class="table table-bordered table-striped">
                     <thead>
                         <tr>
@@ -200,12 +271,30 @@
                     </div>
                 </div>
             </div>
+            @endif
         </div>
     </section>
 @endsection
 
 @section('page-script')
-    @if ($selectedOutletId)
+    @if ($mode === 'folders')
+        <script>
+            $(function () {
+                // Cari folder di sisi browser (daftar folder sudah ada di halaman).
+                $('#opf-filter').on('input', function () {
+                    var term = $.trim($(this).val()).toLowerCase();
+                    var visible = 0;
+                    $('#opf-grid .opf-card[data-name]').each(function () {
+                        var match = term === '' || String($(this).data('name')).indexOf(term) !== -1;
+                        $(this).toggle(match);
+                        if (match) { visible++; }
+                    });
+                    $('#opf-empty').toggle(term !== '' && visible === 0);
+                });
+            });
+        </script>
+    @endif
+    @if ($mode === 'products')
         <script>
             $(function () {
                 function updateSelectedOutletPriceLabels() {
