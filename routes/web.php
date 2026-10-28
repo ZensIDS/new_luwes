@@ -79,6 +79,8 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/penjualan/data', [PenjualanController::class, 'getIndexData'])->name('penjualan.index.data');
     Route::resource('/penjualan', PenjualanController::class)->only(['index', 'create', 'store', 'show', 'destroy']);
     Route::get('/penjualan/{penjualan}/print', [PenjualanController::class, 'print'])->name('penjualan.print');
+    Route::get('/qz/certificate', [\App\Http\Controllers\QzSignController::class, 'certificate'])->name('qz.certificate');
+    Route::post('/qz/sign', [\App\Http\Controllers\QzSignController::class, 'sign'])->name('qz.sign');
     Route::get('/refundPenjualan/invoices', [RefundPenjualanController::class, 'invoices'])->name('refundPenjualan.invoices');
     Route::get('/refundPenjualan/products', [RefundPenjualanController::class, 'products'])->name('refundPenjualan.products');
     Route::get('/refundPenjualan/stocks', [RefundPenjualanController::class, 'stocks'])->name('refundPenjualan.stocks');
