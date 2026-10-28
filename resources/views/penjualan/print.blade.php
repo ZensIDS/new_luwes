@@ -112,7 +112,6 @@
         $summaryRaw = [['Jumlah item', (string) $itemCount, 0], ['Subtotal', $fmtRaw($subtotalGross), 0]];
         if ($discountTotal > 0) { $summaryRaw[] = ['Diskon', '-' . $fmtRaw($discountTotal), 0]; }
         if ($voucherTotal > 0) { $summaryRaw[] = ['Voucher', '-' . $fmtRaw($voucherTotal), 0]; }
-        if ($roundingAmount > 0) { $summaryRaw[] = ['Pembulatan', '+' . $fmtRaw($roundingAmount), 0]; }
         $summaryRaw[] = ['TOTAL', 'Rp ' . $fmtRaw($grandTotal), 1];
         $payRaw = [
             [(string) ($penjualan->paymentMethod?->name ?? $penjualan->payment_method_name ?? 'Tunai'), $fmtRaw($paidAmount), 0],
@@ -283,7 +282,6 @@
         <span class="lbl">Subtotal</span><span class="num">{{ number_format($subtotalGross, 0, ',', '.') }}</span>
         @if ($discountTotal > 0)<span class="lbl">Diskon</span><span class="num">-{{ number_format($discountTotal, 0, ',', '.') }}</span>@endif
         @if ($voucherTotal > 0)<span class="lbl">Voucher</span><span class="num">-{{ number_format($voucherTotal, 0, ',', '.') }}</span>@endif
-        @if ($roundingAmount > 0)<span class="lbl">Pembulatan</span><span class="num">+{{ number_format($roundingAmount, 0, ',', '.') }}</span>@endif
         <span class="lbl grand">TOTAL</span><span class="num grand">Rp {{ number_format($grandTotal, 0, ',', '.') }}</span>
     </div>
 
@@ -333,6 +331,8 @@
             <datalist id="raw-printers"></datalist>
             <label>Lebar printer (karakter/baris) <input type="number" id="raw-cols" step="1" min="20" max="64"></label>
             <label>Geser ke kanan (spasi) <input type="number" id="raw-indent" step="1" min="0" max="20"></label>
+            <label>Tingkat tebal (1-5 kali cetak) <input type="number" id="raw-pass" step="1" min="1" max="5"></label>
+            <label><span>Mode tebal printer (emphasized)</span> <input type="checkbox" id="raw-bold" style="width:auto"></label>
             <label><span>Potong kertas di akhir</span> <input type="checkbox" id="raw-cut" style="width:auto"></label>
             <button type="button" id="raw-find">Cari printer</button>
             <button type="button" id="raw-save">Simpan</button>
@@ -352,7 +352,7 @@
         (function () {
             var RAW = @json($rawReceipt);
             var KEY = 'receipt-raw-{{ $paper }}';
-            var def = { on: true, printer: '', cols: {{ $rawDefaultCols }}, cut: false, indent: 2 };
+            var def = { on: true, printer: '', cols: {{ $rawDefaultCols }}, cut: false, indent: 2, bold: true, pass: 3 };
             var CERT_URL = @json(route('qz.certificate'));
             var SIGN_URL = @json(route('qz.sign'));
             var CSRF = @json(csrf_token());
@@ -361,9 +361,9 @@
             function load() {
                 try {
                     var s = JSON.parse(window.localStorage.getItem(KEY) || 'null');
-                    if (s) return { on: s.on !== false, printer: s.printer || '', cols: +s.cols || def.cols, cut: !!s.cut, indent: isFinite(s.indent) && s.indent !== null && s.indent !== '' ? +s.indent : def.indent };
+                    if (s) return { on: s.on !== false, printer: s.printer || '', cols: +s.cols || def.cols, cut: !!s.cut, bold: s.bold !== false, pass: isFinite(s.pass) && s.pass !== null && s.pass !== '' ? Math.max(1, Math.min(5, +s.pass)) : def.pass, indent: isFinite(s.indent) && s.indent !== null && s.indent !== '' ? +s.indent : def.indent };
                 } catch (e) {}
-                return { on: def.on, printer: def.printer, cols: def.cols, cut: def.cut, indent: def.indent };
+                return { on: def.on, printer: def.printer, cols: def.cols, cut: def.cut, bold: def.bold, pass: def.pass, indent: def.indent };
             }
             function clean(s) {
                 return String(s == null ? '' : s).replace(/[\u2013\u2014\u00b7]/g, '-').replace(/[^\x20-\x7E]/g, '?');
@@ -390,13 +390,25 @@
                 // cols = total karakter yang muat di printer; indent = spasi kosong di kiri (menggeser isi ke kanan).
                 var ind = Math.max(0, Math.min(20, o.indent | 0)), c = Math.max(16, o.cols - ind);
                 var pad = rep(' ', ind), out = [], dash = rep('-', c);
-                function line(t) { out.push(pad + t + '\n'); }
+                // Overstrike: baris yang sama dicetak (pass) kali di posisi yang sama (jarak baris 0), lalu baris terakhir
+                // mengembalikan jarak normal. Makin besar pass, makin tebal & gelap.
+                var passes = Math.max(1, Math.min(5, o.pass | 0 || 1));
+                function line(t) {
+                    if (passes <= 1 || !t.trim()) { out.push(pad + t + '\n'); return; }
+                    out.push(ESC + '3\x00');
+                    for (var i = 0; i < passes - 1; i++) out.push(pad + t + '\n');
+                    out.push(ESC + '2');
+                    out.push(pad + t + '\n');
+                }
                 function ctr(t) { t = clean(t); return rep(' ', Math.floor((c - t.length) / 2)) + t; }
                 function ctrWrap(t) { wrap(t, c).forEach(function (w) { line(ctr(w)); }); }
+                // Tebal: emphasized (ESC E) + double-strike (ESC G) = tiap titik ditembak dua kali, hasil jauh lebih gelap.
+                function strong() { out.push(ESC + 'E\x01' + ESC + 'G\x01'); }
+                function normal() { out.push(ESC + 'E\x00' + ESC + 'G\x00'); if (o.bold) strong(); }
                 out.push(ESC + '@');
-                out.push(ESC + 'E\x01' + ESC + 'G\x01');
+                strong();
                 ctrWrap(RAW.store);
-                out.push(ESC + 'E\x00' + ESC + 'G\x00');
+                normal();
                 RAW.header.forEach(ctrWrap);
                 line('');
                 RAW.meta.forEach(function (m) { line(lr(m[0], m[1], c)); });
@@ -408,15 +420,15 @@
                 });
                 line(dash);
                 RAW.summary.forEach(function (r) {
-                    if (r[2]) out.push(ESC + 'E\x01' + ESC + 'G\x01');
+                    if (r[2]) strong();
                     line(lr(r[0], r[1], c));
-                    if (r[2]) out.push(ESC + 'E\x00' + ESC + 'G\x00');
+                    if (r[2]) normal();
                 });
                 line(dash);
                 RAW.pay.forEach(function (r) {
-                    if (r[2]) out.push(ESC + 'E\x01');
+                    if (r[2]) strong();
                     line(lr(r[0], r[1], c));
-                    if (r[2]) out.push(ESC + 'E\x00');
+                    if (r[2]) normal();
                 });
                 if (RAW.saved) { line(''); ctrWrap('Anda hemat Rp ' + RAW.saved); }
                 line('');
@@ -471,15 +483,28 @@
                 }, function () { window.print(); });
             };
 
+            // Tekan Enter di halaman nota = klik Print (diabaikan saat mengetik di kolom pengaturan).
+            var enterLock = false;
+            document.addEventListener('keydown', function (e) {
+                if (e.key !== 'Enter' || e.repeat || e.ctrlKey || e.altKey || e.metaKey) return;
+                var t = e.target, tag = t && t.tagName ? t.tagName.toLowerCase() : '';
+                if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+                e.preventDefault();
+                if (enterLock) return;
+                enterLock = true;
+                setTimeout(function () { enterLock = false; }, 1500);
+                window.printReceipt(document.querySelector('.no-print .primary'));
+            });
+
             // Panel pengaturan
             var elOn = document.getElementById('raw-on'), elPr = document.getElementById('raw-printer'),
-                elCols = document.getElementById('raw-cols'), elIndent = document.getElementById('raw-indent'), elCut = document.getElementById('raw-cut'),
+                elCols = document.getElementById('raw-cols'), elIndent = document.getElementById('raw-indent'), elBold = document.getElementById('raw-bold'), elPass = document.getElementById('raw-pass'), elCut = document.getElementById('raw-cut'),
                 elMsg = document.getElementById('raw-msg');
             if (!elOn) return;
             var cur = load();
-            elOn.checked = cur.on; elPr.value = cur.printer; elCols.value = cur.cols; elIndent.value = cur.indent; elCut.checked = cur.cut;
+            elOn.checked = cur.on; elPr.value = cur.printer; elCols.value = cur.cols; elIndent.value = cur.indent; elBold.checked = cur.bold; elPass.value = cur.pass; elCut.checked = cur.cut;
             document.getElementById('raw-save').addEventListener('click', function () {
-                var v = { on: elOn.checked, printer: elPr.value.trim(), cols: Math.max(20, Math.min(64, parseInt(elCols.value, 10) || def.cols)), cut: elCut.checked, indent: Math.max(0, Math.min(20, parseInt(elIndent.value, 10) || 0)) };
+                var v = { on: elOn.checked, printer: elPr.value.trim(), cols: Math.max(20, Math.min(64, parseInt(elCols.value, 10) || def.cols)), cut: elCut.checked, bold: elBold.checked, pass: Math.max(1, Math.min(5, parseInt(elPass.value, 10) || 1)), indent: Math.max(0, Math.min(20, parseInt(elIndent.value, 10) || 0)) };
                 try { window.localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) {}
                 elMsg.textContent = 'Tersimpan ✓';
             });
