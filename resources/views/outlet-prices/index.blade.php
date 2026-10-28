@@ -77,6 +77,18 @@
                         @csrf
                         <input type="hidden" name="print" value="1">
                         <input type="hidden" name="outlet_id" value="{{ $selectedOutletId }}">
+                        <select name="mode" class="form-control input-sm" style="display:inline-block; width:auto;"
+                            title="Mode cetak label">
+                            <option value="thermal" selected>Thermal (hitam putih)</option>
+                            <option value="warna">Warna</option>
+                        </select>
+                        <select name="paper" class="form-control input-sm" style="display:inline-block; width:auto;"
+                            title="Ukuran kertas label">
+                            <option value="80" selected>80 mm</option>
+                            <option value="68">68 mm</option>
+                            <option value="58">58 mm</option>
+                            <option value="100">A4 (label 95 mm)</option>
+                        </select>
                         <button type="submit" id="print-selected-outlet-price-labels" class="btn bg-purple" disabled>
                             <i class="fa fa-print"></i> Cetak label terpilih
                             (<span id="selected-outlet-price-count">0</span>)
