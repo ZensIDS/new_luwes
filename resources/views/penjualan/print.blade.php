@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Struk {{ $penjualan->code }}</title>
-    <script src="https://cdn.jsdelivr.net/npm/qz-tray@2.2.4/qz-tray.js"></script>
+    <script src="{{ asset('js/qz-tray.js') }}"></script>
     <script>
         // Ingat pilihan kertas per-perangkat, jadi cetak otomatis dari kasir & Re-Print
         // selalu langsung memakai ukuran terakhir (58 / 68 / 80) tanpa harus klik lagi.
@@ -331,7 +331,8 @@
             <label><span>Aktifkan</span> <input type="checkbox" id="raw-on" style="width:auto"></label>
             <label>Nama printer <input type="text" id="raw-printer" list="raw-printers" placeholder="(kosong = printer default)" style="width:170px;text-align:left"></label>
             <datalist id="raw-printers"></datalist>
-            <label>Lebar (karakter/baris) <input type="number" id="raw-cols" step="1" min="20" max="64"></label>
+            <label>Lebar printer (karakter/baris) <input type="number" id="raw-cols" step="1" min="20" max="64"></label>
+            <label>Geser ke kanan (spasi) <input type="number" id="raw-indent" step="1" min="0" max="20"></label>
             <label><span>Potong kertas di akhir</span> <input type="checkbox" id="raw-cut" style="width:auto"></label>
             <button type="button" id="raw-find">Cari printer</button>
             <button type="button" id="raw-save">Simpan</button>
@@ -351,15 +352,18 @@
         (function () {
             var RAW = @json($rawReceipt);
             var KEY = 'receipt-raw-{{ $paper }}';
-            var def = { on: true, printer: '', cols: {{ $rawDefaultCols }}, cut: false };
+            var def = { on: true, printer: '', cols: {{ $rawDefaultCols }}, cut: false, indent: 2 };
+            var CERT_URL = @json(route('qz.certificate'));
+            var SIGN_URL = @json(route('qz.sign'));
+            var CSRF = @json(csrf_token());
             var ESC = '\x1B';
 
             function load() {
                 try {
                     var s = JSON.parse(window.localStorage.getItem(KEY) || 'null');
-                    if (s) return { on: s.on !== false, printer: s.printer || '', cols: +s.cols || def.cols, cut: !!s.cut };
+                    if (s) return { on: s.on !== false, printer: s.printer || '', cols: +s.cols || def.cols, cut: !!s.cut, indent: isFinite(s.indent) && s.indent !== null && s.indent !== '' ? +s.indent : def.indent };
                 } catch (e) {}
-                return { on: def.on, printer: def.printer, cols: def.cols, cut: def.cut };
+                return { on: def.on, printer: def.printer, cols: def.cols, cut: def.cut, indent: def.indent };
             }
             function clean(s) {
                 return String(s == null ? '' : s).replace(/[\u2013\u2014\u00b7]/g, '-').replace(/[^\x20-\x7E]/g, '?');
@@ -383,15 +387,17 @@
                 return out;
             }
             function build(o) {
-                var c = o.cols, out = [], dash = rep('-', c);
-                function line(t) { out.push(t + '\n'); }
+                // cols = total karakter yang muat di printer; indent = spasi kosong di kiri (menggeser isi ke kanan).
+                var ind = Math.max(0, Math.min(20, o.indent | 0)), c = Math.max(16, o.cols - ind);
+                var pad = rep(' ', ind), out = [], dash = rep('-', c);
+                function line(t) { out.push(pad + t + '\n'); }
+                function ctr(t) { t = clean(t); return rep(' ', Math.floor((c - t.length) / 2)) + t; }
+                function ctrWrap(t) { wrap(t, c).forEach(function (w) { line(ctr(w)); }); }
                 out.push(ESC + '@');
-                out.push(ESC + 'a\x01');
                 out.push(ESC + 'E\x01' + ESC + 'G\x01');
-                wrap(RAW.store, c).forEach(line);
+                ctrWrap(RAW.store);
                 out.push(ESC + 'E\x00' + ESC + 'G\x00');
-                RAW.header.forEach(function (h) { wrap(h, c).forEach(line); });
-                out.push(ESC + 'a\x00');
+                RAW.header.forEach(ctrWrap);
                 line('');
                 RAW.meta.forEach(function (m) { line(lr(m[0], m[1], c)); });
                 line(dash);
@@ -412,18 +418,39 @@
                     line(lr(r[0], r[1], c));
                     if (r[2]) out.push(ESC + 'E\x00');
                 });
-                out.push(ESC + 'a\x01');
-                if (RAW.saved) { line(''); wrap('Anda hemat Rp ' + RAW.saved, c).forEach(line); }
+                if (RAW.saved) { line(''); ctrWrap('Anda hemat Rp ' + RAW.saved); }
                 line('');
-                RAW.footer.forEach(function (f) { wrap(f, c).forEach(line); });
-                line('Dicetak ' + RAW.printedAt);
-                out.push(ESC + 'a\x00');
+                RAW.footer.forEach(ctrWrap);
+                line(ctr('Dicetak ' + RAW.printedAt));
                 out.push(ESC + 'd\x05');
                 if (o.cut) out.push(ESC + 'm');
                 return out;
             }
+            var secured = false;
+            function setupSecurity() {
+                if (secured) return;
+                secured = true;
+                // Sertifikat & tanda tangan dari server sendiri. Bila endpoint belum disiapkan, otomatis jalan tanpa tanda tangan.
+                qz.security.setCertificatePromise(function (resolve) {
+                    fetch(CERT_URL, { credentials: 'same-origin', cache: 'no-store' })
+                        .then(function (r) { return r.ok ? r.text() : ''; })
+                        .then(function (t) { if (t) resolve(t); else resolve(); }, function () { resolve(); });
+                });
+                qz.security.setSignatureAlgorithm('SHA512');
+                qz.security.setSignaturePromise(function (toSign) {
+                    return function (resolve) {
+                        fetch(SIGN_URL, {
+                            method: 'POST', credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-TOKEN': CSRF },
+                            body: 'request=' + encodeURIComponent(toSign)
+                        }).then(function (r) { return r.ok ? r.text() : ''; })
+                          .then(function (t) { if (t) resolve(t); else resolve(); }, function () { resolve(); });
+                    };
+                });
+            }
             function connect() {
                 if (typeof qz === 'undefined') return Promise.reject(new Error('QZ Tray tidak termuat'));
+                setupSecurity();
                 return qz.websocket.isActive() ? Promise.resolve() : qz.websocket.connect({ retries: 0, delay: 0 });
             }
             function print() {
@@ -446,13 +473,13 @@
 
             // Panel pengaturan
             var elOn = document.getElementById('raw-on'), elPr = document.getElementById('raw-printer'),
-                elCols = document.getElementById('raw-cols'), elCut = document.getElementById('raw-cut'),
+                elCols = document.getElementById('raw-cols'), elIndent = document.getElementById('raw-indent'), elCut = document.getElementById('raw-cut'),
                 elMsg = document.getElementById('raw-msg');
             if (!elOn) return;
             var cur = load();
-            elOn.checked = cur.on; elPr.value = cur.printer; elCols.value = cur.cols; elCut.checked = cur.cut;
+            elOn.checked = cur.on; elPr.value = cur.printer; elCols.value = cur.cols; elIndent.value = cur.indent; elCut.checked = cur.cut;
             document.getElementById('raw-save').addEventListener('click', function () {
-                var v = { on: elOn.checked, printer: elPr.value.trim(), cols: Math.max(20, Math.min(64, parseInt(elCols.value, 10) || def.cols)), cut: elCut.checked };
+                var v = { on: elOn.checked, printer: elPr.value.trim(), cols: Math.max(20, Math.min(64, parseInt(elCols.value, 10) || def.cols)), cut: elCut.checked, indent: Math.max(0, Math.min(20, parseInt(elIndent.value, 10) || 0)) };
                 try { window.localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) {}
                 elMsg.textContent = 'Tersimpan ✓';
             });
