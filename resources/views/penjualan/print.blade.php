@@ -352,7 +352,7 @@
         (function () {
             var RAW = @json($rawReceipt);
             var KEY = 'receipt-raw-{{ $paper }}';
-            var def = { on: true, printer: '', cols: {{ $rawDefaultCols }}, cut: false, indent: 2, bold: true, pass: 3 };
+            var def = { on: true, printer: '', cols: {{ $rawDefaultCols }}, cut: false, indent: 2, bold: false, pass: 3 };
             var CERT_URL = @json(route('qz.certificate'));
             var SIGN_URL = @json(route('qz.sign'));
             var CSRF = @json(csrf_token());
@@ -361,7 +361,7 @@
             function load() {
                 try {
                     var s = JSON.parse(window.localStorage.getItem(KEY) || 'null');
-                    if (s) return { on: s.on !== false, printer: s.printer || '', cols: +s.cols || def.cols, cut: !!s.cut, bold: s.bold !== false, pass: isFinite(s.pass) && s.pass !== null && s.pass !== '' ? Math.max(1, Math.min(5, +s.pass)) : def.pass, indent: isFinite(s.indent) && s.indent !== null && s.indent !== '' ? +s.indent : def.indent };
+                    if (s) return { on: s.on !== false, printer: s.printer || '', cols: +s.cols || def.cols, cut: !!s.cut, bold: typeof s.bold === 'boolean' ? s.bold : def.bold, pass: isFinite(s.pass) && s.pass !== null && s.pass !== '' ? Math.max(1, Math.min(5, +s.pass)) : def.pass, indent: isFinite(s.indent) && s.indent !== null && s.indent !== '' ? +s.indent : def.indent };
                 } catch (e) {}
                 return { on: def.on, printer: def.printer, cols: def.cols, cut: def.cut, bold: def.bold, pass: def.pass, indent: def.indent };
             }
