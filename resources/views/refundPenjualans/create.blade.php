@@ -136,7 +136,7 @@
                             <a href="{{ route('refundPenjualan.index') }}" class="btn btn-default btn-block">Batal</a>
                         </div>
                     </div>
-                    <p class="text-muted small return-help"><i class="fa fa-info-circle"></i> Nota hanya diperlukan jika ingin menghubungkan retur dengan transaksi lama. Stok retur masuk kembali dan stok barang pengganti berkurang saat disimpan.</p>
+                    <p class="text-muted small return-help"><i class="fa fa-info-circle"></i> Nota hanya diperlukan jika ingin menghubungkan retur dengan transaksi lama. Stok retur masuk kembali dan stok barang pengganti berkurang saat disimpan. Barang pengganti tanpa stok sistem tetap bisa dipilih (dicatat sebagai stok minus).</p>
                 </aside>
             </div>
         </form>
@@ -236,7 +236,7 @@
                     <td class="text-center"><button type="button" class="btn btn-xs btn-danger remove-return" data-index="${index}"><i class="fa fa-trash"></i></button></td></tr>`).join('')
                     : '<tr><td colspan="5" class="text-center text-muted empty-row">Belum ada barang retur. Scan barcode untuk mulai.</td></tr>';
                 replacementRows.innerHTML = state.replacements.length ? state.replacements.map((item, index) => `
-                    <tr><td><strong>${esc(item.code)}</strong> — ${esc(item.name)}</td><td class="text-center"><input type="number" class="form-control input-sm replacement-qty" data-index="${index}" min="1" value="${item.qty}" style="width:80px; margin:auto;"></td>
+                    <tr><td><strong>${esc(item.code)}</strong> — ${esc(item.name)}${Number(item.qty) > Number(item.stock_total || 0) ? '<br><small class="text-warning"><i class="fa fa-exclamation-triangle"></i> Stok sistem ' + Number(item.stock_total || 0) + ' — kekurangannya dicatat sebagai stok minus.</small>' : ''}</td><td class="text-center"><input type="number" class="form-control input-sm replacement-qty" data-index="${index}" min="1" value="${item.qty}" style="width:80px; margin:auto;"></td>
                     <td class="text-right">${money(item.price)}</td><td class="text-right">${money(item.price * item.qty)}</td>
                     <td class="text-center"><button type="button" class="btn btn-xs btn-danger remove-replacement" data-index="${index}"><i class="fa fa-trash"></i></button></td></tr>`).join('')
                     : '<tr><td colspan="5" class="text-center text-muted empty-row">Scan barang retur terlebih dahulu.</td></tr>';

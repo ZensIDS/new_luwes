@@ -99,8 +99,8 @@ class RefundPenjualanController extends Controller
     }
 
     /**
-     * Resolve one scanned product. Returned items may have zero current stock;
-     * replacement items must have stock in the selected outlet.
+     * Resolve one scanned product. Returned items and replacement items may both have
+     * zero current stock; replacement stock that is short is booked to the MINUS batch.
      */
     public function products(Request $request, PriceCalculator $calculator)
     {
@@ -128,16 +128,12 @@ class RefundPenjualanController extends Controller
         } else {
             $stock = (clone $stockQuery)
                 ->where('sku', $barcode)
-                ->when($purpose === 'replacement', fn ($query) => $query->where('qty', '>', 0))
                 ->orderBy('created_at')->orderBy('id')->first();
             $product = $stock?->product;
         }
 
         if (! $product) {
             return response()->json(['message' => 'Barcode produk tidak ditemukan.'], 404);
-        }
-        if ($purpose === 'replacement' && ! $stock) {
-            return response()->json(['message' => 'Stok produk pengganti tidak tersedia di outlet ini.'], 422);
         }
 
         $rule = OutletPrice::query()
@@ -157,6 +153,8 @@ class RefundPenjualanController extends Controller
             'code' => $product->code,
             'owner_stock_id' => $stock?->id,
             'stock_qty' => (int) ($stock?->qty ?? 0),
+            // Total stok tersedia (batch positif, belum kedaluwarsa) untuk petunjuk di layar.
+            'stock_total' => (int) (clone $stockQuery)->where('product_id', $product->id)->where('qty', '>', 0)->sum('qty'),
             'price' => (float) $price['price'],
         ]);
     }
@@ -419,8 +417,18 @@ class RefundPenjualanController extends Controller
                         $replacementTotal += $subtotal;
                         $remainingQty -= $qty;
                     }
+                    // Stok sistem kosong/kurang (barang fisik ada tapi belum tercatat): sisanya diambil dari
+                    // batch MINUS, sama seperti penjualan di kasir, lalu ditutup saat penerimaan barang.
                     if ($remainingQty > 0) {
-                        throw ValidationException::withMessages(['replacements' => "Jumlah stock {$product?->name} tidak mencukupi."]);
+                        $latestHpp = app(\App\Services\LatestHpp::class)->forProduct((int) $outletId, (int) $productId);
+                        $deficitStock = $stockService->deficitStock((int) $outletId, (int) $productId, (float) $latestHpp, $request->user());
+                        $price = $calculator->calculateItem($latestHpp, $rules->get($productId), $product)['price'];
+                        $subtotal = (float) $price * $remainingQty;
+                        $replacementItems[] = [
+                            'stock' => $deficitStock, 'qty' => $remainingQty, 'unit_price' => (float) $price, 'subtotal' => $subtotal,
+                        ];
+                        $replacementTotal += $subtotal;
+                        $remainingQty = 0;
                     }
                 }
 
@@ -445,7 +453,7 @@ class RefundPenjualanController extends Controller
                 ]);
 
                 foreach ($replacementItems as $replacement) {
-                    $stockService->issue($replacement['stock'], $replacement['qty'], RefundPenjualan::class, $refund->id, $request->user(), "Pengganti retur penjualan {$refund->code} - {$replacement['stock']->product?->name}");
+                    $stockService->issue($replacement['stock'], $replacement['qty'], RefundPenjualan::class, $refund->id, $request->user(), "Pengganti retur penjualan {$refund->code} - {$replacement['stock']->product?->name}", $replacement['stock']->isDeficit());
                 }
                 foreach ($returnItems as $returnItem) {
                     $refund->items()->create([
