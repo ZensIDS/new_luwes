@@ -186,7 +186,7 @@ class PenjualanController extends Controller
             $aksi = '<div class="btn-group">'
                 . '<button type="button" class="btn btn-default btn-sm btn-toggle-detail" title="Lihat rincian barang"><i class="fa fa-chevron-down"></i> Detail</button>'
                 . '<a class="btn btn-info btn-sm" href="' . e(route('penjualan.show', $value->id)) . '" title="Buka halaman penjualan"><i class="fa fa-eye"></i> Show</a>'
-                . '<a class="btn btn-warning btn-sm" href="' . e(route('penjualan.print', $value->id)) . '" title="Cetak ulang nota"><i class="fa fa-print"></i> Re-Print</a>';
+                . '<a class="btn btn-warning btn-sm btn-reprint" href="' . e(route('penjualan.print', ['penjualan' => $value->id, 'reprint' => 1])) . '" title="Cetak ulang nota (F4)"><i class="fa fa-print"></i> Re-Print</a>';
             if ($canManageSales) {
                 $block = $cancellation->blockReason($value, $user);
                 if ($block) {
@@ -334,6 +334,42 @@ class PenjualanController extends Controller
             'penjualan' => $penjualan,
             'canManageSales' => auth()->user()->role !== 'staff-outlet',
             'deleteBlock' => $cancellation->blockReason($penjualan, auth()->user()),
+        ]);
+    }
+
+    /**
+     * Pop up Reprint (F4) di halaman kasir: cari penjualan berdasarkan nomor (kode) di outlet tsb.
+     * Kasir hanya melihat penjualannya sendiri; role lain melihat semua penjualan outlet itu
+     * (sama dengan aturan ensurePenjualanAccess). Tanpa kata kunci = 20 penjualan terbaru.
+     */
+    public function reprintSearch(Request $request)
+    {
+        $outletId = OutletAccess::id($request);
+        $user = $request->user();
+        $term = trim((string) $request->input('q', ''));
+
+        $query = Penjualan::query()
+            ->with('customer')
+            ->where('outlet_id', $outletId);
+
+        if ($user->role === 'kasir') {
+            $query->where('kasir_id', (string) $user->getAuthIdentifier());
+        }
+
+        if ($term !== '') {
+            $query->where('code', 'like', '%' . addcslashes($term, '\\%_') . '%');
+        }
+
+        $rows = $query->orderByDesc('created_at')->orderByDesc('id')->limit(20)->get();
+
+        return response()->json([
+            'data' => $rows->map(fn ($penjualan) => [
+                'id' => $penjualan->id,
+                'code' => $penjualan->code,
+                'date' => $penjualan->created_at?->format('d/m/Y H:i'),
+                'customer' => $penjualan->customer?->name,
+                'total' => (float) ($penjualan->grand_total ?? $penjualan->total ?? 0),
+            ])->values(),
         ]);
     }
 

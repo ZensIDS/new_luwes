@@ -45,6 +45,24 @@
                                     </div>
                                 @enderror
                             </div>
+                            <div class="form-group">
+                                <label for="charge_percent">Biaya Tambahan / Charge (%)</label>
+                                <input type="number" step="0.01" min="0" max="100" class="form-control" id="charge_percent" name="charge_percent"
+                                    value="{{ old('charge_percent', 0) }}" placeholder="0">
+                                <p class="help-block">Persen dari total belanja yang ditambahkan ke pembayaran pelanggan (mis. 0,7 untuk QRIS). Kosongkan / 0 bila tanpa biaya.</p>
+                                @error('charge_percent')
+                                    <div class="invalid-feedback text-danger">
+                                        {{ $message }}
+                                    </div>
+                                @enderror
+                            </div>
+                            <div class="checkbox">
+                                <label>
+                                    <input type="hidden" name="is_fixed_amount" value="0">
+                                    <input type="checkbox" name="is_fixed_amount" value="1" {{ old('is_fixed_amount', false) ? 'checked' : '' }}>
+                                    <b>Nominal fix</b> &mdash; uang diterima terisi otomatis sebesar total (+ biaya), kasir tidak perlu mengisi nominal
+                                </label>
+                            </div>
                         </div><!-- /.box-body -->
 
                         <div class="box-footer">

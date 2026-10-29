@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\CashierSession;
 use App\Models\OutletPrice;
 use App\Models\OwnerStock;
+use App\Models\PaymentMethod;
 use App\Models\Penjualan;
 use App\Models\Transaction;
 use App\Models\Voucher;
@@ -153,9 +154,17 @@ class CashierSaleService
             // baru) agar nota/invoice lama yang punya pembulatan tetap tampil benar.
             $grandTotal = max(0, $subtotal - $voucherTotal);
             $roundingAmount = 0.0;
-            $paidAmount = (float) ($data['paid_amount'] ?? 0);
-            if ($paidAmount < $grandTotal) {
-                throw new RuntimeException('Uang Diterima (F9) kurang dari Grand Total.');
+
+            // Metode pembayaran bisa punya biaya tambahan (%) dan/atau "nominal fix". Biaya dihitung server dari
+            // total belanja, dicatat terpisah (tidak ikut grand_total / omzet), dan ditagihkan ke pelanggan.
+            $paymentMethod = ! empty($data['payment_method_id']) ? PaymentMethod::find($data['payment_method_id']) : null;
+            $feePercent = $paymentMethod ? max(0.0, min(100.0, (float) $paymentMethod->charge_percent)) : 0.0;
+            $feeAmount = $feePercent > 0 ? (float) round($grandTotal * $feePercent / 100) : 0.0;
+            $amountDue = $grandTotal + $feeAmount;
+            // Nominal fix: uang diterima otomatis pas, nilai dari client diabaikan.
+            $paidAmount = $paymentMethod?->is_fixed_amount ? $amountDue : (float) ($data['paid_amount'] ?? 0);
+            if ($paidAmount < $amountDue) {
+                throw new RuntimeException('Uang Diterima kurang dari total bayar.');
             }
 
             // Nomor invoice berisi outlet + kasir + tanggal + urutan dari counter terkunci,
@@ -180,10 +189,12 @@ class CashierSaleService
                 'rounding_amount' => $roundingAmount,
                 'grand_total' => $grandTotal,
                 'paid_amount' => $paidAmount,
-                'change_amount' => $paidAmount - $grandTotal,
+                'change_amount' => $paidAmount - $amountDue,
                 'payment_method_id' => $data['payment_method_id'] ?? null,
                 'payment_method_name' => $data['payment_method_name'] ?? null,
                 'payment_reference' => $data['payment_reference'] ?? null,
+                'payment_fee_percent' => $feePercent,
+                'payment_fee_amount' => $feeAmount,
                 'status' => 'paid',
             ]);
 

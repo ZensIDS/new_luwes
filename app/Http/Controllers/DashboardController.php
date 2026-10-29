@@ -26,6 +26,11 @@ class DashboardController extends Controller
     {
         $user = auth()->user();
 
+        // Kasir tidak memakai dashboard: setelah login langsung ke halaman kasir (buka kasir / POS) outletnya.
+        if ($user->role === 'kasir' && $user->outlet_id) {
+            return redirect()->route('outlet.show', $user->outlet_id);
+        }
+
         if (in_array($user->role, ['staff-outlet', 'kasir'], true)) {
             $requestOrdersBase = RequestOrder::where('owner_id', $user->outlet_id);
 

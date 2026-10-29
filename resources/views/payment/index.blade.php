@@ -25,6 +25,8 @@
                                     <td>No</td>
                                     <td>Nama</td>
                                     <td>Nomor Rekening</td>
+                                    <td>Nominal Fix</td>
+                                    <td>Biaya (%)</td>
                                     <td>Aksi</td>
                                 </tr>
                             </thead>
@@ -33,6 +35,8 @@
                                     <td>{{ $loop->iteration }}</td>
                                     <td>{{ $value->name }}</td>
                                     <td>{{ $value->bank_number }}</td>
+                                    <td>{!! $value->is_fixed_amount ? '<span class="label label-success">Ya</span>' : '<span class="text-muted">-</span>' !!}</td>
+                                    <td>{{ (float) $value->charge_percent > 0 ? rtrim(rtrim(number_format($value->charge_percent, 2, ',', '.'), '0'), ',') . '%' : '-' }}</td>
                                     <td>
                                         <a class="btn btn-warning" href="{{ route('payment.edit', $value->id) }}">Edit</a>
                                         <form action="{{ route('payment.destroy', $value->id) }}" method="post"

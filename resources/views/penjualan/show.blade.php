@@ -105,6 +105,14 @@
                                 {{-- <tr> --}}
                                     {{-- <th colspan="4" class="text-sm text-right">Di Bayar : @currency($penjualan->total)</th> --}}
                                 {{-- </tr> --}}
+                                @if ((float) ($penjualan->payment_fee_amount ?? 0) > 0)
+                                    <tr>
+                                        <th colspan="4" class="text-sm text-right">Biaya {{ $penjualan->payment_method_name }} ({{ rtrim(rtrim(number_format($penjualan->payment_fee_percent, 2, ',', '.'), '0'), ',') }}%): @currency($penjualan->payment_fee_amount)</th>
+                                    </tr>
+                                    <tr>
+                                        <th colspan="4" class="text-right">Total Bayar : @currency($grandTotal + $penjualan->payment_fee_amount)</th>
+                                    </tr>
+                                @endif
                                 <tr>
                                     <th colspan="4" class="text-sm text-right">Dibayar: @currency($penjualan->paid_amount ?? $penjualan->total)</th>
                                 </tr>

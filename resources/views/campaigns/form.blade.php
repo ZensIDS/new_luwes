@@ -306,7 +306,7 @@ $(function () {
             .replace(/[^A-Z0-9]+/g, '-')
             .replace(/^-+|-+$/g, '')
             .slice(0, 85);
-        return (type === 'voucher' ? 'VCR-' : 'PROMO-') + (slug || 'BARU');
+        return (type === 'voucher' ? 'VCRL-' : 'PROMO-') + (slug || 'BARU');
     }
 
     function updateCode() {
@@ -407,6 +407,14 @@ $(function () {
     $('#campaign-code').on('input', function () {
         codeWasEdited = true;
         $('#code-auto').val('0');
+    });
+    // Kode voucher wajib berawalan VCRL (server juga memastikannya).
+    const originalCampaignCode = String($('#campaign-code').val() || '').trim().toUpperCase();
+    $('#campaign-code').on('blur', function () {
+        const value = String($(this).val() || '').trim().toUpperCase();
+        if ($('#campaign-type').val() !== 'voucher' || !value || value === originalCampaignCode) return;
+        const fixed = value.replace(/^VCR-/, '');
+        $(this).val(fixed.startsWith('VCRL') ? fixed : 'VCRL-' + fixed);
     });
     $('#campaign-type, #discount-type').on('change', updateTypeFields);
     $('#product-picker').on('change', renderSelectedProducts);

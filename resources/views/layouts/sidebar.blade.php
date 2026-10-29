@@ -41,10 +41,12 @@
     @php $role = auth()->user()->role; @endphp
     <ul class="sidebar-menu">
 
-        {{-- Dashboard --}}
+        {{-- Dashboard (disembunyikan untuk kasir) --}}
+        @if ($role !== 'kasir')
         <li class="{{ request()->is('dashboard*') ? 'active' : '' }}">
             <a href="/dashboard"><i class="fa fa-tachometer"></i><span>Dashboard</span></a>
         </li>
+        @endif
         @if ($role === 'kasir')
             <li class="{{ request()->is('penjualan/create') || request()->is('cashier*') || request()->routeIs('outlet.show') ? 'active' : '' }}">
                 <a href="{{ route('penjualan.create') }}"><i class="fa fa-shopping-cart"></i><span>Kasir POS</span></a>

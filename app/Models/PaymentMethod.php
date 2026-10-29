@@ -13,5 +13,12 @@ class PaymentMethod extends Model
         'name',
         'bank_number',
         'desc',
+        'is_fixed_amount',
+        'charge_percent',
+    ];
+
+    protected $casts = [
+        'is_fixed_amount' => 'boolean',
+        'charge_percent' => 'float',
     ];
 }

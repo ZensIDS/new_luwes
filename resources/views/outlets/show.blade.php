@@ -22,8 +22,11 @@
                         <span>Nama kasir <b>{{ $activeShift?->name ?? '—' }}</b></span>
                         <span>Saldo awal <b>Rp {{ number_format($summary['opening_cash'] ?? 0, 0, ',', '.') }}</b></span>
                         <span>Penjualan tunai <b>Rp {{ number_format($summary['cash_sales'] ?? 0, 0, ',', '.') }}</b></span>
+                        <span>Non-tunai <b>Rp {{ number_format($summary['breakdown']['non_cash_total'] ?? 0, 0, ',', '.') }}</b></span>
+                        <span>Voucher <b>{{ number_format($summary['breakdown']['voucher_count'] ?? 0, 0, ',', '.') }}x / Rp {{ number_format($summary['breakdown']['voucher_total'] ?? 0, 0, ',', '.') }}</b></span>
                         <span>BON <b class="text-danger">Rp {{ number_format($summary['cash_out'] ?? 0, 0, ',', '.') }}</b></span>
-                        <span>Kas berjalan <b>Rp {{ number_format($summary['expected_cash'] ?? 0, 0, ',', '.') }}</b></span>
+                        <span title="Penjualan tunai + kas masuk - BON, di luar saldo awal">Kas penjualan <b>Rp {{ number_format($summary['expected_cash'] ?? 0, 0, ',', '.') }}</b></span>
+                        <span title="Saldo awal + kas penjualan">Isi laci <b>Rp {{ number_format($summary['drawer_total'] ?? 0, 0, ',', '.') }}</b></span>
                     </div>
                 @endif
             </div>
@@ -78,31 +81,33 @@
         @if (! $cashierSession)
             <div class="cashier-open-gate">
                 <div class="cashier-open-card">
-                    <div class="cashier-open-icon"><i class="fa fa-money"></i></div>
+                    <div class="cashier-open-icon"><i class="fa fa-unlock-alt"></i></div>
                     <h2>Buka kasir</h2>
-                    <p class="text-muted">Cek uang fisik di cash drawer sebelum mulai transaksi, lalu simpan sebagai saldo awal sesi.</p>
-                    <form action="{{ route('cashier.open', $outlet) }}" method="POST">
+                    <form action="{{ route('cashier.open', $outlet) }}" method="POST" autocomplete="off">
                         @csrf
                         <div class="form-group text-left">
                             <label for="opening_cashier_name">Nama kasir</label>
-                            <input id="opening_cashier_name" type="text" name="opening_cashier_name" class="form-control" value="{{ old('opening_cashier_name') }}" maxlength="150" placeholder="Contoh: Siti" required autofocus>
-                            <small class="help-block">Isi manual nama kasir yang sedang bertugas. Akun login tetap menjadi identitas kassa.</small>
+                            <input id="opening_cashier_name" type="text" name="opening_cashier_name" class="form-control input-lg" value="{{ old('opening_cashier_name') }}" maxlength="150" placeholder="Contoh: Siti" required autofocus>
                         </div>
                         <div class="form-group text-left">
-                            <label for="opening_cash">Nominal cash drawer saat buka</label>
+                            <label for="opening_cash">Saldo Stock</label>
                             <div class="input-group input-group-lg">
                                 <span class="input-group-addon">Rp</span>
                                 <input id="opening_cash" type="text" inputmode="numeric" name="opening_cash" class="form-control" min="0" data-currency-input data-currency-decimals="0" autocomplete="off"
-                                    value="{{ old('opening_cash', $suggestedOpeningCash ?? 1000000) }}" required autofocus>
+                                    value="{{ old('opening_cash', $suggestedOpeningCash ?? 1000000) }}" required>
                             </div>
-                            <small class="help-block">Saran saldo dari penutupan terakhir: Rp {{ number_format($suggestedOpeningCash ?? 1000000, 0, ',', '.') }}.</small>
-                        </div>
-                        <div class="form-group text-left">
-                            <label for="opening_note">Catatan pembukaan <small>(opsional)</small></label>
-                            <textarea id="opening_note" name="opening_note" class="form-control" rows="2" placeholder="Contoh: saldo awal dihitung bersama supervisor">{{ old('opening_note') }}</textarea>
                         </div>
                         <button class="btn btn-success btn-lg btn-block" type="submit"><i class="fa fa-unlock"></i> Buka kasir</button>
                     </form>
+                    <div class="cashier-open-links">
+                        <a class="btn btn-default" href="{{ route('cashier.history', ['outlet_id' => $outlet->id]) }}"><i class="fa fa-history"></i> History</a>
+                        <a class="btn btn-default" href="{{ route('penjualan.index', ['outlet_id' => $outlet->id]) }}"><i class="fa fa-file-text"></i> Daftar Penjualan</a>
+                    </div>
+                    <form action="{{ route('logout') }}" method="POST" class="cashier-open-logout">
+                        @csrf
+                        <button type="submit" class="btn btn-danger btn-block"><i class="fa fa-sign-out"></i> Logout</button>
+                    </form>
+                    <script>document.getElementById('opening_cashier_name').focus();</script>
                 </div>
             </div>
         @else
@@ -122,17 +127,12 @@
                             <h4 class="modal-title" id="bonModalLabel"><i class="fa fa-minus-circle"></i> Catat BON / Uang Keluar</h4>
                         </div>
                         <div class="modal-body">
-                            <p class="text-muted small">Catat setiap uang yang dikeluarkan dari cash drawer selama jam kerja.</p>
                             <div class="form-group">
                                 <label for="bon_amount">Nominal</label>
                                 <div class="input-group">
                                     <span class="input-group-addon">Rp</span>
                                     <input id="bon_amount" type="text" inputmode="numeric" name="amount" class="form-control" data-currency-input data-currency-decimals="0" autocomplete="off" placeholder="0" required>
                                 </div>
-                            </div>
-                            <div class="form-group">
-                                <label for="bon_note">Keperluan</label>
-                                <textarea id="bon_note" name="note" class="form-control" rows="3" placeholder="Contoh: setor hasil penjualan ke owner" required></textarea>
                             </div>
                         </div>
                         <div class="modal-footer">
@@ -212,18 +212,40 @@
                             <h4 class="modal-title" id="closeCashierModalLabel"><i class="fa fa-lock"></i> Tutup kasir</h4>
                         </div>
                         <div class="modal-body">
-                            <div class="alert alert-info small">
-                                Saldo sistem saat ini: <strong>Rp {{ number_format($summary['expected_cash'] ?? 0, 0, ',', '.') }}</strong>.
-                                Hitung uang fisik, lalu sisakan saldo untuk besok.
-                            </div>
+                            <table class="table table-condensed table-bordered" style="margin-bottom:10px;">
+                                <tbody>
+                                    <tr><td>Penjualan tunai</td><td class="text-right">Rp {{ number_format($summary['cash_sales'] ?? 0, 0, ',', '.') }}</td></tr>
+                                    <tr><td>Kas masuk (mis. selisih tukar barang)</td><td class="text-right">Rp {{ number_format($summary['cash_in'] ?? 0, 0, ',', '.') }}</td></tr>
+                                    <tr><td>BON / uang keluar</td><td class="text-right text-danger">- Rp {{ number_format($summary['cash_out'] ?? 0, 0, ',', '.') }}</td></tr>
+                                    <tr id="closeExpectedRow" class="info" data-expected="{{ (float) ($summary['expected_cash'] ?? 0) }}">
+                                        <th>Uang hasil penjualan yang seharusnya ada</th>
+                                        <th class="text-right">Rp {{ number_format($summary['expected_cash'] ?? 0, 0, ',', '.') }}</th>
+                                    </tr>
+                                    <tr id="closeDifferenceRow">
+                                        <td>Selisih dengan uang fisik</td>
+                                        <td class="text-right"><strong id="closeDifferenceText">isi uang fisik</strong></td>
+                                    </tr>
+                                    <tr>
+                                        <td>Total uang di laci setelah tutup <small class="text-muted">(uang fisik + saldo besok)</small></td>
+                                        <td class="text-right"><strong id="closeDrawerTotal">Rp 0</strong></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                            <p class="text-muted small" style="margin-top:-4px;">
+                                Saldo awal Rp {{ number_format($summary['opening_cash'] ?? 0, 0, ',', '.') }} tidak ikut dihitung di atas.
+                            </p>
+
+                            @include('cashier._breakdown', ['breakdown' => $summary['breakdown'] ?? \App\Models\CashierSession::emptyBreakdown()])
+
                             <div class="row">
                                 <div class="col-sm-6 form-group">
-                                    <label for="closing_cash">Uang fisik saat tutup</label>
+                                    <label for="closing_cash">Uang fisik hasil penjualan tunai</label>
                                     <div class="input-group">
                                         <span class="input-group-addon">Rp</span>
-                                        <input id="closing_cash" type="text" inputmode="numeric" name="closing_cash" class="form-control" min="0" data-currency-input data-currency-decimals="0" autocomplete="off"
-                                            value="{{ old('closing_cash', $summary['expected_cash'] ?? 0) }}" required>
+                                        <input id="closing_cash" type="text" inputmode="numeric" name="closing_cash" class="form-control" min="0" data-currency-input data-currency-decimals="0" autocomplete="off" placeholder="Hitung uang fisik"
+                                            value="{{ old('closing_cash') }}" required>
                                     </div>
+                                    <small class="help-block">Hanya uang dari penjualan, di luar saldo yang disisakan untuk besok.</small>
                                 </div>
                                 <div class="col-sm-6 form-group">
                                     <label for="carry_over_cash">Saldo disisakan besok</label>
@@ -232,13 +254,10 @@
                                         <input id="carry_over_cash" type="text" inputmode="numeric" name="carry_over_cash" class="form-control" min="0" data-currency-input data-currency-decimals="0" autocomplete="off"
                                             value="{{ old('carry_over_cash', $summary['opening_cash'] ?? 1000000) }}" required>
                                     </div>
+                                    <small class="help-block">Terpisah dari uang fisik di samping.</small>
                                 </div>
                             </div>
-                            <div class="form-group">
-                                <label for="closing_note">Catatan penutupan <small>(opsional)</small></label>
-                                <textarea id="closing_note" name="closing_note" class="form-control" rows="2" placeholder="Contoh: setoran dibawa supervisor">{{ old('closing_note') }}</textarea>
-                            </div>
-                            <p class="text-muted small">Setoran/uang yang diambil saat tutup dihitung otomatis: uang fisik dikurangi saldo besok. Jika berbeda dari saldo sistem, selisihnya masuk history.</p>
+
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-default" data-dismiss="modal">Batal</button>
@@ -257,6 +276,70 @@
         window.POS_OUTLET_ID = @json($outlet->id);
         window.POS_PRODUCTS_URL = @json(route('outlet.products', ['outlet' => $outlet->id]));
         window.user = @json(auth()->user());
+    </script>
+    <script>
+        // Selisih tutup kasir dihitung langsung saat uang fisik / saldo besok diketik.
+        // Baris "seharusnya" hijau bila pas, merah bila selisih, biru selama uang fisik belum diisi.
+        (function () {
+            const expectedRow = document.getElementById('closeExpectedRow');
+            const diffRow = document.getElementById('closeDifferenceRow');
+            const closing = document.getElementById('closing_cash');
+            const carry = document.getElementById('carry_over_cash');
+            const text = document.getElementById('closeDifferenceText');
+            const drawer = document.getElementById('closeDrawerTotal');
+            if (!expectedRow || !diffRow || !closing || !carry || !text || !drawer) return;
+
+            const expected = Number(expectedRow.dataset.expected || 0);
+            const toNumber = (value) => Number(String(value || '').replace(/[^\d]/g, '')) || 0;
+            const rp = (value) => 'Rp ' + Math.abs(value).toLocaleString('id-ID');
+            const states = ['info', 'success', 'danger'];
+
+            const paint = (state) => {
+                [expectedRow, diffRow].forEach((row) => {
+                    states.forEach((name) => row.classList.remove(name));
+                    row.classList.add(state);
+                });
+            };
+
+            const render = () => {
+                const hasClosing = String(closing.value || '').trim() !== '';
+                const physical = toNumber(closing.value);
+                drawer.textContent = rp(physical + toNumber(carry.value));
+
+                if (!hasClosing) {
+                    text.textContent = 'isi uang fisik';
+                    expectedRow.classList.remove('success', 'danger');
+                    expectedRow.classList.add('info');
+                    diffRow.classList.remove('info', 'success', 'danger');
+                    return;
+                }
+
+                const diff = physical - expected;
+                if (diff === 0) {
+                    text.textContent = 'Pas (Rp 0)';
+                    paint('success');
+                } else {
+                    text.textContent = (diff > 0 ? 'Lebih ' : 'Kurang ') + rp(diff);
+                    paint('danger');
+                }
+            };
+
+            closing.addEventListener('input', render);
+            carry.addEventListener('input', render);
+            render();
+        })();
+
+        // Modal BON & Tutup kasir: kursor langsung di kolom isian utama begitu modal terbuka.
+        if (window.jQuery) {
+            const focusOnShown = (modalId, inputId) => {
+                window.jQuery(modalId).on('shown.bs.modal', function () {
+                    const input = document.getElementById(inputId);
+                    if (input) { input.focus(); input.select(); }
+                });
+            };
+            focusOnShown('#bonModal', 'bon_amount');
+            focusOnShown('#closeCashierModal', 'closing_cash');
+        }
     </script>
     @if ($cashierSession)
         @vite(['resources/js/pos.js'])
@@ -290,6 +373,9 @@
         .cashier-open-gate { flex:1 1 auto; display:flex; align-items:center; justify-content:center; overflow:auto; }
         .cashier-open-card { width:100%; max-width:460px; padding:30px; text-align:center; background:#fff; border-top:4px solid #00a65a; box-shadow:0 2px 8px rgba(0,0,0,.1); }
         .cashier-open-card h2 { margin-top:10px; }
+        .cashier-open-links { display:flex; gap:8px; margin-top:14px; }
+        .cashier-open-links .btn { flex:1 1 0; }
+        .cashier-open-logout { margin-top:8px; }
         .cashier-open-icon { width:64px; height:64px; margin:0 auto; border-radius:50%; background:#e9f8ef; color:#00a65a; font-size:32px; line-height:64px; }
         @media (max-width: 900px) {
             .pos-header { display:block; }

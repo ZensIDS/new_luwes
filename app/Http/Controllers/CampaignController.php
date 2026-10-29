@@ -215,7 +215,7 @@ class CampaignController extends Controller
         $baseCode = $this->resolveCode(
             $data['name'],
             $data['code'] ?? null,
-            'VCR',
+            Voucher::CODE_PREFIX,
             $autoCode
         );
         $codes = $this->voucherCodes($baseCode, $quantity);
@@ -329,7 +329,7 @@ class CampaignController extends Controller
 
     private function updateVoucher(Voucher $voucher, array $data, ?Carbon $startAt, ?Carbon $endAt): void
     {
-        $code = $this->resolveUpdateCode($voucher->name, $voucher->code, $data, 'VCR', 'voucher', $voucher->id);
+        $code = $this->resolveUpdateCode($voucher->name, $voucher->code, $data, Voucher::CODE_PREFIX, 'voucher', $voucher->id);
         $productIds = $this->productIds($data);
         $outletIds = array_values($data['outlet_ids'] ?? []);
 
@@ -410,6 +410,11 @@ class CampaignController extends Controller
             $baseCode = $prefix.'-'.($slug !== '' ? $slug : now()->format('YmdHis'));
         }
 
+        // Voucher: kode selalu diawali VCRL (otomatis maupun diketik manual).
+        if ($prefix === Voucher::CODE_PREFIX) {
+            $baseCode = Voucher::withCodePrefix($baseCode);
+        }
+
         $baseCode = Str::limit($baseCode, 95, '');
         if (! $auto && $this->codeExists($baseCode)) {
             throw ValidationException::withMessages(['code' => 'Kode voucher atau promo sudah digunakan.']);
@@ -438,6 +443,12 @@ class CampaignController extends Controller
         $code = strtoupper(trim((string) ($data['code'] ?? $currentCode)));
         if ($code === '') {
             return $this->resolveCode($name, null, $prefix, true);
+        }
+
+        // Kode voucher yang tidak diubah dibiarkan apa adanya (voucher lama yang sudah tercetak tetap valid).
+        // Kode yang diubah/diketik baru wajib berawalan VCRL.
+        if ($prefix === Voucher::CODE_PREFIX && $code !== strtoupper(trim((string) $currentCode))) {
+            $code = Voucher::withCodePrefix($code);
         }
 
         if ($this->codeExists($code, $ignoreType, $ignoreId)) {

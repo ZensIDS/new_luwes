@@ -59,6 +59,8 @@
         $itemNameFont = $profile['item'];
         $totalFont = $profile['total'];
         $logoMaxWidth = $profile['logo'];
+        // Hasil cetak ulang (dari tombol Re-Print / shortcut F4 di halaman Penjualan).
+        $isReprint = request()->boolean('reprint');
         $items = $penjualan->displayItems();
         $itemCount = $items->sum(fn ($item) => (int) $item->qty);
         // Rincian per item dihitung dari satu sumber supaya semua angka di struk saling menjumlah:
@@ -90,7 +92,10 @@
         $grandTotal = (float) ($penjualan->grand_total
             ?? max(0, $subtotalGross - $discountTotal - $voucherTotal + $roundingAmount));
         $paidAmount = (float) ($penjualan->paid_amount ?? $penjualan->total ?? 0);
-        $changeAmount = (float) ($penjualan->change_amount ?? max(0, $paidAmount - $grandTotal));
+        $feeAmount = (float) ($penjualan->payment_fee_amount ?? 0);
+        $feePercent = (float) ($penjualan->payment_fee_percent ?? 0);
+        $feeLabel = 'Biaya ' . ($penjualan->paymentMethod?->name ?? $penjualan->payment_method_name ?? '') . ' (' . rtrim(rtrim(number_format($feePercent, 2, ',', '.'), '0'), ',') . '%)';
+        $changeAmount = (float) ($penjualan->change_amount ?? max(0, $paidAmount - $grandTotal - $feeAmount));
 
         // ---- Data untuk cetak teks langsung via QZ Tray (ESC/POS, memakai font bawaan printer) ----
         $fmtRaw = fn ($n) => number_format((float) $n, 0, ',', '.');
@@ -104,7 +109,7 @@
         $metaRaw = [
             ['No', (string) $penjualan->code],
             ['Tgl', (string) optional($penjualan->created_at)->format('d/m/Y H:i')],
-            ['Kasir', ($penjualan->kasir?->name ?? '-') . ' - ' . ($penjualan->cashierShift?->name ?? 'Kasir')],
+            ['Kasir', ($penjualan->kasir?->name ?? '-') . ' - ' . ($penjualan->cashierShift?->name ?? 'Kasir') . ($isReprint ? ' (Reprint)' : '')],
         ];
         if ($penjualan->customer?->name) {
             $metaRaw[] = ['Customer', (string) $penjualan->customer->name];
@@ -113,6 +118,10 @@
         if ($discountTotal > 0) { $summaryRaw[] = ['Diskon', '-' . $fmtRaw($discountTotal), 0]; }
         if ($voucherTotal > 0) { $summaryRaw[] = ['Voucher', '-' . $fmtRaw($voucherTotal), 0]; }
         $summaryRaw[] = ['TOTAL', 'Rp ' . $fmtRaw($grandTotal), 1];
+        if ($feeAmount > 0) {
+            $summaryRaw[] = [trim($feeLabel), $fmtRaw($feeAmount), 0];
+            $summaryRaw[] = ['TOTAL BAYAR', 'Rp ' . $fmtRaw($grandTotal + $feeAmount), 1];
+        }
         $payRaw = [
             [(string) ($penjualan->paymentMethod?->name ?? $penjualan->payment_method_name ?? 'Tunai'), $fmtRaw($paidAmount), 0],
             ['Kembali', $fmtRaw($changeAmount), 1],
@@ -224,6 +233,7 @@
         .footer-msg img { max-width: 100%; }
         .printed-at { margin-top: 2mm; font-size: {{ $tinyFont }}; }
 
+
         /* Tampilan layar saja (tombol & petunjuk) */
         .no-print { margin: 14px auto 0; width: 100%; max-width: 340px; font-family: Arial, sans-serif; font-weight: normal; font-size: 14px; }
         .no-print a, .no-print button { display: block; width: 100%; margin-top: 6px; padding: 10px; border: 1px solid #777; background: #fff; color: #000; font: inherit; text-align: center; text-decoration: none; cursor: pointer; border-radius: 4px; }
@@ -255,7 +265,7 @@
     <div class="meta">
         <div class="row"><span class="key">No</span><span class="val bold">{{ $penjualan->code }}</span></div>
         <div class="row"><span class="key">Tgl</span><span class="val">{{ optional($penjualan->created_at)->format('d/m/Y H:i') }}</span></div>
-        <div class="row"><span class="key">Kasir</span><span class="val">{{ $penjualan->kasir?->name ?? '—' }} · {{ $penjualan->cashierShift?->name ?? 'Kasir' }}</span></div>
+        <div class="row"><span class="key">Kasir</span><span class="val">{{ $penjualan->kasir?->name ?? '—' }} · {{ $penjualan->cashierShift?->name ?? 'Kasir' }}@if ($isReprint) (Reprint)@endif</span></div>
         @if ($penjualan->customer?->name)<div class="row"><span class="key">Customer</span><span class="val">{{ $penjualan->customer->name }}</span></div>@endif
     </div>
 
@@ -283,6 +293,10 @@
         @if ($discountTotal > 0)<span class="lbl">Diskon</span><span class="num">-{{ number_format($discountTotal, 0, ',', '.') }}</span>@endif
         @if ($voucherTotal > 0)<span class="lbl">Voucher</span><span class="num">-{{ number_format($voucherTotal, 0, ',', '.') }}</span>@endif
         <span class="lbl grand">TOTAL</span><span class="num grand">Rp {{ number_format($grandTotal, 0, ',', '.') }}</span>
+        @if ($feeAmount > 0)
+            <span class="lbl small">{{ trim($feeLabel) }}</span><span class="num small">{{ number_format($feeAmount, 0, ',', '.') }}</span>
+            <span class="lbl grand">TOTAL BAYAR</span><span class="num grand">Rp {{ number_format($grandTotal + $feeAmount, 0, ',', '.') }}</span>
+        @endif
     </div>
 
     <div class="rule-dash"></div>
@@ -309,9 +323,9 @@
         <a href="{{ route('outlet.show', $penjualan->outlet_id) }}">Kembali</a>
         <button type="button" class="primary" onclick="window.printReceipt(this); return false;">Print {{ $paper }}mm</button>
         <div class="papers">
-            <a href="{{ route('penjualan.print', [$penjualan, 'paper' => '58']) }}" class="{{ $paper === '58' ? 'active' : '' }}">Kertas 58mm</a>
-            <a href="{{ route('penjualan.print', [$penjualan, 'paper' => '68']) }}" class="{{ $paper === '68' ? 'active' : '' }}">Kertas 68mm</a>
-            <a href="{{ route('penjualan.print', [$penjualan, 'paper' => '80']) }}" class="{{ $paper === '80' ? 'active' : '' }}">Kertas 80mm</a>
+            <a href="{{ route('penjualan.print', array_filter(['penjualan' => $penjualan->id, 'paper' => '58', 'reprint' => $isReprint ? 1 : null])) }}" class="{{ $paper === '58' ? 'active' : '' }}">Kertas 58mm</a>
+            <a href="{{ route('penjualan.print', array_filter(['penjualan' => $penjualan->id, 'paper' => '68', 'reprint' => $isReprint ? 1 : null])) }}" class="{{ $paper === '68' ? 'active' : '' }}">Kertas 68mm</a>
+            <a href="{{ route('penjualan.print', array_filter(['penjualan' => $penjualan->id, 'paper' => '80', 'reprint' => $isReprint ? 1 : null])) }}" class="{{ $paper === '80' ? 'active' : '' }}">Kertas 80mm</a>
         </div>
         <div class="adjust">
             <b>Penyesuaian posisi cetak ({{ $paper }}mm)</b>

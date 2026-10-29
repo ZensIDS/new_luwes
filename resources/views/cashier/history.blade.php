@@ -13,6 +13,12 @@
                 <span class="text-muted" style="margin-left:10px;">Semua aktivitas dicatat dengan Spatie Activitylog.</span>
             </div>
             <div class="box-body table-responsive">
+                @php($rp = fn ($number) => 'Rp ' . number_format((float) $number, 0, ',', '.'))
+                <p class="text-muted small" style="margin-bottom:8px;">
+                    <strong>Uang fisik</strong> = uang hasil penjualan tunai (ditambah kas masuk, dikurangi BON), dihitung terpisah dari
+                    <strong>saldo besok</strong>. <strong>Selisih</strong> = uang fisik &minus; kas seharusnya.
+                    Sesi yang ditutup sebelum perhitungan ini diperbarui tetap memakai angka lama.
+                </p>
                 <table class="table table-bordered table-striped">
                     <thead>
                         <tr>
@@ -21,20 +27,25 @@
                             <th>Saldo awal</th>
                             <th>Penjualan tunai</th>
                             <th>BON</th>
+                            <th>Kas seharusnya</th>
+                            <th>Uang fisik</th>
+                            <th>Selisih</th>
+                            <th>Saldo besok</th>
                             <th>Setoran tutup</th>
                             <th>Total disetor/keluar</th>
-                            <th>Uang fisik</th>
-                            <th>Saldo besok</th>
-                            <th>Selisih</th>
                             <th>Status</th>
                         </tr>
                     </thead>
                     <tbody>
                         @forelse ($sessions as $session)
-                            @php($sessionSummary = $session->status === 'open' ? $session->summary() : [
+                            @php($isOpen = $session->status === 'open')
+                            @php($sessionSummary = $isOpen ? $session->summary() : [
                                 'cash_sales' => $session->cash_sales,
                                 'cash_out' => $session->cash_out,
+                                'expected_cash' => $session->expected_cash,
                             ])
+                            @php($breakdown = $breakdowns[$session->id] ?? \App\Models\CashierSession::emptyBreakdown())
+                            @php($difference = $isOpen ? null : (float) $session->discrepancy)
                             <tr>
                                 <td>
                                     {{ $session->opened_at?->format('d/m/Y H:i') }}<br>
@@ -53,29 +64,44 @@
                                 <td>@currency($session->opening_cash)</td>
                                 <td>@currency($sessionSummary['cash_sales'] ?? 0)</td>
                                 <td class="text-danger">@currency($sessionSummary['cash_out'] ?? 0)</td>
-                                <td>@currency($session->cash_removed)</td>
+                                <td>@currency($sessionSummary['expected_cash'] ?? 0)</td>
+                                <td>{!! $isOpen ? '<span class="text-muted">—</span>' : $rp($session->closing_cash) !!}</td>
+                                <td class="{{ $difference === null ? 'text-muted' : ($difference == 0 ? 'text-success' : 'text-danger') }}">
+                                    @if ($difference === null)
+                                        —
+                                    @elseif ($difference == 0)
+                                        <strong>Pas</strong>
+                                    @else
+                                        <strong>{{ $difference > 0 ? 'Lebih' : 'Kurang' }}</strong><br>
+                                        {{ $difference > 0 ? '+' : '-' }}{{ $rp(abs($difference)) }}
+                                    @endif
+                                </td>
+                                <td>{!! $isOpen ? '<span class="text-muted">—</span>' : $rp($session->carry_over_cash) !!}</td>
+                                <td>{!! $isOpen ? '<span class="text-muted">—</span>' : $rp($session->cash_removed) !!}</td>
                                 <td>@currency(($sessionSummary['cash_out'] ?? 0) + (float) ($session->cash_removed ?? 0))</td>
-                                <td>@currency($session->closing_cash)</td>
-                                <td>@currency($session->carry_over_cash)</td>
-                                <td class="{{ (float) $session->discrepancy === 0.0 ? 'text-success' : 'text-danger' }}">@currency($session->discrepancy)</td>
                                 <td>
-                                    @if ($session->status === 'open')
+                                    @if ($isOpen)
                                         <span class="label label-success">OPEN</span>
                                     @else
-                                        <span class="label label-default">CLOSED</span>
+                                        <span class="label label-default">CLOSED</span><br>
+                                        <a href="{{ route('cashier.print-close', ['cashierSession' => $session->id, 'reprint' => 1, 'auto' => 1, 'from' => 'history']) }}" class="btn btn-warning btn-xs" style="margin-top:4px;" title="Cetak ulang ringkasan tutup kasir"><i class="fa fa-print"></i> Re-Print</a>
                                     @endif
                                 </td>
                             </tr>
                             <tr class="active">
-                                <td colspan="11">
+                                <td colspan="12">
+                                    @include('cashier._breakdown', ['breakdown' => $breakdown])
                                     <strong>Catatan:</strong> {{ $session->closing_note ?: $session->opening_note ?: '-' }}
                                     @if ($session->drawerEntries->isNotEmpty())
                                         <span style="margin-left:18px;"><strong>Aktivitas drawer:</strong>
                                             @foreach ($session->drawerEntries as $entry)
                                                 @if ($entry->type === 'check')
                                                     Cek fisik Rp {{ number_format($entry->amount, 0, ',', '.') }} (selisih {{ $entry->difference >= 0 ? '+' : '' }}Rp {{ number_format($entry->difference, 0, ',', '.') }}) — {{ $entry->note }}
+                                                @elseif ($entry->type === 'cash_in')
+                                                    Kas masuk Rp {{ number_format($entry->amount, 0, ',', '.') }} — {{ $entry->note }}
                                                 @else
-                                                    BON Rp {{ number_format($entry->amount, 0, ',', '.') }} — {{ $entry->note }}
+                                                    BON Rp {{ number_format($entry->amount, 0, ',', '.') }}{{ filled($entry->note) ? ' — ' . $entry->note : '' }}
+                                                    <a href="{{ route('cashier.print-bon', ['entry' => $entry->id, 'reprint' => 1, 'auto' => 1, 'from' => 'history']) }}" class="btn btn-warning btn-xs" title="Cetak ulang BON"><i class="fa fa-print"></i> Re-Print</a>
                                                 @endif{{ $loop->last ? '' : '; ' }}
                                             @endforeach
                                         </span>
@@ -83,7 +109,7 @@
                                 </td>
                             </tr>
                         @empty
-                            <tr><td colspan="11" class="text-center text-muted">Belum ada history kasir.</td></tr>
+                            <tr><td colspan="12" class="text-center text-muted">Belum ada history kasir.</td></tr>
                         @endforelse
                     </tbody>
                 </table>

@@ -385,10 +385,10 @@ class VoucherController extends Controller
     {
         $data = $request->validated();
         [$startAt, $endAt] = $this->parseDateRange($request->input('daterange'));
-        $baseCode = strtoupper(trim((string) ($data['code'] ?? '')));
+        $baseCode = Voucher::withCodePrefix((string) ($data['code'] ?? ''));
         if ($baseCode === '') {
             do {
-                $baseCode = 'VCR-'.now()->format('YmdHis').'-'.strtoupper(bin2hex(random_bytes(2)));
+                $baseCode = Voucher::CODE_PREFIX.'-'.now()->format('YmdHis').'-'.strtoupper(bin2hex(random_bytes(2)));
             } while (Voucher::where('code', $baseCode)->exists());
         }
         $quantity = (int) ($data['quantity'] ?? 1);
@@ -450,6 +450,9 @@ class VoucherController extends Controller
     {
         $data = $request->validated();
         $code = strtoupper(trim((string) ($data['code'] ?? $voucher->code)));
+        if ($code !== strtoupper(trim((string) $voucher->code))) {
+            $code = Voucher::withCodePrefix($code);
+        }
         if (Voucher::where('code', $code)->where('id', '!=', $voucher->id)->exists()) {
             throw ValidationException::withMessages(['code' => 'Kode voucher sudah digunakan.']);
         }

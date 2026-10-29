@@ -80,6 +80,7 @@ class CashierSession extends Model
             ->where('status', 'paid')
             ->where(function ($query) {
                 $query->whereNull('payment_method_name')
+                    ->orWhere('payment_method_name', '')
                     ->orWhere('payment_method_name', 'like', '%tunai%')
                     ->orWhere('payment_method_name', 'like', '%cash%');
             });
@@ -88,6 +89,96 @@ class CashierSession extends Model
     public function drawerEntries()
     {
         return $this->hasMany(CashierDrawerEntry::class);
+    }
+
+    /**
+     * Metode bayar dianggap tunai bila namanya kosong atau memuat "tunai" / "cash".
+     * Aturan yang sama dipakai cashSales() dan retur penjualan.
+     */
+    public static function isCashPaymentName(?string $name): bool
+    {
+        $name = trim((string) $name);
+
+        return $name === '' || preg_match('/tunai|cash/i', $name) === 1;
+    }
+
+    public static function emptyBreakdown(): array
+    {
+        return [
+            'sales_count' => 0,
+            'sales_total' => 0.0,
+            'non_cash_total' => 0.0,
+            'payments' => [],
+            'voucher_count' => 0,
+            'voucher_total' => 0.0,
+        ];
+    }
+
+    /**
+     * Rincian penjualan per metode bayar + voucher yang keluar untuk banyak sesi sekaligus
+     * (2 query saja, tidak N+1). Hanya penjualan berstatus paid dan belum dihapus.
+     *
+     * @param  array<int>  $sessionIds
+     * @return array<int, array>  dikunci oleh id sesi
+     */
+    public static function breakdownFor(array $sessionIds): array
+    {
+        $sessionIds = array_values(array_unique(array_map('intval', $sessionIds)));
+        $result = [];
+        foreach ($sessionIds as $id) {
+            $result[$id] = self::emptyBreakdown();
+        }
+        if (! $sessionIds) {
+            return $result;
+        }
+
+        $methodExpr = "COALESCE(NULLIF(TRIM(payment_method_name), ''), 'Tunai')";
+        $payments = Penjualan::query()
+            ->whereIn('cashier_session_id', $sessionIds)
+            ->where('status', 'paid')
+            ->selectRaw("cashier_session_id, {$methodExpr} as method, COUNT(*) as trx, SUM(COALESCE(grand_total, total, 0)) as total")
+            ->groupByRaw("cashier_session_id, {$methodExpr}")
+            ->get();
+
+        foreach ($payments as $row) {
+            $id = (int) $row->cashier_session_id;
+            $isCash = self::isCashPaymentName($row->method);
+            $total = (float) $row->total;
+
+            $result[$id]['payments'][] = [
+                'name' => (string) $row->method,
+                'is_cash' => $isCash,
+                'count' => (int) $row->trx,
+                'total' => $total,
+            ];
+            $result[$id]['sales_count'] += (int) $row->trx;
+            $result[$id]['sales_total'] += $total;
+            if (! $isCash) {
+                $result[$id]['non_cash_total'] += $total;
+            }
+        }
+
+        // Tunai selalu di atas, sisanya urut nama.
+        foreach ($result as $id => $breakdown) {
+            usort($result[$id]['payments'], fn ($a, $b) => [! $a['is_cash'], $a['name']] <=> [! $b['is_cash'], $b['name']]);
+        }
+
+        $vouchers = DB::table('voucher_redemptions as vr')
+            ->join('penjualans as p', 'p.id', '=', 'vr.penjualan_id')
+            ->whereIn('p.cashier_session_id', $sessionIds)
+            ->whereNull('p.deleted_at')
+            ->where('p.status', 'paid')
+            ->selectRaw('p.cashier_session_id, COUNT(vr.id) as qty, SUM(vr.amount) as total')
+            ->groupBy('p.cashier_session_id')
+            ->get();
+
+        foreach ($vouchers as $row) {
+            $id = (int) $row->cashier_session_id;
+            $result[$id]['voucher_count'] = (int) $row->qty;
+            $result[$id]['voucher_total'] = (float) $row->total;
+        }
+
+        return $result;
     }
 
     public function summary(): array
@@ -102,8 +193,13 @@ class CashierSession extends Model
         // separately from today's cash movement, matching the outlet workflow:
         // sales - BON = cash available to settle at the end of the day.
         $expectedCash = $cashSales + $cashIn - $cashOut;
+        $breakdown = self::breakdownFor([(int) $this->id])[(int) $this->id] ?? self::emptyBreakdown();
 
         return [
+            'breakdown' => $breakdown,
+            // Isi laci seharusnya = saldo awal (float) + kas penjualan. Hanya untuk informasi:
+            // pencocokan uang fisik saat tutup memakai expected_cash (tanpa saldo awal).
+            'drawer_total' => (float) $this->opening_cash + $expectedCash,
             'opening_cash' => (float) $this->opening_cash,
             'cash_sales' => $cashSales,
             'cash_in' => $cashIn,

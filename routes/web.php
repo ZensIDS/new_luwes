@@ -7,6 +7,7 @@ use App\Http\Controllers\CartUserController;
 use App\Http\Controllers\CampaignController;
 use App\Http\Controllers\CashierPrintController;
 use App\Http\Controllers\CashierSessionController;
+use App\Http\Controllers\CashierSlipController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DashboardController;
@@ -65,6 +66,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/get-penjualan/{outlet_id}', [PenjualanController::class, 'getPenjualan']);
     Route::get('/penjualan-detail/{penjualan_id}/items', [PenjualanController::class, 'getItems']);
     Route::get('/penjualan/data', [PenjualanController::class, 'getIndexData'])->name('penjualan.index.data');
+    Route::get('/penjualan/reprint-search', [PenjualanController::class, 'reprintSearch'])->name('penjualan.reprint-search');
     Route::resource('/penjualan', PenjualanController::class)->only(['index', 'create', 'store', 'show', 'destroy']);
     Route::get('/penjualan/{penjualan}/print', [PenjualanController::class, 'print'])->name('penjualan.print');
     Route::get('/qz/certificate', [\App\Http\Controllers\QzSignController::class, 'certificate'])->name('qz.certificate');
@@ -92,6 +94,8 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::post('/cashier-sessions/{cashierSession}/change-shift', [CashierSessionController::class, 'changeShift'])->name('cashier.change-shift');
     Route::post('/cashier-sessions/{cashierSession}/drawer-entry', [CashierSessionController::class, 'entry'])->name('cashier.drawer-entry');
     Route::post('/cashier-sessions/{cashierSession}/close', [CashierSessionController::class, 'close'])->name('cashier.close');
+    Route::get('/cashier-entries/{entry}/print-bon', [CashierSlipController::class, 'bon'])->name('cashier.print-bon');
+    Route::get('/cashier-sessions/{cashierSession}/print-close', [CashierSlipController::class, 'close'])->name('cashier.print-close');
     Route::resource('/customer', CustomerController::class);
     Route::resource('/kas', KasController::class);
     Route::resource('/payment', PaymentMethodController::class);

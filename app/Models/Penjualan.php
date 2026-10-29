@@ -32,6 +32,8 @@ class Penjualan extends Model
         'payment_method_id',
         'payment_method_name',
         'payment_reference',
+        'payment_fee_percent',
+        'payment_fee_amount',
         'status',
         'delete_reason',
         'deleted_by',
@@ -47,6 +49,8 @@ class Penjualan extends Model
         'grand_total' => 'float',
         'paid_amount' => 'float',
         'change_amount' => 'float',
+        'payment_fee_percent' => 'float',
+        'payment_fee_amount' => 'float',
     ];
 
     public function customer()

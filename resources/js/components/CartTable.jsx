@@ -1,5 +1,5 @@
 import React from "react";
-import { formatIdNumber, formatRupiah, parseIdNumber } from "../utils";
+import { SHOW_PAYMENT_REFERENCE, formatRupiah } from "../utils";
 import CartTableBody from "./CartTableBody";
 import ReactSelectField from "./ReactSelectField";
 import Vouchers from "./Vouchers";
@@ -11,7 +11,6 @@ const CartTable = ({
     promotionTotal,
     voucherBreakdown,
     voucherTotal,
-    roundingAmount = 0,
     grandTotal,
     customers,
     customerId,
@@ -26,7 +25,6 @@ const CartTable = ({
     setPaymentReference,
     paymentMethodInputRef,
     paymentReferenceInputRef,
-    paidInputRef,
     voucherInputRef,
     outletId,
     appliedVouchers,
@@ -51,10 +49,8 @@ const CartTable = ({
     setSelectedCartProductId,
     cartTableRef,
 }) => {
-    const change = Math.max(0, parseIdNumber(paidAmount) - grandTotal);
-    const selectedCustomer = customers.find((customer) => String(customer.id) === String(customerId));
     const selectedPaymentMethod = paymentMethods.find((method) => String(method.id) === String(paymentMethodId));
-    const requiresPaymentReference = Boolean(paymentMethodId) && !/tunai|cash/i.test(selectedPaymentMethod?.name || "");
+    const requiresPaymentReference = SHOW_PAYMENT_REFERENCE && Boolean(paymentMethodId) && !/tunai|cash/i.test(selectedPaymentMethod?.name || "");
 
     return (
         <>
@@ -94,7 +90,6 @@ const CartTable = ({
                             Voucher{voucherBreakdown.length ? ` (${voucherBreakdown.map((voucher) => voucher.code).join(", ")})` : ""}: <b>-{formatRupiah(voucherTotal)}</b>
                         </span>
                     )}
-                    {roundingAmount > 0 && <span>Pembulatan: <b>+{formatRupiah(roundingAmount)}</b></span>}
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                     <span style={{ fontSize: 15, fontWeight: 700 }}>Grand Total</span>
@@ -117,7 +112,7 @@ const CartTable = ({
                 onSyncPromotions={onSyncPromotions}
             />
             <div className="pos-quick-field" data-quick-field="customer">
-                <label>Customer <small>(F4)</small></label>
+                <label>Customer <small>(F1)</small></label>
                 <ReactSelectField
                     ref={customerInputRef}
                     value={customerId}
@@ -153,9 +148,6 @@ const CartTable = ({
                     ]}
                 />
             </div>
-            <div className="text-muted" style={{ fontSize: 12, marginTop: 4 }}>
-                Customer: <b>{selectedCustomer?.name || "Umum"}</b> &nbsp;·&nbsp; Pembayaran: <b>{selectedPaymentMethod?.name || "Tunai"}</b>
-            </div>
             <div className="row">
                 {requiresPaymentReference && (
                     <div className="col-md-12">
@@ -174,34 +166,9 @@ const CartTable = ({
                         </div>
                     </div>
                 )}
-                <div className="col-md-6">
-                    <label>Uang Diterima <span className="text-danger">*</span> <small>(F9)</small></label>
-                    <div className="input-group input-group-sm">
-                        <input
-                            ref={paidInputRef}
-                            type="text"
-                            inputMode="numeric"
-                            autoComplete="off"
-                            className="form-control"
-                            style={{ height: "40px", fontSize: "16px" }}
-                            placeholder={formatIdNumber(grandTotal)}
-                            value={paidAmount}
-                            onChange={(event) => {
-                                const value = event.target.value;
-                                setPaidAmount(value === "" ? "" : formatIdNumber(value));
-                            }}
-                        />
-                    </div>
-                </div>
-                <div className="col-md-6">
-                    <label>Kembalian</label>
-                    <div style={{ minHeight: 40, padding: "7px 12px", border: "1px solid #00a65a", borderRadius: 4, background: "#f0fff4", color: "#008d4c", fontSize: 22, fontWeight: 700, textAlign: "right" }}>
-                        {formatRupiah(change)}
-                    </div>
-                </div>
             </div>
             <p style={{ marginTop: 8, marginBottom: 0, padding: "6px 10px", background: "#f4f4f8", borderLeft: "4px solid #605ca8", fontSize: 13, fontWeight: 700, color: "#222" }}>
-                <i className="fa fa-keyboard-o"></i> F2 Cari produk &nbsp;|&nbsp; F3 Scan &nbsp;|&nbsp; F4 Customer &nbsp;|&nbsp; F5 Item &nbsp;|&nbsp; F6 Promo &nbsp;|&nbsp; F7 Pembayaran &nbsp;|&nbsp; F8 Voucher &nbsp;|&nbsp; F9 Uang &nbsp;|&nbsp; F10 Proses &nbsp;|&nbsp; Delete hapus baris terpilih
+                <i className="fa fa-keyboard-o"></i> F2 Cari produk &nbsp;|&nbsp; F3 Scan &nbsp;|&nbsp; F1 Customer &nbsp;|&nbsp; F4 Reprint &nbsp;|&nbsp; F5 Item &nbsp;|&nbsp; F6 Promo &nbsp;|&nbsp; F7 Pembayaran &nbsp;|&nbsp; F8 Voucher &nbsp;|&nbsp; Ctrl/Cmd+Enter Bayar (F10) &nbsp;|&nbsp; Insert / Option ubah qty (di item) &nbsp;|&nbsp; Delete hapus baris terpilih
             </p>
             {errorMessage && <div className="alert alert-danger" style={{ marginTop: 8 }}>{errorMessage}</div>}
             <div className="row" style={{ marginTop: 10 }}>
@@ -210,7 +177,7 @@ const CartTable = ({
                 </div>
                 <div className="col-sm-6">
                 <button type="button" className="btn btn-success btn-block" onClick={handleSubmit} disabled={isSubmitting || !cart.length}>
-                    {isSubmitting ? "Processing..." : "Process (F10)"}
+                    {isSubmitting ? "Processing..." : "Bayar (Ctrl+Enter)"}
                 </button>
                 </div>
             </div>
