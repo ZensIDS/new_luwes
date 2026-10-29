@@ -32,3 +32,7 @@ export const formatIdNumber = (value) => {
         maximumFractionDigits: 0,
     }).format(parseIdNumber(value));
 };
+
+// Nomor referensi pembayaran (non-tunai) disembunyikan sementara. Ubah ke true untuk menampilkannya
+// (dan mewajibkannya) lagi di form kasir maupun pop up pembayaran.
+export const SHOW_PAYMENT_REFERENCE = false;

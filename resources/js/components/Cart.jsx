@@ -5,7 +5,13 @@ import Swal from "sweetalert2";
 import Barcodes from "./Barcodes.jsx";
 import CartTable from "./CartTable";
 import Gallery from "./Gallery";
-import { parseIdNumber } from "../utils";
+import PaymentModal from "./PaymentModal";
+import ReprintModal from "./ReprintModal";
+import { SHOW_PAYMENT_REFERENCE, parseIdNumber } from "../utils";
+
+// Awalan kode voucher (sama dengan Voucher::CODE_PREFIX di backend).
+const VOUCHER_PREFIX = "VCRL";
+const isVoucherCode = (value) => String(value || "").trim().toUpperCase().startsWith(VOUCHER_PREFIX);
 
 const ProductSearchModal = ({ open, inputRef, search, onSearch, products, productsLoading, onAddProduct, onClose }) => {
     useEffect(() => {
@@ -66,6 +72,7 @@ const Cart = () => {
     const [appliedVouchers, setAppliedVouchers] = useState([]);
     const [appliedPromotions, setAppliedPromotions] = useState([]);
     const [barcode, setBarcode] = useState("");
+    const [scanNotice, setScanNotice] = useState("");
     const [search, setSearch] = useState("");
     const [paidAmount, setPaidAmount] = useState("");
     const [errorMessage, setErrorMessage] = useState("");
@@ -77,10 +84,11 @@ const Cart = () => {
     const [isPrintingReceipt, setIsPrintingReceipt] = useState(false);
     const [selectedCartProductId, setSelectedCartProductId] = useState(null);
     const [productModalOpen, setProductModalOpen] = useState(false);
+    const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+    const [reprintModalOpen, setReprintModalOpen] = useState(false);
     const barcodeRef = useRef(null);
     const searchRef = useRef(null);
     const voucherRef = useRef(null);
-    const paidRef = useRef(null);
     const customerRef = useRef(null);
     const paymentMethodRef = useRef(null);
     const paymentReferenceRef = useRef(null);
@@ -147,13 +155,8 @@ const Cart = () => {
 
     const voucherBreakdown = getVoucherBreakdown();
     const voucherTotal = voucherBreakdown.reduce((sum, voucher) => sum + voucher.amount, 0);
-    const totalBeforeRounding = Math.max(0, getSubtotal() - voucherTotal);
-    // Harus sama dengan PriceCalculator::roundingAmount di backend: dibulatkan ke ATAS kelipatan 100.
-    const TOTAL_ROUNDING_STEP = 100;
-    const roundingAmount = totalBeforeRounding > 0
-        ? Math.ceil(Math.round(totalBeforeRounding) / TOTAL_ROUNDING_STEP) * TOTAL_ROUNDING_STEP - Math.round(totalBeforeRounding)
-        : 0;
-    const grandTotal = Math.round(totalBeforeRounding) + roundingAmount;
+    // Tidak ada pembulatan total (sama dengan CashierSaleService): grand total = subtotal - voucher.
+    const grandTotal = Math.round(Math.max(0, getSubtotal() - voucherTotal));
 
     const loadCart = (promotionCodes = appliedPromotions.map((promotion) => promotion.code)) => {
         const params = new URLSearchParams({ outlet_id: outlet.id });
@@ -267,7 +270,8 @@ const Cart = () => {
 
         productRequest.then((product) => {
             if (!product) {
-                setErrorMessage("Barcode tidak ditemukan pada stok outlet.");
+                // Bukan produk: kode lama (mis. "VCR-...") atau kode promo masih bisa berupa voucher/promo.
+                scanVoucher(code, "Barcode produk / voucher tidak ditemukan.");
                 return;
             }
 
@@ -282,9 +286,46 @@ const Cart = () => {
         }).catch(() => setErrorMessage("Barcode tidak ditemukan pada stok outlet."));
     };
 
+    // Scan kode voucher (VCRL...) atau kode promo: cek ke server lalu pasang ke transaksi.
+    const scanVoucher = (value, notFoundMessage = "") => {
+        const code = String(value || "").trim().toUpperCase();
+        if (!code) return;
+
+        axios.get("/voucher/lookup", { params: { code, outlet_id: outlet.id }, headers: { Accept: "application/json" } })
+            .then((response) => {
+                const result = response.data;
+                setBarcode("");
+                if (result.kind === "promotion") {
+                    const already = appliedPromotions.some((item) => item.code === result.code);
+                    addPromotion(result);
+                    setScanNotice(already ? "" : "Promo " + result.code + " dipasang.");
+                } else {
+                    const already = appliedVouchers.some((item) => item.code === result.code);
+                    addVoucher(result);
+                    setScanNotice(already ? "" : "Voucher " + result.code + " dipasang.");
+                }
+                barcodeRef.current?.focus();
+            })
+            .catch((error) => {
+                setScanNotice("");
+                setBarcode("");
+                setErrorMessage(
+                    (error.response?.status === 404 && notFoundMessage)
+                    || error.response?.data?.message
+                    || "Voucher tidak dapat digunakan."
+                );
+                barcodeRef.current?.focus();
+            });
+    };
+
     const handleScanBarcode = (event) => {
         event.preventDefault();
-        if (barcode.trim()) addToCart(barcode.trim());
+        const code = barcode.trim();
+        if (!code) return;
+        setScanNotice("");
+        setErrorMessage("");
+        if (isVoucherCode(code)) scanVoucher(code);
+        else addToCart(code);
     };
 
     const updateCart = (productId, quantity) => {
@@ -399,76 +440,53 @@ const Cart = () => {
         barcodeRef.current?.focus();
     };
 
-    const handleSubmit = () => {
+    // Ctrl+Enter / Cmd+Enter, F10, atau tombol Bayar: buka pop up pembayaran (metode, nominal, kembalian).
+    const openPaymentModal = () => {
         if (submitLockRef.current || isSubmitting || completedSale) return;
-
+        if (!cart.length) {
+            setErrorMessage("Keranjang masih kosong.");
+            return;
+        }
         setErrorMessage("");
-        const selectedPaymentMethod = paymentMethods.find((method) => String(method.id) === String(paymentMethodId));
-        const paymentMethodName = selectedPaymentMethod?.name || "Tunai";
-        const isCash = !paymentMethodId || /tunai|cash/i.test(paymentMethodName);
-        const paidValue = parseIdNumber(paidAmount);
+        setPaymentModalOpen(true);
+    };
 
-        if (!paidAmount.trim()) {
-            setErrorMessage("Uang Diterima (F9) wajib diisi sebelum memproses penjualan.");
-            paidRef.current?.focus();
-            return;
-        }
+    // Dipanggil PaymentModal saat Enter: simpan penjualan lalu langsung buka nota untuk dicetak otomatis.
+    // Mengembalikan Promise; bila ditolak, pesan errornya tampil di pop up pembayaran.
+    const submitSale = ({ paidValue, methodId, methodName, reference }) => {
+        if (submitLockRef.current) return Promise.reject(new Error("Transaksi sedang diproses."));
 
-        if (paidValue < grandTotal) {
-            setErrorMessage("Uang Diterima (F9) kurang dari Grand Total.");
-            paidRef.current?.focus();
-            return;
-        }
-
-        if (!isCash && !paymentReference.trim()) {
-            setErrorMessage("Nomor Referensi wajib diisi untuk metode pembayaran ini.");
-            paymentReferenceRef.current?.focus();
-            return;
-        }
+        const isCash = !methodId || /tunai|cash/i.test(methodName || "Tunai");
 
         submitLockRef.current = true;
         setIsSubmitting(true);
-        axios.post("/penjualan", {
+        return axios.post("/penjualan", {
             outlet_id: outlet.id,
             customer_id: customerId || null,
             paid_amount: paidValue,
-            payment_method_id: paymentMethodId || null,
-            payment_method_name: paymentMethodName,
-            payment_reference: isCash ? null : paymentReference.trim() || null,
+            payment_method_id: methodId || null,
+            payment_method_name: methodName || "Tunai",
+            payment_reference: SHOW_PAYMENT_REFERENCE && !isCash ? reference || null : null,
             voucher_codes: appliedVouchers.map((voucher) => voucher.code),
             promotion_codes: appliedPromotions.map((promotion) => promotion.code),
         }).then((response) => {
             window.localStorage.setItem("last-pos-sale", response.data.order.id);
-            submitLockRef.current = false;
-            setIsSubmitting(false);
-            const completedSale = {
+            const sale = {
                 code: response.data.order.code,
                 print: response.data.print,
             };
-            setCompletedSale(completedSale);
-            Swal.fire({
-                icon: "success",
-                title: "Penjualan tersimpan",
-                text: `Transaksi ${completedSale.code} berhasil disimpan. Pilih tindakan berikutnya.`,
-                showCancelButton: true,
-                confirmButtonText: "Cetak",
-                cancelButtonText: "Close",
-                allowOutsideClick: false,
-                allowEscapeKey: false,
-                reverseButtons: true,
-            }).then((result) => {
-                resetCheckoutState();
-                if (result.isConfirmed) {
-                    printCompletedSale(completedSale.print);
-                } else {
-                    window.location.reload();
-                }
-            });
-        }).catch((error) => {
+            setCompletedSale(sale);
+            // Kunci tetap aktif: halaman segera berpindah ke nota, jadi tidak boleh ada submit kedua.
+            if (sale.print) {
+                printCompletedSale(sale.print);
+            } else {
+                window.location.reload();
+            }
+        }, (error) => {
             submitLockRef.current = false;
             setIsSubmitting(false);
             const errors = error.response?.data?.errors;
-            setErrorMessage(
+            throw new Error(
                 (errors && Object.values(errors).flat().join(" "))
                 || error.response?.data?.message
                 || "Checkout gagal."
@@ -491,6 +509,8 @@ const Cart = () => {
 
     useEffect(() => {
         const shortcut = (event) => {
+            // Saat pop up pembayaran / reprint terbuka, tombol ditangani pop up itu sendiri.
+            if (paymentModalOpen || reprintModalOpen) return;
             const typing = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName);
             if (event.key === "F3") { event.preventDefault(); barcodeRef.current?.focus(); }
             if (event.key === "F2") {
@@ -499,13 +519,19 @@ const Cart = () => {
                 loadProducts(search, true);
                 window.setTimeout(() => searchRef.current?.focus(), 0);
             }
-            if (event.key === "F4") { event.preventDefault(); customerRef.current?.focus(); }
+            if (event.key === "F1") { event.preventDefault(); customerRef.current?.focus(); }
+            if (event.key === "F4") {
+                // Reprint: pop up cari nomor penjualan (nota dicetak dengan tulisan REPRINT).
+                event.preventDefault();
+                setProductModalOpen(false);
+                setReprintModalOpen(true);
+            }
+            if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); openPaymentModal(); return; }
             if (event.key === "F5") { event.preventDefault(); cartTableRef.current?.focusFirstRow(); }
             if (event.key === "F6") { event.preventDefault(); promotionTableRef.current?.open(); }
             if (event.key === "F7") { event.preventDefault(); paymentMethodRef.current?.focus(); }
             if (event.key === "F8") { event.preventDefault(); voucherRef.current?.focus(); }
-            if (event.key === "F9") { event.preventDefault(); paidRef.current?.focus(); }
-            if (event.key === "F10") { event.preventDefault(); if (!completedSale && cart.length) handleSubmit(); }
+            if (event.key === "F10") { event.preventDefault(); openPaymentModal(); }
             if (event.ctrlKey && event.key.toLowerCase() === "h") { event.preventDefault(); holdTransaction(); }
             if (event.ctrlKey && event.key.toLowerCase() === "l") { event.preventDefault(); recallTransaction(); }
             if (event.ctrlKey && event.key.toLowerCase() === "p") {
@@ -532,7 +558,7 @@ const Cart = () => {
         };
         window.addEventListener("keydown", shortcut);
         return () => window.removeEventListener("keydown", shortcut);
-    }, [cart, paidAmount, grandTotal, appliedVouchers, appliedPromotions, selectedCartProductId, paymentReference, paymentMethodId, isSubmitting, completedSale, search]);
+    }, [cart, paidAmount, grandTotal, appliedVouchers, appliedPromotions, selectedCartProductId, paymentReference, paymentMethodId, isSubmitting, completedSale, search, paymentModalOpen, reprintModalOpen]);
 
     return (
         <div className="row pos-cashier-layout">
@@ -552,12 +578,34 @@ const Cart = () => {
                 }}
                 onClose={() => setProductModalOpen(false)}
             />
+            <ReprintModal
+                open={reprintModalOpen}
+                outletId={outlet.id}
+                onClose={() => {
+                    setReprintModalOpen(false);
+                    window.setTimeout(() => barcodeRef.current?.focus(), 0);
+                }}
+            />
+            <PaymentModal
+                open={paymentModalOpen}
+                grandTotal={grandTotal}
+                paymentMethods={paymentMethods}
+                initialMethodId={paymentMethodId}
+                initialReference={paymentReference}
+                initialPaid={paidAmount}
+                onConfirm={submitSale}
+                onClose={() => {
+                    setPaymentModalOpen(false);
+                    window.setTimeout(() => barcodeRef.current?.focus(), 0);
+                }}
+            />
             <div className="col-md-12 pos-cashier-column">
                 <Barcodes
                     barcode={barcode}
                     handleScanBarcode={handleScanBarcode}
                     handleOnChangeBarcode={(event) => setBarcode(event.target.value)}
                     inputRef={barcodeRef}
+                    notice={scanNotice}
                 />
                 <div className="pos-cashier-details">
                     <CartTable
@@ -567,7 +615,6 @@ const Cart = () => {
                         promotionTotal={getPromotionTotal()}
                         voucherBreakdown={voucherBreakdown}
                         voucherTotal={voucherTotal}
-                        roundingAmount={roundingAmount}
                         grandTotal={grandTotal}
                         customers={customers}
                         customerId={customerId}
@@ -582,7 +629,6 @@ const Cart = () => {
                         setPaymentReference={setPaymentReference}
                         paymentMethodInputRef={paymentMethodRef}
                         paymentReferenceInputRef={paymentReferenceRef}
-                        paidInputRef={paidRef}
                         voucherInputRef={voucherRef}
                         outletId={outlet.id}
                         appliedVouchers={appliedVouchers}
@@ -614,7 +660,7 @@ const Cart = () => {
                         }}
                         handleClickDelete={deleteCartItem}
                         handleEmptyCart={emptyCart}
-                        handleSubmit={handleSubmit}
+                        handleSubmit={openPaymentModal}
                         isSubmitting={isSubmitting}
                         errorMessage={errorMessage}
                         selectedCartProductId={selectedCartProductId}

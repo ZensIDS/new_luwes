@@ -37,7 +37,7 @@
                                 <input type="text" id="daterange" class="form-control" style="min-width:230px" readonly>
                             </div>
                         </div>
-                        <p class="help-block" style="margin:8px 0 0">Default menampilkan penjualan hari ini. Ubah rentang tanggal untuk melihat data sebelumnya.</p>
+                        {{-- <p class="pj-hint">Default menampilkan penjualan hari ini. Ubah rentang tanggal untuk melihat data sebelumnya. Klik <strong>Detail</strong> pada baris untuk melihat rincian barang. Tekan <kbd>F4</kbd> untuk Re-Print nota penjualan teratas.</p> --}}
                     </div>
                     <div class="box-body table-responsive text-nowrap">
                         <table id="penjualan-table" class="table table-bordered table-striped" style="width:100%">
@@ -131,6 +131,17 @@ $(function () {
     });
 
     $('#kasir_id').on('change', function () { table.ajax.reload(); });
+
+    // Shortcut F4 = Re-Print nota pada baris teratas tabel (penjualan terbaru; ikut hasil filter/pencarian).
+    $(document).on('keydown', function (e) {
+        if (e.key !== 'F4' || e.repeat || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+        e.preventDefault();
+        if ($('.swal2-container, .modal.in').length) return; // jangan ganggu dialog yang sedang terbuka
+        var $btn = $('#penjualan-table tbody tr a.btn-reprint').first();
+        if ($btn.length) {
+            window.location.href = $btn.attr('href');
+        }
+    });
 });
 </script>
 @endsection

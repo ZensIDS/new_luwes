@@ -9,6 +9,27 @@ class Voucher extends Model
 {
     use SoftDeletes;
 
+    /**
+     * Awalan wajib kode voucher. Kasir memakainya untuk membedakan scan voucher dari scan produk,
+     * dan pencarian "VCRL" di daftar voucher langsung menampilkan semua voucher.
+     */
+    public const CODE_PREFIX = 'VCRL';
+
+    /**
+     * Pastikan kode diawali VCRL. Kode lama berawalan "VCR-" diganti jadi "VCRL-".
+     */
+    public static function withCodePrefix(string $code): string
+    {
+        $code = strtoupper(trim($code));
+        if ($code === '') {
+            return '';
+        }
+
+        $code = preg_replace('/^VCR-/', '', $code);
+
+        return str_starts_with($code, self::CODE_PREFIX) ? $code : self::CODE_PREFIX.'-'.$code;
+    }
+
     protected $fillable = [
         'name',
         'code',

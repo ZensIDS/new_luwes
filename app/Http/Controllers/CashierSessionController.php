@@ -107,13 +107,14 @@ class CashierSessionController extends Controller
         $data = $request->validate([
             'type' => ['required', 'in:bon,check'],
             'amount' => ['required', 'numeric', $request->input('type') === 'bon' ? 'gt:0' : 'min:0'],
-            'note' => ['required', 'string', 'max:1000'],
+            // Catatan wajib hanya untuk cek drawer; BON cukup nominal.
+            'note' => [$request->input('type') === 'bon' ? 'nullable' : 'required', 'string', 'max:1000'],
         ]);
 
         $summary = $cashierSession->summary();
         $isCheck = $data['type'] === 'check';
 
-        CashierDrawerEntry::create([
+        $entry = CashierDrawerEntry::create([
             'cashier_session_id' => $cashierSession->id,
             'outlet_id' => $cashierSession->outlet_id,
             'cashier_id' => $request->user()->getAuthIdentifier(),
@@ -121,11 +122,16 @@ class CashierSessionController extends Controller
             'amount' => $data['amount'],
             'expected_cash' => $isCheck ? $summary['expected_cash'] : null,
             'difference' => $isCheck ? ((float) $data['amount'] - $summary['expected_cash']) : null,
-            'note' => $data['note'],
+            'note' => $data['note'] ?? null,
             'recorded_at' => now(),
         ]);
 
-        return redirect()->route('outlet.show', $cashierSession->outlet_id)
+        // BON langsung dicetak otomatis (QZ Tray); cek drawer tidak dicetak.
+        $redirect = $isCheck
+            ? redirect()->route('outlet.show', $cashierSession->outlet_id)
+            : redirect()->route('cashier.print-bon', ['entry' => $entry->id, 'auto' => 1]);
+
+        return $redirect
             ->with('toast_success', $isCheck ? 'Cek cash drawer berhasil dicatat.' : 'BON / uang keluar berhasil dicatat.');
     }
 
@@ -140,12 +146,8 @@ class CashierSessionController extends Controller
             'closing_note' => ['nullable', 'string', 'max:1000'],
         ]);
 
-        if ((float) $data['carry_over_cash'] > (float) $data['closing_cash']) {
-            return redirect()->back()
-                ->withInput()
-                ->with('toast_error', 'Saldo yang disisakan untuk besok tidak boleh lebih besar dari uang fisik saat tutup.');
-        }
-
+        // closing_cash = uang fisik HASIL PENJUALAN (tunai + kas masuk - BON), dihitung terpisah dari
+        // carry_over_cash (saldo yang disisakan untuk besok). Keduanya tidak saling mengurangi.
         $closingCash = (float) $data['closing_cash'];
 
         DB::transaction(function () use ($cashierSession, $data, $closingCash) {
@@ -163,7 +165,8 @@ class CashierSessionController extends Controller
                 'cash_sales' => $summary['cash_sales'],
                 'cash_in' => $summary['cash_in'],
                 'cash_out' => $summary['cash_out'],
-                'cash_removed' => $closingCash - (float) $data['carry_over_cash'],
+                // Seluruh uang hasil penjualan dibawa keluar (setoran); saldo besok tetap di laci.
+                'cash_removed' => $closingCash,
                 'carry_over_cash' => $data['carry_over_cash'],
                 'discrepancy' => $closingCash - $summary['expected_cash'],
                 'closing_note' => $data['closing_note'] ?? null,
@@ -171,7 +174,8 @@ class CashierSessionController extends Controller
             ]);
         });
 
-        return redirect()->route('penjualan.index')
+        // Setelah tutup kasir, langsung cetak ringkasan (auto), lalu kembali ke halaman penjualan.
+        return redirect()->route('cashier.print-close', ['cashierSession' => $cashierSession->id, 'auto' => 1])
             ->with('toast_success', 'Kasir ditutup. Ringkasan cash drawer tersimpan di history kasir.');
     }
 
@@ -207,7 +211,10 @@ class CashierSessionController extends Controller
             ->limit(100)
             ->get();
 
-        return view('cashier.history', compact('sessions', 'activities'));
+        // Rincian per metode bayar + voucher untuk semua sesi (2 query, bukan per baris).
+        $breakdowns = CashierSession::breakdownFor($sessions->pluck('id')->all());
+
+        return view('cashier.history', compact('sessions', 'activities', 'breakdowns'));
     }
 
     private function ensureOperationAccess(CashierSession $cashierSession): void

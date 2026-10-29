@@ -1,4 +1,4 @@
-import React, { forwardRef, useImperativeHandle, useRef } from "react";
+import React, { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { formatRupiah } from "../utils";
 const CartTableBody = forwardRef(({
     cart,
@@ -10,6 +10,32 @@ const CartTableBody = forwardRef(({
     setSelectedCartProductId,
 }, ref) => {
     const rowRefs = useRef([]);
+    // Qty yang sedang diketik disimpan sementara (draft) dan baru dikirim saat Enter / keluar dari kolom,
+    // supaya mengetik angka lebih dari satu digit tidak "balik" ke nilai lama di tiap ketikan.
+    const [qtyDraft, setQtyDraft] = useState({});
+    const skipBlurCommit = useRef(false);
+    const altAlone = useRef(false);
+    const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent || "");
+
+    const focusQty = (row) => {
+        const input = row?.querySelector("input.qty");
+        if (!input) return;
+        input.focus();
+        input.select();
+    };
+
+    const commitQty = (item, rawValue) => {
+        const qty = Number.parseInt(rawValue, 10);
+        if (Number.isInteger(qty) && qty >= 1 && qty !== Number(item.pivot.qty)) {
+            handleChangeQty(item.id, qty);
+        }
+    };
+
+    const clearDraft = (itemId) => setQtyDraft((current) => {
+        const next = { ...current };
+        delete next[itemId];
+        return next;
+    });
 
     const focusRow = (index) => {
         if (!cart.length) return;
@@ -25,6 +51,15 @@ const CartTableBody = forwardRef(({
 
     const handleRowKeyDown = (event, index) => {
         const rowIsTarget = event.target === event.currentTarget;
+
+        // Option (Mac) ditekan sendirian = ubah qty; bila ditekan bersama tombol lain (mis. Option+panah) dibatalkan.
+        altAlone.current = event.key === "Alt" && !event.repeat;
+
+        if (rowIsTarget && event.key === "Insert") {
+            event.preventDefault();
+            focusQty(event.currentTarget);
+            return;
+        }
         const moveWithTab = event.key === "Tab" && rowIsTarget;
         const moveWithArrow = event.key === "ArrowDown" || event.key === "ArrowUp";
         const moveWithAltArrow = event.altKey && moveWithArrow;
@@ -47,8 +82,16 @@ const CartTableBody = forwardRef(({
 
         if (rowIsTarget && event.key === "Enter") {
             event.preventDefault();
-            event.currentTarget.querySelector("input.qty")?.focus();
+            focusQty(event.currentTarget);
         }
+    };
+
+    const handleRowKeyUp = (event) => {
+        if (isMac && event.key === "Alt" && altAlone.current && event.target === event.currentTarget) {
+            event.preventDefault();
+            focusQty(event.currentTarget);
+        }
+        altAlone.current = false;
     };
 
     useImperativeHandle(ref, () => ({
@@ -66,7 +109,8 @@ const CartTableBody = forwardRef(({
                     onClick={() => setSelectedCartProductId(c.id)}
                     onFocus={() => setSelectedCartProductId(c.id)}
                     onKeyDown={(event) => handleRowKeyDown(event, index)}
-                    title="Tab/Shift+Tab atau ↑/↓ untuk berpindah item; Enter untuk edit qty"
+                    onKeyUp={handleRowKeyUp}
+                    title="Tab/Shift+Tab atau ↑/↓ untuk berpindah item; Enter / Insert / Option untuk edit qty"
                 >
                     <td>
                         <span>{c.name}</span>
@@ -111,10 +155,32 @@ const CartTableBody = forwardRef(({
                             className="form-control form-control-sm qty text-center"
                             min="1"
                             style={{ maxWidth: "90px", minWidth: "78px", height: "40px", fontSize: "18px", fontWeight: 600 }}
-                            value={c.pivot.qty}
-                            onChange={(event) =>
-                                handleChangeQty(c.id, event.target.value)
-                            }
+                            value={qtyDraft[c.id] ?? c.pivot.qty}
+                            onFocus={(event) => event.target.select()}
+                            onChange={(event) => {
+                                const value = event.target.value;
+                                setQtyDraft((current) => ({ ...current, [c.id]: value }));
+                            }}
+                            onKeyDown={(event) => {
+                                if (event.key !== "Enter" && event.key !== "Escape") return;
+                                // Enter = simpan qty, Escape = batal; keduanya mengembalikan fokus ke barisnya
+                                // supaya bisa lanjut memilih item lain dengan panah.
+                                event.preventDefault();
+                                event.stopPropagation();
+                                if (event.key === "Enter") commitQty(c, event.target.value);
+                                skipBlurCommit.current = true;
+                                clearDraft(c.id);
+                                const row = event.target.closest("tr");
+                                row?.focus();
+                                skipBlurCommit.current = false;
+                            }}
+                            onBlur={(event) => {
+                                if (skipBlurCommit.current) return;
+                                if (qtyDraft[c.id] !== undefined) {
+                                    commitQty(c, event.target.value);
+                                    clearDraft(c.id);
+                                }
+                            }}
                         />
                     </td>
                     <td>{formatRupiah(c.cashier_unit_price ?? c.harga_jual)}</td>
