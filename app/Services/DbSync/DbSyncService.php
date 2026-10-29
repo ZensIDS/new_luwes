@@ -277,7 +277,31 @@ class DbSyncService
 
         $snapshot = $row ? json_decode((string) $row->snapshot, true) : null;
 
-        return $snapshot ? $snapshot + ['detected_at' => $row->detected_at] : null;
+        return $snapshot ? $snapshot + ['detected_at' => $row->detected_at] : $this->hostingRow($table, $id);
+    }
+
+    /** Tanpa salinan konflik: tampilkan data baris di hosting saja (data lokal tidak terjangkau dari hosting). */
+    private function hostingRow(string $table, int|string $id): ?array
+    {
+        $row = DB::table($table)->where('id', $id)->first();
+
+        if (! $row) {
+            return null;
+        }
+
+        $server = array_map(fn ($v) => is_string($v) ? mb_strimwidth($v, 0, 2000, '…') : $v, (array) $row);
+
+        return [
+            'table' => $table,
+            'id' => $id,
+            'local' => null,
+            'local_unknown' => true,
+            'server' => $server,
+            'base' => null,
+            'states' => array_fill_keys(array_keys($server), 'unknown'),
+            'newest' => 'server',
+            'detected_at' => null,
+        ];
     }
 
     public function tableSynchronizer(string $table): TableSynchronizer
@@ -319,23 +343,29 @@ class DbSyncService
                 'chunk_size' => (int) config('dbsync.chunk_size', 1000),
                 'batch_size' => (int) config('dbsync.batch_size', 200),
                 'delete_guard' => config('dbsync.delete_guard'),
-                'conflict' => config('dbsync.conflict', 'skip'),
+                'conflict' => config('dbsync.conflict', 'newest'),
+                'append_only' => in_array($table, config('dbsync.append_only', []), true),
                 'force' => $force,
                 'dry_run' => $dryRun,
             ],
         );
     }
 
-    /** Koneksi lokal khusus sinkron: affected rows = baris cocok, tanpa cek foreign key. */
+    /**
+     * Koneksi lokal khusus sinkron: affected rows = baris cocok, tanpa cek foreign key.
+     * Setelan auto_increment_increment/offset koneksi aplikasi tetap dipakai, supaya id baru
+     * yang dibuat sinkron (lihat TableSynchronizer::relocate) tidak bentrok dengan hosting.
+     */
     public function localConnection(): Connection
     {
         $name = self::LOCAL_CONNECTION;
 
         if (! config("database.connections.$name")) {
             $config = config('database.connections.'.config('dbsync.local_connection'));
+            $init = $config['options'][PDO::MYSQL_ATTR_INIT_COMMAND] ?? null;
             $config['options'] = array_replace($config['options'] ?? [], [
                 PDO::MYSQL_ATTR_FOUND_ROWS => true,
-                PDO::MYSQL_ATTR_INIT_COMMAND => 'SET SESSION foreign_key_checks=0',
+                PDO::MYSQL_ATTR_INIT_COMMAND => $init ? $init.', foreign_key_checks=0' : 'SET SESSION foreign_key_checks=0',
             ]);
             config(["database.connections.$name" => $config]);
         }

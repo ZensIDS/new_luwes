@@ -121,11 +121,11 @@ class RowMerger
         return $states;
     }
 
-    /** 'local' atau 'server': baris dengan updated_at terbaru. */
+    /** 'local' atau 'server': baris dengan updated_at (atau created_at) terbaru. */
     public function newerWins(array $local, array $server): string
     {
-        $l = (string) ($local['updated_at'] ?? '');
-        $s = (string) ($server['updated_at'] ?? '');
+        $l = (string) ($local['updated_at'] ?? $local['created_at'] ?? '');
+        $s = (string) ($server['updated_at'] ?? $server['created_at'] ?? '');
 
         if ($l === $s) {
             return $this->prefer === 'server' ? 'server' : 'local';

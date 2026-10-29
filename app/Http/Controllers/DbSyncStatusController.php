@@ -138,9 +138,9 @@ class DbSyncStatusController extends Controller
             $row = rescue(fn () => $sync->storedConflict($data['table'], $data['id']), null, false);
 
             return $row
-                ? response()->json($row + ['stored' => true])
-                : response()->json(['message' => 'Data perbedaan baris ini tidak tersedia di hosting (konflik sudah diselesaikan, '
-                    .'atau server lokal belum sinkron ulang). Buka dashboard di server lokal untuk melihat & menyelesaikannya.'], 404);
+                ? response()->json($row + ['stored' => empty($row['local_unknown'])])
+                : response()->json(['message' => "Baris {$data['table']} #{$data['id']} tidak ada di hosting. "
+                    .'Server lokal akan menyamakannya otomatis pada sinkron berikutnya.'], 404);
         }
 
         try {

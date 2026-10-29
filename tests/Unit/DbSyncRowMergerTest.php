@@ -138,4 +138,13 @@ class DbSyncRowMergerTest extends TestCase
 
         $this->assertSame(['name'], $this->merger()->conflicts($local, $server, null));
     }
+
+    public function test_newest_uses_created_at_when_table_has_no_updated_at()
+    {
+        $local = ['id' => 3, 'note' => 'L', 'created_at' => '2026-10-20 10:00:00'];
+        $server = ['id' => 3, 'note' => 'S', 'created_at' => '2026-10-20 10:05:00'];
+
+        $this->assertSame('server', $this->merger()->newerWins($local, $server));
+        $this->assertSame('local', $this->merger()->newerWins($local, ['created_at' => $local['created_at']] + $server));
+    }
 }

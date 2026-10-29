@@ -71,16 +71,25 @@ return [
     ],
 
     /*
-    | Kolom lain yang diubah di DUA sisi ke nilai berbeda = KONFLIK.
+    | Kolom lain yang diubah di DUA sisi ke nilai berbeda:
+    |  'newest' (default): menang data yang TERAKHIR diubah (updated_at, atau created_at bila tidak ada).
+    |             Kolom yang hanya diubah di satu sisi tetap diambil dari sisi itu, jadi perubahan
+    |             lokal & hosting digabung berurutan. Bila waktunya sama persis, menang sisi 'prefer'.
     |  'skip'   : baris tidak disinkron (lokal & hosting tetap dengan datanya masing-masing),
     |             muncul peringatan di dashboard, diselesaikan dengan
     |             php artisan dbsync:resolve {tabel} {id} --keep=local|server|newest
-    |  'newest' : otomatis menang baris dengan updated_at terbaru.
     */
-    'conflict' => env('DB_SYNC_CONFLICT', 'skip'),
+    'conflict' => env('DB_SYNC_CONFLICT', 'newest'),
 
-    // Pada mode 'newest', bila updated_at sama persis, menang sisi ini ('local' atau 'server').
+    // Bila updated_at sama persis, menang sisi ini ('local' atau 'server'). Server lokal = sumber utama.
     'prefer' => env('DB_SYNC_PREFER', 'local'),
+
+    /*
+    | Tabel log (hanya ditambah, tidak pernah diubah). Bila id yang sama berisi baris berbeda di lokal
+    | & hosting (id bentrok, mis. sebelum DB_AUTO_INCREMENT_OFFSET diset), KEDUA baris disimpan:
+    | baris hosting dipindah ke id baru, bukan ditimpa.
+    */
+    'append_only' => ['activity_log', 'stock_movements'],
 
     /*
     | Pengaman: bila satu kali sinkron akan menghapus lebih dari

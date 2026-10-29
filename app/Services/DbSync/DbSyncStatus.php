@@ -25,9 +25,18 @@ class DbSyncStatus
 
         $staleAfter = max(10, 5 * (int) config('dbsync.interval', 2));
         $stale = ! $lastSuccess || Carbon::parse($lastSuccess)->lt(now()->subMinutes($staleAfter));
+        $autoIncrement = $this->autoIncrement();
+        $wantOffset = $isLocalNode ? 1 : 2;
+        $badAutoIncrement = ($isLocalNode || $lastRun) && $autoIncrement
+            && ($autoIncrement['increment'] < 2 || $autoIncrement['offset'] !== $wantOffset);
 
         [$health, $message] = match (true) {
             $connection && ! $connection['ok'] => ['error', 'Tidak dapat terhubung ke database hosting.'],
+            $badAutoIncrement => ['error', sprintf(
+                'Set DB_AUTO_INCREMENT_INCREMENT=2 dan DB_AUTO_INCREMENT_OFFSET=%d di .env %s (sekarang %d/%d), '
+                .'lalu php artisan config:clear; tanpa itu id baru di lokal & hosting bisa bentrok.',
+                $wantOffset, $isLocalNode ? 'server lokal' : 'hosting', $autoIncrement['increment'], $autoIncrement['offset']
+            )],
             ! $isLocalNode && ! $lastRun && ! $configured => ['unconfigured', 'Belum ada server lokal yang tersinkron ke database ini.'],
             $isLocalNode && ! $configured => ['error', 'DB_SERVER_* belum diisi di .env server lokal.'],
             $lastRun && $lastRun['status'] === 'failed' => ['error', 'Sinkron terakhir gagal.'],
@@ -57,6 +66,16 @@ class DbSyncStatus
             'last_success_human' => $lastSuccess ? Carbon::parse($lastSuccess)->locale('id')->diffForHumans() : null,
             'checked_at' => now()->toIso8601String(),
         ];
+    }
+
+    /** @return array{increment:int, offset:int}|null setelan id koneksi aplikasi ini (lihat config/database.php) */
+    private function autoIncrement(): ?array
+    {
+        return rescue(function () {
+            $row = DB::selectOne('SELECT @@session.auto_increment_increment AS i, @@session.auto_increment_offset AS o');
+
+            return ['increment' => (int) $row->i, 'offset' => (int) $row->o];
+        }, null, false);
     }
 
     public function checkConnection(): array

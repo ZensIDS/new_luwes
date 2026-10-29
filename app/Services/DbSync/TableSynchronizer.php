@@ -3,6 +3,7 @@
 namespace App\Services\DbSync;
 
 use Illuminate\Database\Connection;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -47,7 +48,7 @@ class TableSynchronizer
     /**
      * @param  string[]  $columns
      * @param  string[]  $generated  kolom generated (dihitung MySQL, tidak boleh ditulis)
-     * @param  array{chunk_size:int,batch_size:int,delete_guard:array,force:bool,dry_run:bool,conflict:string}  $options
+     * @param  array{chunk_size:int,batch_size:int,delete_guard:array,force:bool,dry_run:bool,conflict:string,append_only:bool}  $options
      */
     public function __construct(
         private Connection $local,
@@ -356,6 +357,13 @@ class TableSynchronizer
                     throw new SyncDeferred;
                 }
 
+                if ($action === 'resolve' && $this->options['append_only'] && $this->intKey
+                    && $l && $s && $this->collides($this->strip($l), $this->strip($s))) {
+                    $this->relocate($id, $l, $s);
+
+                    return;
+                }
+
                 [$toLocal, $toServer] = $this->resolve($id, $action, $l, $s);
 
                 $newServerHash = $toServer === false
@@ -435,14 +443,9 @@ class TableSynchronizer
             throw new SyncDeferred;
         }
 
-        // created_at beda DAN ada kolom data lain yang beda -> kemungkinan dua baris berbeda memakai id sama.
-        // Bila yang beda hanya created_at/updated_at, itu baris yang sama: menang yang terbaru.
-        $dataDiffers = ! RowMerger::sameRow(
-            array_diff_key($local, array_flip(RowMerger::TIMESTAMPS)),
-            array_diff_key($server, array_flip(RowMerger::TIMESTAMPS))
-        );
+        $collides = $this->collides($local, $server);
 
-        if ($dataDiffers && array_key_exists('created_at', $local) && ! RowMerger::same($local['created_at'], $server['created_at'] ?? null)) {
+        if ($collides && $this->options['conflict'] === 'skip') {
             throw new SyncConflict(
                 'data berbeda di lokal & hosting (created_at berbeda) — kemungkinan id bentrok. '
                 .'Pastikan DB_AUTO_INCREMENT_OFFSET lokal & hosting berbeda.'
@@ -451,9 +454,64 @@ class TableSynchronizer
 
         $this->guardConflict($local, $server, null);
 
-        return $this->merger->newerWins($local, $server) === 'local'
+        $winner = $this->merger->newerWins($local, $server);
+
+        if ($collides && count($this->stats['warnings']) < 20) {
+            $this->stats['warnings'][] = sprintf(
+                'id %s berisi data berbeda di lokal & hosting (created_at berbeda); dipakai versi %s (terbaru).',
+                $id, $winner === 'local' ? 'lokal' : 'hosting'
+            );
+        }
+
+        return $winner === 'local'
             ? [false, $local]
             : [$server, false];
+    }
+
+    /**
+     * created_at beda DAN ada kolom data lain yang beda -> kemungkinan dua baris berbeda memakai id sama.
+     * Bila yang beda hanya created_at/updated_at, itu baris yang sama.
+     */
+    private function collides(array $local, array $server): bool
+    {
+        $dataDiffers = ! RowMerger::sameRow(
+            array_diff_key($local, array_flip(RowMerger::TIMESTAMPS)),
+            array_diff_key($server, array_flip(RowMerger::TIMESTAMPS))
+        );
+
+        return $dataDiffers
+            && array_key_exists('created_at', $local)
+            && ! RowMerger::same($local['created_at'], $server['created_at'] ?? null);
+    }
+
+    /**
+     * Tabel append-only (log) dengan id bentrok: simpan kedua baris. Id lama dipakai baris lokal,
+     * baris hosting dipindah ke id baru dari auto increment lokal (di dua sisi).
+     */
+    private function relocate(int|string $id, array $l, array $s): void
+    {
+        $newId = $this->local->table($this->table)->insertGetId(array_diff_key($this->strip($s), ['id' => true]));
+
+        if ($this->server->table($this->table)->where('id', $newId)->exists()) {
+            throw new RuntimeException("id bentrok, dan id baru $newId untuk baris hosting sudah dipakai di hosting.");
+        }
+
+        $serverHashes = $this->server->transaction(function () use ($id, $newId, $l, $s) {
+            $moved = $this->server->table($this->table)
+                ->where('id', $id)
+                ->whereRaw("{$this->hashExpr} = ?", [$s['__h']])
+                ->update(['id' => $newId]);
+
+            if ($moved === 0) {
+                throw new SyncDeferred;
+            }
+
+            $this->server->table($this->table)->insert($this->strip($l));
+
+            return array_column($this->fetchRows($this->server, [$id, $newId]), '__h', 'id');
+        });
+
+        $this->saveBase($this->fetchRows($this->local, [$id, $newId]), $serverHashes);
     }
 
     /** Mode 'skip' (default): kolom yang bentrok membuat baris dilewati dan dilaporkan sebagai konflik. */

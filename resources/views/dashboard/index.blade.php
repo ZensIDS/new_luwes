@@ -1049,8 +1049,9 @@
                 server: { cls: 'warning', label: 'label-warning', text: 'Hosting berubah' },
                 merged: { cls: 'success', label: 'label-success', text: 'Digabung' },
                 same: { cls: '', label: 'label-default', text: 'Sama' },
+                unknown: { cls: '', label: 'label-default', text: '—' },
             };
-            const STATE_ORDER = ['conflict', 'local', 'server', 'merged', 'same'];
+            const STATE_ORDER = ['conflict', 'local', 'server', 'merged', 'unknown', 'same'];
             let diff = null;
 
             const cell = (row, col) => {
@@ -1081,16 +1082,22 @@
                             const st = STATE[diff.states[c]] || STATE.same;
                             return '<tr class="' + st.cls + '"><td><code>' + esc(c) + '</code></td>'
                                 + '<td>' + (diff.base ? cell(diff.base, c) : '<i class="text-muted">belum pernah sinkron</i>') + '</td>'
-                                + '<td>' + cell(diff.local, c) + '</td><td>' + cell(diff.server, c) + '</td>'
+                                + '<td>' + (diff.local_unknown ? '<i class="text-muted">tidak terbaca dari hosting</i>' : cell(diff.local, c)) + '</td>'
+                                + '<td>' + cell(diff.server, c) + '</td>'
                                 + '<td><span class="label ' + st.label + '">' + st.text + '</span></td></tr>';
                         }).join('')
                         : '<tr><td colspan="5" class="text-center text-success">Data lokal & hosting sekarang sudah sama. Konflik akan hilang pada sinkron berikutnya.</td></tr>')
                     + '</tbody></table>'
-                    + '<p class="small text-muted" style="margin:8px 0 0">Versi terbaru (berdasarkan <code>updated_at</code>): <b>' + newest + '</b>.</p>'
+                    + (diff.local_unknown ? '' : '<p class="small text-muted" style="margin:8px 0 0">Versi terbaru (berdasarkan <code>updated_at</code>): <b>' + newest + '</b>.</p>')
                     + (diff.stored
                         ? '<p class="small text-warning" style="margin:4px 0 0"><i class="fa fa-info-circle"></i> Data diambil saat sinkron terakhir'
                             + (diff.detected_at ? ' (' + esc(diff.detected_at) + ')' : '')
-                            + '. Konflik hanya bisa diselesaikan dari dashboard server lokal.</p>'
+                            + '. Server lokal menyamakan baris ini otomatis (data terbaru menang) pada sinkron berikutnya;'
+                            + ' bila tetap muncul, selesaikan dari dashboard server lokal.</p>'
+                        : '')
+                    + (diff.local_unknown
+                        ? '<p class="small text-warning" style="margin:4px 0 0"><i class="fa fa-info-circle"></i> Ini data di hosting saja; data lokal'
+                            + ' tidak bisa dibaca dari hosting. Server lokal menyamakan baris ini otomatis (data terbaru menang) pada sinkron berikutnya.</p>'
                         : '')
                 );
             }

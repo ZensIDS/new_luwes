@@ -2,7 +2,7 @@
 
 Panduan ini menjelaskan cara memasang aplikasi Luwes di **1 PC server lokal (Debian) memakai Docker**, yang
 dipakai oleh **3 PC client** di jaringan toko/gudang, lalu menyinkronkan databasenya **otomatis dua arah**
-dengan aplikasi online di hosting: <https://newluwes.decaasoftwares.com/>.
+dengan aplikasi online di hosting: <https://luwespacitan.com/>.
 
 **Urutan pengerjaan:**
 
@@ -41,7 +41,7 @@ make up          # buat .env + tanya kredensial DB hosting + build + jalankan se
             INTERNET                                   JARINGAN LOKAL (LAN / WiFi toko)
  ┌──────────────────────────────┐                ┌───────────────────────────────────────────┐
  │ Hosting (Hostinger)          │                │  PC SERVER LOKAL (Debian + Docker)        │
- │ newluwes.decaasoftwares.com  │◄── sinkron ────│   ├─ app       : web Laravel (Apache+PHP) │
+ │ luwespacitan.com             │◄── sinkron ────│   ├─ app       : web Laravel (Apache+PHP) │
  │ MySQL hosting (Remote MySQL) │   tiap 2 menit │   ├─ scheduler : sinkron DB otomatis      │
  └──────────────────────────────┘   (dua arah)   │   └─ mysql     : database lokal           │
           ▲                                      └───────────────▲───────────────────────────┘
@@ -194,7 +194,7 @@ langkah 5, sinkron langsung berhasil.
 ### 4.1 Izinkan Remote MySQL
 
 1. Login panel **Niagahoster/Hostinger (hPanel)** memakai username panel (mis. `u1342798`).
-2. Buka **Websites** → `newluwes.decaasoftwares.com` → **Databases** → **Remote MySQL**.
+2. Buka **Websites** → `luwespacitan.com` → **Databases** → **Remote MySQL**.
 3. Cek IP publik internet toko dari PC server:
    ```bash
    curl -s ifconfig.me
@@ -232,7 +232,7 @@ DB_SERVER_HOST=
 Lalu, lewat SSH / Terminal hosting (pastikan kode hosting sudah versi terbaru):
 
 ```bash
-cd ~/domains/newluwes.decaasoftwares.com/public_html   # sesuaikan dengan folder aplikasi
+cd ~/domains/luwespacitan.com/public_html   # sesuaikan dengan folder aplikasi
 php artisan migrate --force          # membuat tabel db_sync_runs & db_sync_rows
 php artisan optimize:clear
 ```
@@ -345,7 +345,7 @@ Semua nilai sudah terisi oleh `make up`. Bila perlu mengubah, `nano .env` lalu *
 | `DB_AUTO_INCREMENT_INCREMENT` / `_OFFSET` | `2` / `1` | Server lokal = id ganjil (hosting = offset 2) |
 | `DB_SYNC_ENABLED` | `true` | Sinkron otomatis aktif |
 | `DB_SYNC_INTERVAL` | `2` | Menit antar sinkron |
-| `DB_SYNC_CONFLICT` | `skip` | `skip` = konflik dilewati + peringatan; `newest` = otomatis pakai data terbaru |
+| `DB_SYNC_CONFLICT` | `newest` | `newest` = data yang terakhir diubah menang (lokal menang bila waktunya sama); `skip` = konflik dilewati + peringatan |
 | `DB_SERVER_TIMEOUT` | `5` | (opsional) batas waktu koneksi ke hosting, detik |
 | `DB_SYNC_EXCLUDE_TABLES` | – | (opsional) tabel tambahan yang tidak disinkron, pisahkan koma |
 
@@ -408,7 +408,7 @@ sudo ufw status
 4. Buka browser (Chrome) di PC client, ketik: **`http://192.168.1.10`**.
 5. Login memakai akun yang sama seperti di hosting (data user ikut tersinkron dari hosting).
 6. Pastikan data (produk, stok, penjualan) sama dengan yang ada di
-   <https://newluwes.decaasoftwares.com/>. Itu tandanya data sudah berhasil diambil dari DB server hosting.
+   <https://luwespacitan.com/>. Itu tandanya data sudah berhasil diambil dari DB server hosting.
 7. Buat shortcut di desktop: klik kanan desktop → **New → Shortcut** → isi `http://192.168.1.10` → beri nama
    **Luwes Kasir**. Ulangi di ketiga PC client.
 
@@ -483,7 +483,25 @@ Dari terminal: `make sync`, `make sync-dry`, atau `make artisan cmd="dbsync:run 
 
 Konflik terjadi bila **kolom yang sama** pada **baris yang sama** diubah ke nilai berbeda di lokal dan di
 hosting di antara dua sinkron. Contoh: nama produk #4 diganti "A" di kasir offline dan "B" di hosting.
-Baris tersebut **tidak disinkron** (tidak ada data yang tertimpa), dan peringatan muncul di dashboard:
+
+**Default (`DB_SYNC_CONFLICT=newest`): diselesaikan otomatis berdasarkan waktu.** Server lokal adalah sumber
+utama dan hosting sebagai backup online, tetapi perubahan dari hosting tetap ikut masuk ke lokal:
+
+* Kolom yang hanya diubah di **satu sisi** diambil dari sisi itu, jadi perubahan lokal & hosting digabung.
+* Kolom yang diubah di **dua sisi** memakai nilai dari baris yang **terakhir diubah** (`updated_at`, atau
+  `created_at` bila tabel tidak punya `updated_at`). Bila waktunya sama persis, **lokal** yang menang
+  (`DB_SYNC_PREFER=local`).
+* Stok/saldo (`additive_columns`) dijumlahkan, nomor invoice (`max_columns`) diambil yang terbesar.
+* Baris dengan id sama di dua sisi tetapi isinya berbeda (id bentrok, biasanya terjadi sebelum
+  `DB_AUTO_INCREMENT_OFFSET` diset): untuk tabel log (`activity_log`, `stock_movements`) **kedua baris
+  disimpan** (baris hosting dipindah ke id baru). Untuk tabel lain dipakai versi terbaru dan muncul peringatan
+  di hasil sinkron.
+
+> Waktu "terbaru" diambil dari jam masing-masing server, jadi pastikan jam PC server lokal benar
+> (`timedatectl` → *System clock synchronized: yes*).
+
+**Mode manual (`DB_SYNC_CONFLICT=skip`):** baris konflik **tidak disinkron** (tidak ada data yang tertimpa),
+dan peringatan muncul di dashboard:
 
 ```
 products: KONFLIK id 4 dilewati (name: lokal "A" vs hosting "B").
@@ -520,8 +538,9 @@ make artisan cmd="dbsync:resolve products 4 --keep=local"    # pakai versi lokal
 make artisan cmd="dbsync:resolve products 4 --keep=newest"   # pakai yang terakhir diubah
 ```
 
-Bila ingin konflik **otomatis** diselesaikan dengan data terbaru (tanpa dilewati), ubah `.env` server lokal:
-`DB_SYNC_CONFLICT=newest`, lalu `make restart`.
+Dashboard **hosting** hanya bisa *melihat* perbedaan (database lokal tidak terjangkau dari hosting). Pada mode
+`newest` server lokal menyamakan baris itu otomatis pada sinkron berikutnya; pada mode `skip` selesaikan dari
+dashboard / terminal server lokal.
 
 ---
 
