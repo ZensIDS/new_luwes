@@ -130,12 +130,8 @@
             $payRaw[] = ['Ref.', (string) $penjualan->payment_reference, 0];
         }
         $rawReceipt = [
-            'store' => (string) ($penjualan->outlet?->name ?? 'LUWES'),
-            'header' => array_values(array_filter([
-                $penjualan->outlet?->alamat,
-                $penjualan->outlet?->desc,
-                $penjualan->outlet?->npwp ? 'NPWP : ' . $penjualan->outlet->npwp : null,
-            ])),
+            'store' => \App\Support\ReceiptHeader::STORE,
+            'header' => \App\Support\ReceiptHeader::LINES,
             'meta' => $metaRaw,
             'items' => $lines->map(fn ($l) => [
                 'name' => (string) ($l['item']->product?->name ?? 'Produk'),
@@ -184,7 +180,7 @@
         }
         body.heavy .small, body.heavy .tiny, body.heavy .meta, body.heavy .item-name, body.heavy .item-calc,
         body.heavy .item-disc, body.heavy .footer-msg, body.heavy .printed-at { font-size: var(--fs); line-height: 12pt; letter-spacing: .05pt; }
-        body.heavy .store-name { font-size: calc(var(--fs) * 1.2); line-height: 14pt; letter-spacing: 0; }
+        body.heavy .store-name { font-size: var(--fs); line-height: 14pt; letter-spacing: 0; }
         body.heavy .summary .grand { font-size: var(--fs); line-height: 14pt; padding: 1pt 0; }
         body.heavy .item { line-height: 12pt; margin-bottom: 3pt; }
         body.heavy .item-name { max-height: 24pt; }
@@ -201,7 +197,7 @@
         .center { text-align: center; }
         .bold { font-weight: bold; }
         .store-logo { max-width: {{ $logoMaxWidth }}; max-height: 18mm; margin-bottom: 1mm; filter: grayscale(1) contrast(1.6); }
-        .store-name { font-size: {{ $titleFont }}; font-weight: bold; letter-spacing: .5px; word-break: break-word; }
+        .store-name { font-size: {{ $baseFont }}; font-weight: bold; letter-spacing: .5px; word-break: break-word; }
         .small { font-size: {{ $smallFont }}; }
         .tiny { font-size: {{ $tinyFont }}; line-height: 1.25; word-break: break-word; }
         .header-info { margin-top: 1mm; }
@@ -256,10 +252,10 @@
 
 <body class="{{ $heavy ? 'heavy' : '' }}">
     <div class="center">
-        <div class="store-name">{{ $penjualan->outlet?->name ?? 'LUWES' }}</div>
-        @if ($penjualan->outlet?->alamat)<div class="tiny header-info">{{ $penjualan->outlet->alamat }}</div>@endif
-        @if ($penjualan->outlet?->desc)<div class="tiny">{{ $penjualan->outlet->desc }}</div>@endif
-        @if ($penjualan->outlet?->npwp)<div class="tiny">NPWP : {{ $penjualan->outlet->npwp }}</div>@endif
+        <div class="store-name">{{ \App\Support\ReceiptHeader::STORE }}</div>
+        @foreach (\App\Support\ReceiptHeader::LINES as $headerLine)
+            <div class="tiny {{ $loop->first ? 'header-info' : '' }}">{{ $headerLine }}</div>
+        @endforeach
     </div>
 
     <div class="meta">
@@ -366,7 +362,7 @@
         (function () {
             var RAW = @json($rawReceipt);
             var KEY = 'receipt-raw-{{ $paper }}';
-            var def = { on: true, printer: '', cols: {{ $rawDefaultCols }}, cut: false, indent: 2, bold: false, pass: 3 };
+            var def = { on: true, printer: '', cols: {{ $rawDefaultCols }}, cut: false, indent: 2, bold: false, pass: 1 };
             var CERT_URL = @json(route('qz.certificate'));
             var SIGN_URL = @json(route('qz.sign'));
             var CSRF = @json(csrf_token());
@@ -417,7 +413,7 @@
                 function ctr(t) { t = clean(t); return rep(' ', Math.floor((c - t.length) / 2)) + t; }
                 function ctrWrap(t) { wrap(t, c).forEach(function (w) { line(ctr(w)); }); }
                 // Tebal: emphasized (ESC E) + double-strike (ESC G) = tiap titik ditembak dua kali, hasil jauh lebih gelap.
-                function strong() { out.push(ESC + 'E\x01' + ESC + 'G\x01'); }
+                function strong() { if (!o.bold) return; out.push(ESC + 'E\x01' + ESC + 'G\x01'); }
                 function normal() { out.push(ESC + 'E\x00' + ESC + 'G\x00'); if (o.bold) strong(); }
                 out.push(ESC + '@');
                 strong();
