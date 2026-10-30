@@ -9,6 +9,10 @@
     @php($activeShift = $cashierSession?->activeShifts?->first())
     <section class="content">
         <div class="pos-header">
+            <form action="{{ route('logout') }}" method="POST" class="pos-logout"@if ($cashierSession) onsubmit="return confirm('Logout dari akun? Sesi kasir tetap terbuka.')"@endif>
+                @csrf
+                <button type="submit" title="Logout" tabindex="-1"><i class="fa fa-power-off"></i></button>
+            </form>
             <div>
                 <strong>{{ $outlet->name }}</strong>
                 @if ($cashierSession)
@@ -351,6 +355,10 @@
         .pos-mode { background:#f4f6f9; }
         body.pos-mode.sidebar-collapse .content-wrapper, body.pos-mode.sidebar-mini.sidebar-collapse .content-wrapper { margin-left:0 !important; min-height:0 !important; height:100vh; overflow:hidden; background:#f4f6f9; }
         .pos-mode .content { height:100%; min-height:0 !important; padding:15px; overflow:hidden; background:#f4f6f9; display:flex; flex-direction:column; }
+        .pos-header { position:relative; padding-right:52px !important; }
+        .pos-logout { position:absolute; top:8px; right:10px; margin:0; }
+        .pos-logout button { width:30px; height:30px; padding:0; border:1px solid #d9534f; border-radius:50%; background:#fff; color:#d9534f; font-size:14px; line-height:28px; cursor:pointer; }
+        .pos-logout button:hover { background:#d9534f; color:#fff; }
         .pos-header { flex:0 0 auto; display:flex; justify-content:space-between; align-items:flex-start; gap:15px; min-height:46px; margin-bottom:12px; padding:10px 14px; background:#fff; border-left:4px solid #605ca8; box-shadow:0 1px 2px rgba(0,0,0,.08); font-size:16px; }
         .pos-header-actions { display:flex; justify-content:flex-end; align-items:center; gap:4px; flex-wrap:wrap; }
         .pos-header-actions .pos-shortcuts { margin-right:5px; }

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\CashierDrawerEntry;
 use App\Models\CashierSession;
 use App\Models\PaymentMethod;
+use App\Support\ReceiptHeader;
 use Illuminate\Http\Request;
 
 /**
@@ -160,12 +161,8 @@ class CashierSlipController extends Controller
             $footerLines = ['Terima kasih'];
         }
 
-        $slip['store'] = (string) ($outlet?->name ?? 'LUWES');
-        $slip['header'] = array_values(array_filter([
-            $outlet?->alamat,
-            $outlet?->desc,
-            $outlet?->npwp ? 'NPWP : ' . $outlet->npwp : null,
-        ]));
+        $slip['store'] = ReceiptHeader::STORE;
+        $slip['header'] = ReceiptHeader::LINES;
         $slip['footerLines'] = $footerLines;
         $slip['footerHtml'] = $footerHtml;
         $slip['printedAt'] = now()->format('d/m/Y H:i:s');

@@ -54,13 +54,13 @@
         body { width: var(--print-w); margin: 0 auto; padding: 2mm 0 8mm; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; font-size: {{ $baseFont }}; color: #000; line-height: 1.3; }
         body.heavy { font-family: Consolas, 'Courier New', 'DejaVu Sans Mono', monospace; font-weight: bold; font-size: var(--fs); letter-spacing: .05pt; line-height: 12pt; font-kerning: none; font-variant-ligatures: none; padding: 6pt 0 24pt; }
         body.heavy .small, body.heavy .tiny, body.heavy .meta, body.heavy .printed-at, body.heavy .footer-msg { font-size: var(--fs); line-height: 12pt; }
-        body.heavy .store-name { font-size: calc(var(--fs) * 1.2); line-height: 14pt; }
+        body.heavy .store-name { font-size: var(--fs); line-height: 14pt; }
         body.heavy .doc-title { font-size: var(--fs); line-height: 14pt; }
         body.heavy .rule-dash { border: 0; margin: 3pt 0; height: 12pt; line-height: 12pt; overflow: hidden; white-space: nowrap; }
         body.heavy .rule-dash::before { content: '------------------------------------------------------------------------------------------------'; }
         .center { text-align: center; }
         .bold { font-weight: bold; }
-        .store-name { font-size: {{ $titleFont }}; font-weight: bold; letter-spacing: .5px; word-break: break-word; }
+        .store-name { font-size: {{ $baseFont }}; font-weight: bold; letter-spacing: .5px; word-break: break-word; }
         .doc-title { font-size: {{ $baseFont }}; font-weight: bold; text-align: center; margin: 1mm 0; }
         .small { font-size: {{ $smallFont }}; }
         .tiny { font-size: {{ $tinyFont }}; line-height: 1.25; word-break: break-word; }
@@ -145,7 +145,7 @@
         (function () {
             var RAW = @json($slip);
             var KEY = 'receipt-raw-{{ $paper }}';
-            var def = { on: true, printer: '', cols: {{ $rawDefaultCols }}, cut: false, indent: 2, bold: false, pass: 3 };
+            var def = { on: true, printer: '', cols: {{ $rawDefaultCols }}, cut: false, indent: 2, bold: false, pass: 1 };
             var CERT_URL = @json(route('qz.certificate'));
             var SIGN_URL = @json(route('qz.sign'));
             var CSRF = @json(csrf_token());
@@ -192,7 +192,7 @@
                 }
                 function ctr(t) { t = clean(t); return rep(' ', Math.floor((c - t.length) / 2)) + t; }
                 function ctrWrap(t) { wrap(t, c).forEach(function (w) { line(ctr(w)); }); }
-                function strong() { out.push(ESC + 'E\x01' + ESC + 'G\x01'); }
+                function strong() { if (!o.bold) return; out.push(ESC + 'E\x01' + ESC + 'G\x01'); }
                 function normal() { out.push(ESC + 'E\x00' + ESC + 'G\x00'); if (o.bold) strong(); }
                 out.push(ESC + '@');
                 strong();
