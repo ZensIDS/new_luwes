@@ -136,6 +136,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     // Stok Gudang: staff-outlet hanya boleh melihat (index), tidak boleh aksi lain (show/destroy/dll)
     Route::resource('/stock', StockController::class)->only(['index'])->middleware('role:superadmin|admin-gudang|owner|staff-outlet');
     Route::resource('/stock', StockController::class)->except(['index'])->middleware('role:superadmin|admin-gudang|owner');
+    Route::get('/outlet-prices/export', [App\Http\Controllers\OutletPriceController::class, 'exportMaster'])->name('outlet-prices.export');
     Route::resource('/outlet-prices', App\Http\Controllers\OutletPriceController::class)->except(['show']);
     Route::post('/outlet-prices/products', [App\Http\Controllers\OutletPriceController::class, 'storeProduct'])->name('outlet-prices.products.store');
     Route::get('/outlet-prices/products/search', [App\Http\Controllers\OutletPriceController::class, 'searchProducts'])->middleware('throttle:120,1,search')->name('outlet-prices.products.search');
