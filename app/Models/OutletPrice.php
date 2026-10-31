@@ -55,27 +55,23 @@ class OutletPrice extends Model
     ];
 
     /**
-     * Cache folder index Master Harga Jual dibersihkan saat aturan dibuat, dihapus, dipulihkan,
-     * atau pindah outlet/produk. Simpan biasa (mis. tombol Kembali yang hanya memperbarui updated_at) tidak membersihkan.
+     * Cache folder index Master Harga Jual (lihat PriceFolderIndex) dibersihkan saat jumlah aturan
+     * di suatu outlet berubah: dibuat, dihapus, dipulihkan, atau dipindah outlet/produk.
+     * Edit biasa (harga/diskon) tidak mengubah isi folder, jadi tidak perlu membersihkan cache.
      */
     protected static function booted(): void
     {
-        static::saved(function (OutletPrice $price) {
-            if (! $price->wasRecentlyCreated && ! $price->wasChanged(['outlet_id', 'product_id'])) {
-                return;
-            }
+        $forget = fn (?int $outletId) => $outletId ? app(PriceFolderIndex::class)->forget($outletId) : null;
 
-            $folders = app(PriceFolderIndex::class);
-            $folders->forget((int) $price->outlet_id);
-
-            $oldOutletId = (int) $price->getOriginal('outlet_id');
-            if ($oldOutletId && $oldOutletId !== (int) $price->outlet_id) {
-                $folders->forget($oldOutletId);
+        static::created(fn (OutletPrice $price) => $forget((int) $price->outlet_id));
+        static::deleted(fn (OutletPrice $price) => $forget((int) $price->outlet_id));
+        static::restored(fn (OutletPrice $price) => $forget((int) $price->outlet_id));
+        static::updated(function (OutletPrice $price) use ($forget) {
+            if ($price->wasChanged(['outlet_id', 'product_id'])) {
+                $forget((int) $price->getOriginal('outlet_id'));
+                $forget((int) $price->outlet_id);
             }
         });
-
-        static::deleted(fn (OutletPrice $price) => app(PriceFolderIndex::class)->forget((int) $price->outlet_id));
-        static::restored(fn (OutletPrice $price) => app(PriceFolderIndex::class)->forget((int) $price->outlet_id));
     }
 
     public function outlet()

@@ -16,6 +16,7 @@ use App\Services\LatestHpp;
 use App\Services\OtherIncomeService;
 use App\Services\PriceFolderIndex;
 use App\Services\PriceCalculator;
+use App\Services\PriceFolderIndex;
 use App\Support\OutletAccess;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
