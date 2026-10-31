@@ -77,6 +77,16 @@ class Product extends Model
                 $product->harga_beli_besar = round($kecil * $konversi, 2);
             }
         });
+
+        // Folder index Master Harga Jual dikelompokkan per kata pertama nama produk: bersihkan cache
+        // hanya bila nama berubah (simpan produk karena HPP/harga beli tidak perlu membersihkan).
+        static::saved(function (Product $product) {
+            if ($product->wasChanged('name')) {
+                app(\App\Services\PriceFolderIndex::class)->forgetProduct((int) $product->getKey());
+            }
+        });
+        static::deleted(fn (Product $product) => app(\App\Services\PriceFolderIndex::class)->forgetProduct((int) $product->getKey()));
+        static::restored(fn (Product $product) => app(\App\Services\PriceFolderIndex::class)->forgetProduct((int) $product->getKey()));
     }
 
     /**
