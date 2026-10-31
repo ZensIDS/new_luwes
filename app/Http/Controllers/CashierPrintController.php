@@ -89,9 +89,19 @@ class CashierPrintController extends Controller
                 $rule,
                 $product
             );
-            $priceStrike = $calculator->money($price['hpp_setelah_pajak'] + $price['margin_amount']);
-            $product->setAttribute('print_price_hpp_after_tax', $price['hpp_setelah_pajak']);
-            $product->setAttribute('print_price_margin', $price['margin_amount']);
+            // Harga coret khusus label: HPP asli (tanpa pajak/diskon apa pun) + margin yang dihitung
+            // dari HPP asli tersebut. Beda dengan master harga jual (margin dari harga dasar setelah diskon).
+            $hppAsli = $calculator->money($price['hpp']);
+            if ($rule) {
+                $marginLabel = strtolower(trim((string) $rule->margin_type)) === 'percentage'
+                    ? $calculator->money($hppAsli * ((float) $rule->margin_value / 100))
+                    : $calculator->money($rule->margin_value);
+            } else {
+                $marginLabel = $price['margin_amount'];
+            }
+            $priceStrike = $calculator->money($hppAsli + $marginLabel);
+            $product->setAttribute('print_price_hpp', $hppAsli);
+            $product->setAttribute('print_price_margin', $marginLabel);
             $product->setAttribute('print_price_strike', $priceStrike);
             $product->setAttribute('print_price_net', $price['price']);
             // Persen diskon = selisih harga coret terhadap harga jual, dibagi harga coret.
