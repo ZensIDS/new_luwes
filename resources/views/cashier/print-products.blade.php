@@ -69,7 +69,7 @@
     @if (! $printing)
         <div class="toolbar">
             <h2>Cetak label harga produk</h2>
-            <p class="muted">Harga coret dihitung dari HPP setelah pajak + margin. Label mendukung kertas thermal 58mm, 68mm, dan 80mm, dan A4 (label 68 mm, 3 kolom, untuk printer warna). Pilih mode cetak Thermal (hitam putih) atau Warna sebelum mencetak. Persen diskon dihitung dari harga coret terhadap harga jual.</p>
+            <p class="muted">Harga coret dihitung dari HPP asli (tanpa potongan apa pun) + margin yang dikalikan dari HPP asli. Label mendukung kertas thermal 58mm, 68mm, dan 80mm, dan A4 (label 68 mm, 3 kolom, untuk printer warna). Pilih mode cetak Thermal (hitam putih) atau Warna sebelum mencetak. Persen diskon dihitung dari harga coret terhadap harga jual.</p>
             <form method="GET" action="{{ route('cashier.print.products') }}" target="_blank">
                 @if ($outlets->count() > 1)
                     <label>Outlet
@@ -123,7 +123,7 @@
                                     <td>{{ $product->name }}</td>
                                     <td>
                                         @if ($product->print_has_discount)<del>@currency($product->print_price_strike)</del>@endif
-                                        <small class="muted">HPP: @currency($product->print_price_hpp_after_tax) + Margin: @currency($product->print_price_margin)</small>
+                                        <small class="muted">HPP: @currency($product->print_price_hpp) + Margin: @currency($product->print_price_margin)</small>
                                     </td>
                                     <td>@currency($product->print_price_net)</td>
                                 </tr>
