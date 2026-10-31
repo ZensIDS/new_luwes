@@ -11,6 +11,7 @@ use App\Http\Controllers\CashierSlipController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DbSyncStatusController;
 use App\Http\Controllers\DeficitStockController;
 use App\Http\Controllers\ExpiredStockController;
 use App\Http\Controllers\KasController;
@@ -60,6 +61,17 @@ Route::middleware('auth')->group(function () {
 
 Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->group(function () {
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    Route::get('/db-sync/status', DbSyncStatusController::class)
+        ->middleware('role:admin-gudang|owner|superadmin')
+        ->name('db-sync.status');
+    Route::get('/db-sync/conflict', [DbSyncStatusController::class, 'conflict'])
+        ->middleware('role:admin-gudang|owner|superadmin')
+        ->name('db-sync.conflict');
+    Route::middleware('role:owner|superadmin')->group(function () {
+        Route::post('/db-sync/run', [DbSyncStatusController::class, 'run'])->name('db-sync.run');
+        Route::post('/db-sync/resolve', [DbSyncStatusController::class, 'resolve'])->name('db-sync.resolve');
+        Route::post('/db-sync/resolve-all', [DbSyncStatusController::class, 'resolveAll'])->name('db-sync.resolve-all');
+    });
     Route::get('/setting', [DashboardController::class, 'setting'])->name('setting');
     Route::post('/setting-store', [DashboardController::class, 'store'])->name('setting.store');
     Route::get('/get-customer/{penjualan_id}', [CustomerController::class, 'getCustomer']);
@@ -127,7 +139,6 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::resource('/outlet-prices', App\Http\Controllers\OutletPriceController::class)->except(['show']);
     Route::post('/outlet-prices/products', [App\Http\Controllers\OutletPriceController::class, 'storeProduct'])->name('outlet-prices.products.store');
     Route::get('/outlet-prices/products/search', [App\Http\Controllers\OutletPriceController::class, 'searchProducts'])->middleware('throttle:120,1,search')->name('outlet-prices.products.search');
-    Route::get('/outlet-prices/export', [App\Http\Controllers\OutletPriceController::class, 'exportMaster'])->middleware('throttle:30,1,export')->name('outlet-prices.export');
     Route::get('/outlet-prices/existing', [App\Http\Controllers\OutletPriceController::class, 'existingRule'])->name('outlet-prices.existing');
     Route::get('/outlet-prices/preview-hpp', [App\Http\Controllers\OutletPriceController::class, 'previewHpp'])->name('outlet-prices.preview-hpp');
     Route::get('/outlet-prices/products/{product}', [App\Http\Controllers\OutletPriceController::class, 'editProduct'])->whereNumber('product')->name('outlet-prices.products.show');
@@ -188,7 +199,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
 
     Route::resource('/pengeluaran', PengeluaranController::class);
 
-    // Pendapatan Lain / Other Income (pemasukan di luar penjualan kasir). Semua role boleh mengakses; staff-outlet dan kasir
+    // Other Income (pemasukan di luar penjualan kasir). Semua role boleh mengakses; staff-outlet dan kasir
     // dibatasi ke outlet sendiri di controller. Kategori dan nominal Listing: hanya superadmin dan owner (K11).
     Route::middleware('role:superadmin|owner')
         ->prefix('other-income/categories')
@@ -204,7 +215,6 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
         Route::get('/', [OtherIncomeController::class, 'index'])->name('index');
         Route::get('/export', [OtherIncomeController::class, 'export'])->name('export');
         Route::get('/create', [OtherIncomeController::class, 'create'])->name('create');
-        Route::get('/products/search', [OtherIncomeController::class, 'searchProducts'])->middleware('throttle:120,1,search')->name('products.search');
         Route::post('/', [OtherIncomeController::class, 'store'])->name('store');
         Route::get('/{otherIncome}/edit', [OtherIncomeController::class, 'edit'])->whereNumber('otherIncome')->name('edit');
         Route::put('/{otherIncome}', [OtherIncomeController::class, 'update'])->whereNumber('otherIncome')->name('update');
@@ -258,8 +268,6 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/laporan/outlet/rafaksi', [LaporanController::class, 'exportOutletRafaksi'])->name('laporan.outlet.rafaksi')->middleware('throttle:10,1');
     Route::get('/laporan/outlet/retur', [LaporanController::class, 'exportOutletRetur'])->name('laporan.outlet.retur')->middleware('throttle:10,1');
     Route::get('/laporan/outlet/all-stock', [LaporanController::class, 'exportOutletAllStock'])->name('laporan.outlet.all-stock')->middleware('throttle:10,1');
-    Route::get('/laporan/outlet/product-list', [LaporanController::class, 'exportOutletProductList'])->name('laporan.outlet.product-list')->middleware('throttle:10,1');
-    Route::get('/laporan/outlet/product-folders', [LaporanController::class, 'outletProductFolders'])->name('laporan.outlet.product-folders')->middleware('throttle:60,1');
     Route::get('/laporan/pembelian/{id?}', [LaporanController::class, 'exportPembelian'])->name('laporan.pembelian');
     Route::get('/laporan/pickinglist/{id?}', [LaporanController::class, 'exportPickingList'])->name('laporan.pickinglist');
     Route::get('/laporan/request-order/{id?}', [LaporanController::class, 'exportRequestOrder'])->name('laporan.request-order');
