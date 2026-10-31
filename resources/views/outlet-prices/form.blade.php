@@ -693,13 +693,18 @@
                             if ($backSearch !== '') {
                                 $backParams['search'] = $backSearch;
                             } else {
-                                // Tanpa pencarian: kembali ke folder / All Product yang tadi dibuka.
+                                // Tanpa pencarian: kembali ke folder / Semua Barang / Terakhir Ditambahkan yang tadi dibuka.
                                 $backView = (array) session('outlet_prices.last_view', []);
                                 if (! empty($backView['folder'])) {
                                     $backParams['folder'] = $backView['folder'];
                                 } elseif (! empty($backView['all'])) {
                                     $backParams['all'] = 1;
+                                } elseif (! empty($backView['latest'])) {
+                                    $backParams['latest'] = 1;
                                 }
+                            }
+                            if ((int) session('outlet_prices.last_view.page', 1) > 1) {
+                                $backParams['page'] = (int) session('outlet_prices.last_view.page');
                             }
                         }
                     @endphp

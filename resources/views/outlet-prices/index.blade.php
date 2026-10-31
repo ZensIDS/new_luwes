@@ -37,6 +37,9 @@
         .opf-card-all { background:#605ca8; border-color:#605ca8; color:#fff; }
         .opf-card-all:hover, .opf-card-all:focus { color:#fff; border-color:#4b4787; box-shadow:0 3px 10px rgba(96,92,168,.35); }
         .opf-card-all .opf-icon, .opf-card-all .opf-count { color:#fff; }
+        .opf-card-latest { background:#00a65a; border-color:#00a65a; color:#fff; }
+        .opf-card-latest:hover, .opf-card-latest:focus { color:#fff; border-color:#008d4c; box-shadow:0 3px 10px rgba(0,166,90,.35); }
+        .opf-card-latest .opf-icon, .opf-card-latest .opf-count { color:#fff; }
         .opf-empty { display:none; padding:20px 0; color:#777; }
         .opf-crumb { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
         .opf-crumb .opf-path { color:#555; }
@@ -87,7 +90,7 @@
                             <option value="80" selected>80 mm</option>
                             <option value="68">68 mm</option>
                             <option value="58">58 mm</option>
-                            <option value="100">A4 (label 95 mm)</option>
+                            <option value="100">A4 (label 68 mm)</option>
                         </select>
                         <button type="submit" id="print-selected-outlet-price-labels" class="btn bg-purple" disabled>
                             <i class="fa fa-print"></i> Cetak label terpilih
@@ -112,7 +115,7 @@
                 <div class="box-body">
                     <div class="opf-toolbar">
                         <span class="opf-hint">
-                            <i class="fa fa-folder-open-o"></i> Pilih folder (kata pertama nama produk), atau ketik awalan nama/kode di kotak pencarian atas untuk mencari di semua produk.
+                            <i class="fa fa-folder-open-o"></i> Pilih folder (kata pertama nama produk; awalan simbol/angka ada di folder #/Lainnya), atau ketik awalan nama/kode di kotak pencarian atas untuk mencari di semua produk.
                         </span>
                         @if (count($folders) > 12)
                             <input type="text" id="opf-filter" class="form-control input-sm" style="max-width:240px;"
@@ -122,10 +125,16 @@
 
                     @if ($totalAll > 0)
                         <div class="opf-grid" id="opf-grid">
+                            <a class="opf-card opf-card-latest"
+                                href="{{ route('outlet-prices.index', ['outlet_id' => $selectedOutletId, 'latest' => 1]) }}">
+                                <span class="opf-icon"><i class="fa fa-clock-o"></i></span>
+                                <span class="opf-name">Terakhir Ditambahkan</span>
+                                <span class="opf-count">{{ number_format($totalAll, 0, ',', '.') }} produk</span>
+                            </a>
                             <a class="opf-card opf-card-all"
                                 href="{{ route('outlet-prices.index', ['outlet_id' => $selectedOutletId, 'all' => 1]) }}">
                                 <span class="opf-icon"><i class="fa fa-th-large"></i></span>
-                                <span class="opf-name">All Product</span>
+                                <span class="opf-name">Semua Barang (A-Z)</span>
                                 <span class="opf-count">{{ number_format($totalAll, 0, ',', '.') }} produk</span>
                             </a>
                             @foreach ($folders as $folder)
@@ -156,8 +165,10 @@
                                 Hasil pencarian &ldquo;{{ $searchTerm }}&rdquo; (semua produk)
                             @elseif ($activeFolder !== null)
                                 Folder <strong>{{ $activeFolder === \App\Services\PriceFolderIndex::OTHER ? \App\Services\PriceFolderIndex::OTHER_LABEL : $activeFolder }}</strong>
+                            @elseif ($showLatest)
+                                Folder <strong>Terakhir Ditambahkan</strong>
                             @else
-                                All Product
+                                Semua Barang (A-Z)
                             @endif
                             &middot; {{ number_format($prices->total(), 0, ',', '.') }} produk
                         </span>

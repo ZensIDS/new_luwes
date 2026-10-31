@@ -29,32 +29,44 @@
         th, td { padding: 7px; border: 1px solid #ddd; text-align: left; }
         th { background: #f5f5f5; }
 
-        /* ===== Label harga (desain baru) ===== */
-        .label-sheet { width: {{ $isA4 ? '204mm' : $w . 'mm' }}; margin: 0 auto; {{ $isA4 ? 'display:grid; grid-template-columns:repeat(3, 68mm); gap:0;' : '' }} }
-        .label-outer { width: {{ $w }}mm; padding: {{ $isA4 ? '0' : '1.5mm 2mm' }}; break-inside: avoid; page-break-inside: avoid; background: #fff; {{ $isA4 ? 'border:0.2mm dashed #888;' : '' }} }
+        /* ===== Label harga =====
+           Tinggi label dikunci: promo (ada diskon) maks 32,4 mm di kertas 80 mm (< 3,3 cm), tanpa diskon 21,6 mm.
+           Ukuran lain mengikuti skala $k (68 mm / A4 => promo 27,5 mm & tanpa diskon 18,4 mm). */
+        .label-sheet { width: {{ $isA4 ? '204mm' : $w . 'mm' }}; margin: 0 auto; {{ $isA4 ? 'display:grid; grid-template-columns:repeat(3, 68mm); gap:0; align-items:start;' : '' }} }
+        .label-outer { width: {{ $w }}mm; padding: 0; break-inside: avoid; page-break-inside: avoid; background: #fff; {{ $isA4 ? 'outline:0.2mm dashed #888; outline-offset:-0.2mm;' : '' }} }
         .lbl { --accent: {{ $mode === 'warna' ? '#e0577a' : '#000' }}; --soft: {{ $mode === 'warna' ? '#fbe6ea' : '#fff' }}; --boxline: {{ $mode === 'warna' ? 'none' : '0.25mm solid #000' }};
-               position: relative; padding: {{ $mm(3) }} {{ $mm(3.5) }} {{ $mm(2.5) }}; color: #000; background: #fff; font-family: Arial, Helvetica, sans-serif;
+               position: relative; display: flex; flex-direction: column; overflow: hidden; padding: {{ $mm(1.4) }} {{ $mm(3.5) }} {{ $mm(1.2) }}; color: #000; background: #fff; font-family: Arial, Helvetica, sans-serif;
                -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        .lbl .head { position: relative; min-height: {{ $mm(11) }}; padding-right: {{ $mm(19) }}; }
-        .lbl .head.no-circle { padding-right: 0; min-height: {{ $mm(8) }}; }
-        .lbl .name { font-size: {{ $mm(4.1) }}; font-weight: 900; text-transform: uppercase; line-height: 1.15; letter-spacing: .1px; max-height: 2.35em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-        .lbl .circle { position: absolute; top: {{ $mm(-0.5) }}; right: 0; z-index: 2; width: {{ $mm(17.5) }}; height: {{ $mm(17.5) }}; border-radius: 50%; background: var(--accent); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; }
-        .lbl .circle .c-top { font-size: {{ $mm(2.5) }}; font-weight: 800; letter-spacing: .2px; }
-        .lbl .circle .c-pct { font-size: {{ $mm(6.4) }}; font-weight: 900; margin-top: {{ $mm(.4) }}; }
-        .lbl .box { position: relative; margin-top: {{ $mm(3.4) }}; padding: {{ $mm(3.8) }} {{ $mm(3) }} {{ $mm(2) }}; background: var(--soft); border: var(--boxline); border-radius: {{ $mm(2.6) }}; }
-        .lbl .box.single { margin-top: {{ $mm(1) }}; padding-top: {{ $mm(2.4) }}; }
-        .lbl .pill { position: absolute; top: {{ $mm(-2.4) }}; left: {{ $mm(-1) }}; background: var(--accent); color: #fff; font-size: {{ $mm(2.6) }}; font-weight: 800; letter-spacing: .2px; line-height: 1; padding: {{ $mm(1.2) }} {{ $mm(3) }}; border-radius: 99px; }
-        .lbl .price { color: var(--accent); font-weight: 900; line-height: 1; white-space: nowrap; display: flex; align-items: baseline; gap: {{ $mm(1.2) }}; }
-        .lbl .price .rp { font-size: {{ $mm(5) }}; font-weight: 800; }
+        .lbl.promo { height: {{ $mm(32.4) }}; }
+        .lbl.plain { height: {{ $mm(21.6) }}; padding-top: {{ $mm(.8) }}; padding-bottom: {{ $mm(.7) }}; }
+        .lbl .name { flex: none; font-size: {{ $mm(3.1) }}; font-weight: 900; text-transform: uppercase; line-height: 1.08; letter-spacing: .1px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+        .lbl.promo .name { height: {{ $mm(6.7) }}; }
+        .lbl.plain .name { font-size: {{ $mm(2.7) }}; }
+        .lbl .box { position: relative; flex: none; background: var(--soft); border: var(--boxline); border-radius: {{ $mm(2.2) }}; }
+        .lbl.promo .box { margin-top: {{ $mm(2.4) }}; padding: {{ $mm(2) }} {{ $mm(15.5) }} {{ $mm(.8) }} {{ $mm(2.6) }}; }
+        .lbl.plain .box { margin-top: auto; padding: {{ $mm(.3) }} {{ $mm(2.6) }}; }
+        .lbl .pill { position: absolute; top: {{ $mm(-2) }}; left: {{ $mm(-.8) }}; background: var(--accent); color: #fff; font-size: {{ $mm(2.3) }}; font-weight: 800; letter-spacing: .2px; line-height: 1; padding: {{ $mm(1) }} {{ $mm(2.6) }}; border-radius: 99px; }
+        .lbl .price { color: var(--accent); font-weight: 900; line-height: 1; white-space: nowrap; display: flex; align-items: baseline; gap: {{ $mm(1) }}; }
+        .lbl .price .rp { font-size: 0.54em; font-weight: 800; }
         .lbl .price .num { letter-spacing: -.2px; }
-        .lbl .normal { margin-top: {{ $mm(1.8) }}; padding-top: {{ $mm(1.2) }}; border-top: 0.2mm solid var(--accent); font-size: {{ $mm(2.6) }}; font-weight: 700; }
-        .lbl .normal del { text-decoration: none; position: relative; font-size: {{ $mm(3.4) }}; font-weight: 800; margin-left: {{ $mm(.6) }}; }
-        .lbl .normal del::after { content: ''; position: absolute; left: -6%; right: -6%; top: 52%; border-top: {{ $mm(.45) }} solid var(--accent); transform: rotate(-4deg); }
-        .lbl .foot { display: flex; align-items: flex-end; gap: {{ $mm(2.5) }}; margin-top: {{ $mm(2.6) }}; }
-        .lbl .bc { flex: 1 1 auto; min-width: 0; height: {{ $mm(7.8) }}; overflow: hidden; }
-        .lbl .bc svg { display: block; width: 100%; height: {{ $mm(7.8) }}; shape-rendering: crispEdges; }
-        .lbl .digits { flex: 0 0 auto; text-align: right; font-family: 'Courier New', monospace; font-size: {{ $mm(2.6) }}; font-weight: 700; letter-spacing: .6px; line-height: 1.1; }
-        .lbl .digits small { display: block; font-family: Arial, sans-serif; font-size: 6px; font-weight: 400; letter-spacing: 0; margin-top: .6mm; }
+        .lbl .normal { margin-top: {{ $mm(.8) }}; font-size: {{ $mm(2.7) }}; font-weight: 700; line-height: 1.15; }
+        .lbl .normal del { text-decoration: none; position: relative; font-size: {{ $mm(3) }}; font-weight: 800; margin-left: {{ $mm(.5) }}; }
+        .lbl .normal del::after { content: ''; position: absolute; left: -6%; right: -6%; top: 52%; border-top: {{ $mm(.4) }} solid var(--accent); transform: rotate(-4deg); }
+        /* Lingkaran diskon: diturunkan, menumpang di sisi kanan bawah box harga sehingga tidak menambah tinggi label. */
+        .lbl .circle { position: absolute; right: {{ $mm(2.4) }}; top: {{ $mm(14.6) }}; z-index: 2; width: {{ $mm(13.2) }}; height: {{ $mm(13.2) }}; border-radius: 50%; background: var(--accent); color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; }
+        .lbl .circle .c-top { font-size: {{ $mm(2.1) }}; font-weight: 800; letter-spacing: .2px; }
+        .lbl .circle .c-pct { font-size: {{ $mm(5) }}; font-weight: 900; margin-top: {{ $mm(.4) }}; }
+        /* Barcode diperkecil: lebar tetap, tinggi rendah (sebelumnya selebar label & 7,8 mm). */
+        .lbl .foot { display: flex; align-items: flex-end; gap: {{ $mm(2) }}; margin-top: auto; padding-right: {{ $mm(14.5) }}; }
+        .lbl .bc { flex: 0 1 {{ $mm(30) }}; min-width: 0; height: {{ $mm(4.4) }}; overflow: hidden; }
+        .lbl .bc svg { display: block; width: 100%; height: 100%; shape-rendering: crispEdges; }
+        .lbl .digits { flex: 0 1 auto; min-width: 0; text-align: right; font-family: 'Courier New', monospace; font-size: {{ $mm(2.3) }}; font-weight: 700; letter-spacing: {{ $mm(.1) }}; line-height: 1.1; white-space: nowrap; }
+        .lbl .digits small { display: block; font-family: Arial, sans-serif; font-size: {{ $mm(1.8) }}; font-weight: 400; letter-spacing: 0; margin-top: {{ $mm(.3) }}; }
+        /* Tanpa diskon: nama, box harga (besar), lalu baris bawah = barcode kecil + kode + tanggal cetak. */
+        .lbl.plain .foot { margin-top: {{ $mm(.6) }}; padding-right: 0; align-items: center; }
+        .lbl.plain .bc { height: {{ $mm(3.6) }}; }
+        .lbl.plain .digits { font-size: {{ $mm(2.2) }}; }
+        .lbl.plain .date { margin-left: auto; font-size: {{ $mm(1.9) }}; white-space: nowrap; }
         .cut-line { width: {{ $w }}mm; text-align: center; font-size: 8px; color: #555; padding: 1.5mm 0; letter-spacing: 1px; }
 
         @page { size: {{ $isA4 ? 'A4' : $w . 'mm auto' }}; margin: {{ $isA4 ? '3mm' : '0' }}; }
@@ -143,8 +155,14 @@
                 $hasDisc = $product->print_has_discount;
                 $netText = number_format($product->print_price_net, 0, ',', '.');
                 $digitsLen = strlen($netText);
-                $priceScale = $digitsLen <= 7 ? 1 : ($digitsLen === 8 ? .85 : ($digitsLen === 9 ? .75 : .62));
-                $priceSize = round(11.5 * $k * $priceScale, 2) . 'mm';
+                // Ukuran harga dasar (kertas 80 mm): promo 7,8 mm, tanpa diskon 9 mm; mengecil bila angkanya panjang.
+                if ($hasDisc) {
+                    $priceScale = $digitsLen <= 10 ? 1 : .8;
+                    $priceSize = round(12 * $k * $priceScale, 2) . 'mm';
+                } else {
+                    $priceScale = $digitsLen <= 10 ? 1 : .8;
+                    $priceSize = round(12 * $k * $priceScale, 2) . 'mm';
+                }
                 // Barcode Code 128 (sama seperti voucher); beri viewBox agar pas selebar area.
                 $barcodeSvg = DNS1D::getBarcodeSVG((string) $product->code, 'C128', 1, 30, 'black', false, false);
                 if (! str_contains($barcodeSvg, 'viewBox')
@@ -158,28 +176,36 @@
             @endphp
             @for ($index = 0; $index < $product->print_qty; $index++)
                 <div class="label-outer">
-                    <div class="lbl">
-                        <div class="head {{ $hasDisc ? '' : 'no-circle' }}">
+                    @if ($hasDisc)
+                        <div class="lbl promo">
                             <div class="name" title="{{ $product->name }}">{{ $product->name }}</div>
-                            @if ($hasDisc)
-                                <div class="circle">
-                                    <span class="c-top">DISKON</span>
-                                    <span class="c-pct">{{ $product->print_discount_percent }}%</span>
-                                </div>
-                            @endif
-                        </div>
-                        <div class="box {{ $hasDisc ? '' : 'single' }}">
-                            @if ($hasDisc)<div class="pill">HARGA PROMO</div>@endif
-                            <div class="price" style="font-size: {{ $priceSize }};"><span class="rp">Rp</span><span class="num">{{ $netText }}</span></div>
-                            @if ($hasDisc)
+                            <div class="box">
+                                <div class="pill">HARGA PROMO</div>
+                                <div class="price" style="font-size: {{ $priceSize }};"><span class="rp">Rp</span><span class="num">{{ $netText }}</span></div>
                                 <div class="normal">Harga Normal Rp <del>{{ number_format($product->print_price_strike, 0, ',', '.') }}</del></div>
-                            @endif
+                            </div>
+                            <div class="circle">
+                                <span class="c-top">DISKON</span>
+                                <span class="c-pct">{{ $product->print_discount_percent }}%</span>
+                            </div>
+                            <div class="foot">
+                                <div class="bc">{!! $barcodeSvg !!}</div>
+                                <div class="digits">{{ $product->code }}<small>{{ $printedAt?->format('d/m/Y') }}</small></div>
+                            </div>
                         </div>
-                        <div class="foot">
-                            <div class="bc">{!! $barcodeSvg !!}</div>
-                            <div class="digits">{{ $product->code }}<small>{{ $printedAt?->format('d/m/Y') }}</small></div>
+                    @else
+                        <div class="lbl plain">
+                            <div class="name" title="{{ $product->name }}">{{ $product->name }}</div>
+                            <div class="box">
+                                <div class="price" style="font-size: {{ $priceSize }};"><span class="rp">Rp</span><span class="num">{{ $netText }}</span></div>
+                            </div>
+                            <div class="foot">
+                                <div class="bc">{!! $barcodeSvg !!}</div>
+                                <div class="digits">{{ $product->code }}</div>
+                                <div class="date">{{ $printedAt?->format('d/m/Y') }}</div>
+                            </div>
                         </div>
-                    </div>
+                    @endif
                 </div>
                 @if (! $isA4)
                     <div class="cut-line">- - - - - - - - - - - - - - - - - - - - - - - -</div>
