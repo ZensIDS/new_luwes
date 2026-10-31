@@ -14,6 +14,7 @@ use App\Models\Supplier;
 use App\Services\LatestHpp;
 use App\Services\OtherIncomeService;
 use App\Services\PriceCalculator;
+use App\Services\PriceFolderIndex;
 use App\Support\OutletAccess;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -121,7 +122,7 @@ class OutletPriceController extends Controller
         return $request->user() && in_array($request->user()->role, ['staff-outlet', 'kasir'], true);
     }
 
-    public function index(Request $request, PriceCalculator $calculator)
+    public function index(Request $request, PriceCalculator $calculator, PriceFolderIndex $folderIndex)
     {
         $this->ensureManagementAccess();
         // Buka tanpa parameter (misal dari menu) = outlet terakhir tetap dipakai, pencarian mulai kosong.

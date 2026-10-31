@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Services\PriceFolderIndex;
 use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
 
@@ -78,15 +79,15 @@ class Product extends Model
             }
         });
 
-        // Folder index Master Harga Jual dikelompokkan per kata pertama nama produk: bersihkan cache
-        // hanya bila nama berubah (simpan produk karena HPP/harga beli tidak perlu membersihkan).
-        static::saved(function (Product $product) {
+        // Folder Master Harga Jual dikelompokkan per kata pertama nama produk: bersihkan cache folder
+        // semua outlet yang punya aturan harga produk ini saat nama berubah / produk dihapus / dipulihkan.
+        static::updated(function (Product $product) {
             if ($product->wasChanged('name')) {
-                app(\App\Services\PriceFolderIndex::class)->forgetProduct((int) $product->getKey());
+                app(PriceFolderIndex::class)->forgetProduct((int) $product->id);
             }
         });
-        static::deleted(fn (Product $product) => app(\App\Services\PriceFolderIndex::class)->forgetProduct((int) $product->getKey()));
-        static::restored(fn (Product $product) => app(\App\Services\PriceFolderIndex::class)->forgetProduct((int) $product->getKey()));
+        static::deleted(fn (Product $product) => app(PriceFolderIndex::class)->forgetProduct((int) $product->id));
+        static::restored(fn (Product $product) => app(PriceFolderIndex::class)->forgetProduct((int) $product->id));
     }
 
     /**
