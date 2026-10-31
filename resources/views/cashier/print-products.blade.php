@@ -8,10 +8,10 @@
     @php
         // Mode cetak: thermal (hitam putih) atau warna. Layout sama, hanya variabel warna yang berbeda.
         $mode = ($mode ?? 'thermal') === 'warna' ? 'warna' : 'thermal';
-        // 58/68/80 = kertas thermal (lebar label = lebar kertas). 100 = A4 (label 95 mm, disusun rapi, cocok printer warna).
+        // 58/68/80 = kertas thermal (lebar label = lebar kertas). 100 = A4 (label 68 mm, 3 kolom per baris, cocok printer warna).
         $paper = in_array((int) request('paper'), [58, 68, 80, 100], true) ? (int) request('paper') : 80;
         $isA4 = $paper === 100;
-        $w = $isA4 ? 95 : $paper;
+        $w = $isA4 ? 68 : $paper;
         $k = $w / 80; // faktor skala dari ukuran dasar 80 mm
         $mm = fn (float $v) => round($v * $k, 2) . 'mm';
     @endphp
@@ -30,7 +30,7 @@
         th { background: #f5f5f5; }
 
         /* ===== Label harga (desain baru) ===== */
-        .label-sheet { width: {{ $isA4 ? '194mm' : $w . 'mm' }}; margin: 0 auto; {{ $isA4 ? 'display:flex; flex-wrap:wrap; gap:4mm;' : '' }} }
+        .label-sheet { width: {{ $isA4 ? '204mm' : $w . 'mm' }}; margin: 0 auto; {{ $isA4 ? 'display:grid; grid-template-columns:repeat(3, 68mm); gap:0;' : '' }} }
         .label-outer { width: {{ $w }}mm; padding: {{ $isA4 ? '0' : '1.5mm 2mm' }}; break-inside: avoid; page-break-inside: avoid; background: #fff; {{ $isA4 ? 'border:0.2mm dashed #888;' : '' }} }
         .lbl { --accent: {{ $mode === 'warna' ? '#e0577a' : '#000' }}; --soft: {{ $mode === 'warna' ? '#fbe6ea' : '#fff' }}; --boxline: {{ $mode === 'warna' ? 'none' : '0.25mm solid #000' }};
                position: relative; padding: {{ $mm(3) }} {{ $mm(3.5) }} {{ $mm(2.5) }}; color: #000; background: #fff; font-family: Arial, Helvetica, sans-serif;
@@ -57,7 +57,7 @@
         .lbl .digits small { display: block; font-family: Arial, sans-serif; font-size: 6px; font-weight: 400; letter-spacing: 0; margin-top: .6mm; }
         .cut-line { width: {{ $w }}mm; text-align: center; font-size: 8px; color: #555; padding: 1.5mm 0; letter-spacing: 1px; }
 
-        @page { size: {{ $isA4 ? 'A4' : $w . 'mm auto' }}; margin: {{ $isA4 ? '8mm' : '0' }}; }
+        @page { size: {{ $isA4 ? 'A4' : $w . 'mm auto' }}; margin: {{ $isA4 ? '3mm' : '0' }}; }
         @media print {
             body { width: {{ $isA4 ? 'auto' : $w . 'mm' }}; margin: 0 auto; padding: 0; background: #fff; }
             .toolbar { display: none !important; }
@@ -69,7 +69,7 @@
     @if (! $printing)
         <div class="toolbar">
             <h2>Cetak label harga produk</h2>
-            <p class="muted">Harga coret dihitung dari HPP setelah pajak + margin. Label mendukung kertas thermal 58mm, 68mm, dan 80mm, dan A4 (label 95 mm, untuk printer warna). Pilih mode cetak Thermal (hitam putih) atau Warna sebelum mencetak. Persen diskon dihitung dari harga coret terhadap harga jual.</p>
+            <p class="muted">Harga coret dihitung dari HPP setelah pajak + margin. Label mendukung kertas thermal 58mm, 68mm, dan 80mm, dan A4 (label 68 mm, 3 kolom, untuk printer warna). Pilih mode cetak Thermal (hitam putih) atau Warna sebelum mencetak. Persen diskon dihitung dari harga coret terhadap harga jual.</p>
             <form method="GET" action="{{ route('cashier.print.products') }}" target="_blank">
                 @if ($outlets->count() > 1)
                     <label>Outlet
@@ -96,7 +96,7 @@
                             <option value="80" {{ $paper === 80 ? 'selected' : '' }}>80 mm</option>
                             <option value="68" {{ $paper === 68 ? 'selected' : '' }}>68 mm</option>
                             <option value="58" {{ $paper === 58 ? 'selected' : '' }}>58 mm</option>
-                            <option value="100" {{ $paper === 100 ? 'selected' : '' }}>A4 (label 95 mm)</option>
+                            <option value="100" {{ $paper === 100 ? 'selected' : '' }}>A4 (label 68 mm)</option>
                         </select>
                     </label>
                     <label>Mode cetak
