@@ -144,6 +144,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/outlet-prices/preview-hpp', [App\Http\Controllers\OutletPriceController::class, 'previewHpp'])->name('outlet-prices.preview-hpp');
     Route::get('/outlet-prices/products/{product}', [App\Http\Controllers\OutletPriceController::class, 'editProduct'])->whereNumber('product')->name('outlet-prices.products.show');
     Route::put('/outlet-prices/products/{product}', [App\Http\Controllers\OutletPriceController::class, 'updateProduct'])->whereNumber('product')->name('outlet-prices.products.update');
+    Route::patch('/outlet-prices/products/{product}/inline', [App\Http\Controllers\OutletPriceController::class, 'inlineUpdateProduct'])->whereNumber('product')->name('outlet-prices.products.inline');
     Route::get('/outlet-prices/{outletPrice}/hpp-history', [App\Http\Controllers\OutletPriceController::class, 'hppHistory'])->name('outlet-prices.hpp-history');
     Route::post('/outlet-prices/{outletPrice}/touch', [App\Http\Controllers\OutletPriceController::class, 'touch'])->name('outlet-prices.touch');
     Route::get('/outlet-purchases/data', [App\Http\Controllers\OutletPurchaseController::class, 'getIndexData'])->name('outlet-purchases.index.data');
@@ -347,6 +348,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/stock-opname/export-template', [App\Http\Controllers\StockController::class, 'exportOpnameTemplate'])->middleware('role:superadmin|admin-gudang|owner')->name('stock.opname.export-template');
 
     // Supplier
+    Route::get('suppliers/check-kode', [SupplierController::class, 'checkKode'])->name('supplier.check-kode')->middleware('throttle:120,1');
     Route::get('suppliers/export', [SupplierController::class, 'export'])->name('supplier.export')->middleware('throttle:10,1');
     Route::get('suppliers/export-template', [SupplierController::class, 'exportTemplate'])->name('supplier.export.template')->middleware('throttle:10,1');
     Route::post('suppliers/import', [SupplierController::class, 'import'])->name('supplier.import');

@@ -54,6 +54,11 @@ class CashierSaleService
                 ->currentlyActive()
                 ->get()
                 ->keyBy('product_id');
+            $unpriced = $cart->reject(fn ($item) => $rules->has($item->id))->pluck('name');
+            if ($unpriced->isNotEmpty()) {
+                throw new RuntimeException('Harga belum diatur untuk: ' . $unpriced->implode(', ') . '. Hapus dari keranjang atau atur harganya di Master Harga Jual.');
+            }
+
             $allocations = [];
             $subtotal = 0;
             $discountTotal = 0;

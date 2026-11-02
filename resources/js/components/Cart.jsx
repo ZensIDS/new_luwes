@@ -263,7 +263,7 @@ const Cart = () => {
         const localProduct = products.find((item) => item.barcode === code || item.code === code);
         const productRequest = localProduct
             ? Promise.resolve(localProduct)
-            : axios.get(`${outletProductsUrl}?` + new URLSearchParams({ search: code, status_produk: "all", compact: "1" }), {
+            : axios.get(`${outletProductsUrl}?` + new URLSearchParams({ search: code, status_produk: "all", compact: "1", scan: "1" }), {
                 headers: { Accept: "application/json" },
             })
                 .then((response) => (response.data.data || []).find((item) => item.barcode === code || item.code === code));

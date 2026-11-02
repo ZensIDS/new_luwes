@@ -60,9 +60,9 @@ class SetStockController extends Controller
 
         $hpp = $latestHpp->forProduct($outletId, $product->id);
         $price = $calculator->calculateItem($hpp, $product->outletPrices->first(), $product);
+        // Termasuk saldo MINUS (negatif), supaya stok yang tampil sama dengan stok sistem kasir.
         $stockNow = (int) OwnerStock::where('owner_id', $outletId)
             ->where('product_id', $product->id)
-            ->notDeficit()
             ->sum('qty');
 
         $item = null;

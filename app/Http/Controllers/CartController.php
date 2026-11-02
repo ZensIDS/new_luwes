@@ -153,6 +153,15 @@ class CartController extends Controller
             $outletId = OutletAccess::id($request);
             $product = Product::where('code', $request->barcode)->firstOrFail();
 
+            // Harga harus sudah diatur (aturan aktif) di Master Harga Jual outlet ini.
+            $priceSet = OutletPrice::where('outlet_id', $outletId)
+                ->where('product_id', $product->id)
+                ->currentlyActive()
+                ->exists();
+            if (! $priceSet) {
+                return response(['message' => $product->name . ' (harga belum diatur)'], 422);
+            }
+
             // Stok sistem tidak membatasi penjualan: bila melebihi stok, kelebihannya menjadi
             // stok minus saat checkout (lihat CashierSaleService) dan hanya ditandai di keranjang.
             $cart = $request->user()->cart()

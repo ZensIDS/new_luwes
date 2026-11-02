@@ -18,8 +18,9 @@
                         <div class="box-body">
                             <div class="form-group">
                                 <label>Kode</label>
-                                <input type="text" class="form-control" name="kode_supplier"
+                                <input type="text" class="form-control" name="kode_supplier" id="kodeSupplierInput" autocomplete="off"
                                     value="{{ old('kode_supplier', $nextKode) }}">
+                                <small id="kodeSupplierInfo"></small>
                                 @error('kode_supplier')<div class="invalid-feedback text-danger">{{ $message }}</div>@enderror
                             </div>
                             <div class="form-group">
@@ -103,6 +104,50 @@
         d.setDate(d.getDate() + diff);
         ref.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
     }
+})();
+</script>
+
+<script>
+(function() {
+    var input = document.getElementById('kodeSupplierInput');
+    var info  = document.getElementById('kodeSupplierInfo');
+    var btn   = document.querySelector('form button[type="submit"]');
+    if (!input || !info) return;
+
+    var url      = "{{ route('supplier.check-kode') }}";
+    var exceptId = input.dataset.exceptId || '';
+    var timer = null, seq = 0;
+
+    function setState(used, name) {
+        if (used) {
+            info.className = 'text-danger';
+            info.textContent = 'Kode sudah digunakan oleh supplier: ' + name;
+            input.closest('.form-group').classList.add('has-error');
+            if (btn) btn.disabled = true;
+        } else {
+            info.className = '';
+            info.textContent = '';
+            input.closest('.form-group').classList.remove('has-error');
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    function check() {
+        var kode = input.value.trim();
+        if (!kode) { setState(false); return; }
+        var current = ++seq;
+        var q = '?kode=' + encodeURIComponent(kode) + (exceptId ? '&except_id=' + encodeURIComponent(exceptId) : '');
+        fetch(url + q, { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { if (current === seq) setState(d.used, d.name); })
+            .catch(function() {});
+    }
+
+    input.addEventListener('input', function() {
+        clearTimeout(timer);
+        timer = setTimeout(check, 300);
+    });
+    check();
 })();
 </script>
 @endsection

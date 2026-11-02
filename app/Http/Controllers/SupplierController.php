@@ -34,6 +34,28 @@ class SupplierController extends Controller
         return redirect(route('supplier.index'))->with('toast_success', 'Berhasil Menyimpan Data!');
     }
 
+    public function checkKode(Request $request)
+    {
+        $kode = trim((string) $request->query('kode'));
+
+        if ($kode === '') {
+            return response()->json(['used' => false]);
+        }
+
+        $query = Supplier::where('kode_supplier', $kode);
+
+        if ($request->filled('except_id')) {
+            $query->where('id', '!=', $request->query('except_id'));
+        }
+
+        $supplier = $query->first(['id', 'name']);
+
+        return response()->json([
+            'used' => (bool) $supplier,
+            'name' => $supplier?->name,
+        ]);
+    }
+
     public function show(Supplier $supplier)
     {
         dd($supplier);
