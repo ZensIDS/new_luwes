@@ -1144,6 +1144,9 @@
                         if (!dryRun && (xhr.status === 0 || [502, 503, 504].includes(xhr.status))) {
                             $('#dbSyncResult').show().html('<div class="alert alert-info" style="padding:8px 12px">Koneksi ke server terputus / timeout, tetapi sinkron kemungkinan masih berjalan. Pantau progres di atas; hasil akhir muncul setelah selesai.</div>');
                             poll();
+                        } else if (xhr.status === 409) {
+                            $('#dbSyncResult').show().html('<div class="alert alert-warning" style="padding:8px 12px"><i class="fa fa-ban"></i> ' + esc(failMessage(xhr)) + '</div>');
+                            poll();
                         } else {
                             $('#dbSyncResult').show().html('<div class="alert alert-danger" style="padding:8px 12px">' + esc(failMessage(xhr)) + '</div>');
                         }

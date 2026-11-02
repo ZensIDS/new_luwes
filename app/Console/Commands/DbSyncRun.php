@@ -61,6 +61,13 @@ class DbSyncRun extends Command
             }
         }
 
+        // Ada sinkron lain yang masih berjalan: dilewati tanpa dicatat gagal (jadwal 2 menit akan mencoba lagi).
+        if ($result['status'] === 'skipped') {
+            $this->warn('Dilewati: '.$result['error']);
+
+            return self::SUCCESS;
+        }
+
         if ($result['error']) {
             $this->error('Sinkron gagal: '.$result['error']);
 

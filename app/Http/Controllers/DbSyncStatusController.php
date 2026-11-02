@@ -84,6 +84,10 @@ class DbSyncStatusController extends Controller
             return response()->json(['message' => $e->getMessage()], 422);
         }
 
+        if (($result['status'] ?? '') === 'skipped') {
+            return response()->json(['message' => $result['error']], 409);
+        }
+
         return response()->json($result + ['dry_run' => (bool) ($data['dry_run'] ?? false)]);
     }
 

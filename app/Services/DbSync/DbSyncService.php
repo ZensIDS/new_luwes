@@ -47,6 +47,13 @@ class DbSyncService
         $local = $this->localConnection();
         $server = DB::connection(config('dbsync.server_connection'));
 
+        // Sudah ada sinkron yang masih hidup (jadwal otomatis / manual): jangan mulai yang baru dan jangan
+        // mencatat baris apa pun di riwayat. Harus dibatalkan dulu dari dashboard. Baris "running" yang
+        // sudah lama tanpa tanda hidup dianggap proses mati dan tidak menghalangi.
+        if (! $dryRun && $this->hasLiveRun($local)) {
+            return $this->skipped($startedAt);
+        }
+
         // Kolom progres (migrasi 2026_11_02_000001) belum tentu sudah ada: tanpa itu sinkron tetap
         // jalan seperti biasa, hanya tanpa progres / tombol batal di dashboard.
         $tracked = ! $dryRun && (bool) rescue(
@@ -169,9 +176,13 @@ class DbSyncService
             }
         }
 
-        // Sinkron lain masih berjalan: baris ini tidak dicatat, supaya tidak menutupi hasil sinkron yang sebenarnya.
-        if ($busy && $runId) {
-            $local->table('db_sync_runs')->where('id', $runId)->delete();
+        // Sinkron lain masih berjalan (balapan dua proses yang mulai bersamaan): baris ini dibuang, tidak dicatat gagal.
+        if ($busy) {
+            if ($runId) {
+                $local->table('db_sync_runs')->where('id', $runId)->delete();
+            }
+
+            return $this->skipped($startedAt);
         }
 
         // Data perbedaan konflik disimpan terpisah (db_sync_conflicts), bukan di ringkasan riwayat sinkron.
@@ -198,7 +209,7 @@ class DbSyncService
             'tables' => $summary,
         ];
 
-        if (! $dryRun && ! $busy) {
+        if (! $dryRun) {
             $this->recordRun($local, $server, $runId, $result, $tracked ? [
                 'total_tables' => count($columns),
                 'done_tables' => $done,
@@ -209,6 +220,32 @@ class DbSyncService
         }
 
         return $result;
+    }
+
+    /** True bila ada sinkron berstatus "running" yang masih punya tanda hidup (bukan proses mati). */
+    private function hasLiveRun(Connection $local): bool
+    {
+        return $local->table('db_sync_runs')
+            ->where('status', 'running')
+            ->where('updated_at', '>=', now()->subMinutes(max(1, (int) config('dbsync.stall_minutes', 5))))
+            ->exists();
+    }
+
+    /** Hasil "dilewati": tidak menyentuh data dan tidak masuk riwayat sinkron. */
+    private function skipped($startedAt): array
+    {
+        return [
+            'status' => 'skipped',
+            'skipped' => true,
+            'started_at' => $startedAt,
+            'finished_at' => now(),
+            'duration_ms' => 0,
+            'rows_changed' => 0,
+            'error_count' => 0,
+            'conflict_count' => 0,
+            'error' => 'Ada sinkron lain yang sedang berjalan. Batalkan dulu sinkron yang berjalan (tombol "Batalkan Sinkron" di dashboard), baru mulai yang baru.',
+            'tables' => [],
+        ];
     }
 
     /** @return string[] tabel yang ikut disinkron (dari database lokal) */
