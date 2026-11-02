@@ -1006,10 +1006,12 @@
 
             // Selama ada sinkron berjalan, tombol sinkron dikunci supaya tidak bentrok / dobel.
             function applyActive() {
-                const lock = busyOn || !!activeRun;
+                // Sinkron yang macet (proses mati) tidak mengunci tombol: sinkron berikutnya membersihkannya otomatis.
+                const live = !!activeRun && !activeRun.stalled;
+                const lock = busyOn || live;
                 $('#dbSyncBtnRun, #dbSyncBtnDry').prop('disabled', lock);
                 $('#dbSyncBtnRetry').prop('disabled', lock)
-                    .toggle(canManage && !activeRun && !!lastRunInfo && ['cancelled', 'failed', 'partial'].includes(lastRunInfo.status));
+                    .toggle(canManage && !live && !!lastRunInfo && ['cancelled', 'failed', 'partial'].includes(lastRunInfo.status));
             }
 
             function renderProgress(a) {

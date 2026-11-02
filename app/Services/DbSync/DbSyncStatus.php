@@ -164,17 +164,32 @@ class DbSyncStatus
         }
 
         if ($active['stalled'] || $force) {
-            DB::table('db_sync_runs')->where('id', $active['id'])->where('status', 'running')->update([
-                'status' => 'cancelled',
-                'finished_at' => now(),
-                'duration_ms' => $active['elapsed_seconds'] * 1000,
-                'error' => $active['stalled']
-                    ? 'Proses sinkron tidak merespons; dibatalkan manual dari dashboard.'
-                    : 'Dihentikan paksa dari dashboard.',
-                'updated_at' => now(),
-            ]);
+            // Semua baris "running" yang macet ditutup sekaligus (bisa ada beberapa sisa proses mati yang
+            // menumpuk). Paksa = semua baris running, termasuk yang masih terlihat hidup.
+            $stallBefore = now()->subMinutes(max(1, (int) config('dbsync.stall_minutes', 5)));
+            $rows = DB::table('db_sync_runs')
+                ->where('status', 'running')
+                ->when(! $force, fn ($q) => $q->where('updated_at', '<', $stallBefore))
+                ->get(['id', 'started_at']);
 
-            return ['ok' => true, 'forced' => true, 'message' => 'Sinkron ditandai dibatalkan. Anda bisa mengulanginya sekarang.'];
+            foreach ($rows as $row) {
+                $elapsed = max(0, now()->timestamp - Carbon::parse($row->started_at)->timestamp);
+                DB::table('db_sync_runs')->where('id', $row->id)->where('status', 'running')->update([
+                    'status' => 'cancelled',
+                    'finished_at' => now(),
+                    'duration_ms' => (int) min($elapsed * 1000, 4000000000),
+                    'error' => $force
+                        ? 'Dihentikan paksa dari dashboard.'
+                        : 'Proses sinkron tidak merespons; dibatalkan manual dari dashboard.',
+                    'updated_at' => now(),
+                ]);
+            }
+
+            return [
+                'ok' => true,
+                'forced' => true,
+                'message' => $rows->count().' sinkron yang macet ditandai dibatalkan. Anda bisa mengulangi sinkron sekarang.',
+            ];
         }
 
         DB::table('db_sync_runs')->where('id', $active['id'])->update(['cancel_requested' => true]);
