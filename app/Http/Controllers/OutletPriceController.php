@@ -168,8 +168,14 @@ class OutletPriceController extends Controller
                 ->groupBy('product_id')
                 ->pluck('total_qty', 'product_id');
 
-            $prices->getCollection()->each(function (OutletPrice $price) use ($calculator, $latestHpp, $outletStocks) {
+            // Supplier terkait per produk (PO terakhir, atau relasi supplier terakhir bila belum ada PO).
+            $supplierNames = $this->relatedSupplierNames($prices->getCollection()->pluck('product_id')->unique()->values()->all());
+
+            $prices->getCollection()->each(function (OutletPrice $price) use ($calculator, $latestHpp, $outletStocks, $supplierNames) {
                 $product = $price->product;
+
+                $price->setAttribute('category_name', $product?->category?->name);
+                $price->setAttribute('supplier_name', $supplierNames[$price->product_id] ?? null);
 
                 $price->setAttribute('print_hpp', (float) ($latestHpp[$price->product_id] ?? 0));
                 $price->setAttribute('outlet_stock_qty', (int) ($outletStocks[$price->product_id] ?? 0));
@@ -199,7 +205,72 @@ class OutletPriceController extends Controller
             'showAll' => $showAll,
             'showLatest' => $showLatest,
             'searchTerm' => $search,
+            'categories' => $mode === 'products' ? Category::orderBy('name')->get(['id', 'name']) : collect(),
         ]);
+    }
+
+    /**
+     * Nama supplier terkait per produk untuk satu halaman (2 query + 1 untuk nama, tanpa N+1).
+     *
+     * Aturan:
+     *  1. Kalau produk sudah pernah masuk PO: supplier dari PO terbaru yang memuat produk itu.
+     *  2. Kalau belum pernah ada PO: supplier yang paling akhir dikaitkan ke produk (product_supplier).
+     *
+     * @param  array<int,int>  $productIds
+     * @return array<int,string>  product_id => nama supplier
+     */
+    private function relatedSupplierNames(array $productIds): array
+    {
+        if (! $productIds) {
+            return [];
+        }
+
+        $supplierIds = [];
+
+        // 1. PO terakhir (urut dari yang terbaru, ambil kemunculan pertama per produk).
+        $poRows = DB::table('pembelian_products as pp')
+            ->join('pembelians as po', 'po.id', '=', 'pp.pembelian_id')
+            ->whereIn('pp.product_id', $productIds)
+            ->when(\Illuminate\Support\Facades\Schema::hasColumn('pembelian_products', 'deleted_at'), fn ($q) => $q->whereNull('pp.deleted_at'))
+            ->when(\Illuminate\Support\Facades\Schema::hasColumn('pembelians', 'deleted_at'), fn ($q) => $q->whereNull('po.deleted_at'))
+            ->whereNotNull('po.supplier_id')
+            ->orderByDesc('po.created_at')
+            ->orderByDesc('po.id')
+            ->get(['pp.product_id', 'po.supplier_id']);
+
+        foreach ($poRows as $row) {
+            $supplierIds[$row->product_id] ??= (int) $row->supplier_id;
+        }
+
+        // 2. Belum ada PO: supplier yang paling akhir dikaitkan.
+        $missing = array_values(array_diff($productIds, array_keys($supplierIds)));
+        if ($missing) {
+            $linkRows = DB::table('product_supplier')
+                ->whereIn('product_id', $missing)
+                ->orderByDesc('id') // relasi dibuat tanpa timestamps (withTimestamps), jadi id terbesar = paling akhir dikaitkan
+                ->get(['product_id', 'supplier_id']);
+
+            foreach ($linkRows as $row) {
+                $supplierIds[$row->product_id] ??= (int) $row->supplier_id;
+            }
+        }
+
+        if (! $supplierIds) {
+            return [];
+        }
+
+        $names = Supplier::withTrashed()
+            ->whereIn('id', array_unique($supplierIds))
+            ->pluck('name', 'id');
+
+        $result = [];
+        foreach ($supplierIds as $productId => $supplierId) {
+            if (isset($names[$supplierId])) {
+                $result[$productId] = $names[$supplierId];
+            }
+        }
+
+        return $result;
     }
 
     /**
@@ -239,7 +310,7 @@ class OutletPriceController extends Controller
         $order = $ids->flip();
 
         $page->setCollection(
-            OutletPrice::with(['outlet', 'product'])
+            OutletPrice::with(['outlet', 'product.category'])
                 ->whereIn('id', $ids)
                 ->get()
                 ->sortBy(fn (OutletPrice $price) => $order[$price->id])
@@ -656,6 +727,62 @@ class OutletPriceController extends Controller
                 'outlet_id' => $request->filled('outlet_id') ? (int) $request->input('outlet_id') : null,
             ]))
             ->with('toast_success', $message);
+    }
+
+    /**
+     * Edit cepat satu kolom produk dari tabel master harga (klik 2x pada sel).
+     * Hanya barcode (code), nama (name), dan kategori (category_id). Satu kolom per request.
+     *
+     * Sengaja TIDAK memakai updateProduct(): itu mewajibkan seluruh isi panel, menambah update_count,
+     * dan bisa memicu Other Income Listing. Edit cepat hanya mengubah kolom yang dikirim.
+     * Perubahan tetap tercatat di activity log dan cache folder ikut di-reset oleh model Product.
+     */
+    public function inlineUpdateProduct(Request $request, Product $product)
+    {
+        $this->ensureManagementAccess();
+
+        $field = (string) $request->input('field');
+        abort_unless(in_array($field, ['code', 'name', 'category_id'], true), 422, 'Kolom tidak boleh diedit dari sini.');
+
+        $value = $request->input('value');
+        if (in_array($field, ['code', 'name'], true)) {
+            $value = trim((string) $value);
+            if ($field === 'name') {
+                $value = mb_strtoupper($value, 'UTF-8');
+            }
+        }
+
+        $rules = [
+            'code' => ['required', 'string', 'max:255', \Illuminate\Validation\Rule::unique('products', 'code')->ignore($product->id)],
+            'name' => ['required', 'string', 'max:255'],
+            'category_id' => ['required', 'integer', 'exists:categories,id'],
+        ];
+        $messages = [
+            'code.required' => 'Barcode wajib diisi.',
+            'code.unique' => 'Barcode/Code ini sudah digunakan oleh produk lain.',
+            'name.required' => 'Nama produk wajib diisi.',
+            'category_id.required' => 'Kategori wajib dipilih.',
+            'category_id.exists' => 'Kategori tidak valid.',
+        ];
+
+        $validator = \Illuminate\Support\Facades\Validator::make([$field => $value], [$field => $rules[$field]], $messages);
+        if ($validator->fails()) {
+            return response()->json(['success' => false, 'message' => $validator->errors()->first($field)], 422);
+        }
+
+        DB::transaction(function () use ($product, $field, $value) {
+            $locked = Product::lockForUpdate()->findOrFail($product->id);
+            $locked->update([$field => $field === 'category_id' ? (int) $value : $value]);
+        });
+
+        $product->refresh();
+
+        return response()->json([
+            'success' => true,
+            'field' => $field,
+            'value' => $field === 'category_id' ? (int) $product->category_id : (string) $product->{$field},
+            'display' => $field === 'category_id' ? (string) ($product->category?->name ?? '') : (string) $product->{$field},
+        ]);
     }
 
     public function edit(Request $request, OutletPrice $outletPrice)

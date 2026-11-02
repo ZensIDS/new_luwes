@@ -43,6 +43,7 @@ class ProductResource extends JsonResource
                 'barcode' => $this->code,
                 'code' => $this->code,
                 'harga_jual' => $displayPrice,
+                'price_set' => ! $isOutletContext || $priceRule !== null,
                 'is_serialized' => $this->is_serialized,
                 'total_stock' => $isOutletContext ? $systemStock : $warehouseStock(),
                 'outlet_stock' => $isOutletContext ? $systemStock : null,

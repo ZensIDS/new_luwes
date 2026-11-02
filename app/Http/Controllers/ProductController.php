@@ -137,6 +137,15 @@ class ProductController extends Controller
             $products = $products->whereHas('ownerStocks', $outletStockScope);
         }
 
+        // Pencarian kasir (compact): produk yang harganya belum diatur di Master Harga Jual (outlet-prices)
+        // tidak ditampilkan. Scan barcode (scan=1) tetap menemukan produknya supaya kasir mendapat
+        // pesan "(harga belum diatur)" dan bukan "barcode tidak ditemukan".
+        if ($outletId && $request->boolean('compact') && ! $request->boolean('scan')) {
+            $products = $products->whereHas('outletPrices', function ($priceQuery) use ($outletId) {
+                $priceQuery->where('outlet_id', $outletId)->currentlyActive();
+            });
+        }
+
         if ($request->filled('category_id')) {
             $products = $products->where('category_id', $request->integer('category_id'));
         }

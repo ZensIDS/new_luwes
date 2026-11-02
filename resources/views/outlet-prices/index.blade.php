@@ -23,6 +23,15 @@
         /* Header tabel product memakai <td> (tidak tebal); di sini tetap <th> karena DataTables, jadi ketebalannya disamakan. */
         #example1 thead th, #outlet-prices-empty-table thead th { font-weight: normal; }
         #example1 td.op-note { min-width: 160px; white-space: normal; }
+        /* Supplier dibatasi lebarnya: teks panjang dipotong dengan "..." (nama lengkap muncul saat di-hover). */
+        /* Edit cepat (klik 2x): barcode, nama, kategori. Simpan = Enter, batal = Esc / klik di luar. */
+        #example1 td.inline-edit { cursor: cell; }
+        #example1 td.inline-edit:hover { background: #fffbe6; }
+        #example1 td.inline-edit.ie-saved { background: #dff0d8; transition: background .8s; }
+        #example1 td.inline-edit .ie-input { width: 100%; min-width: 200px; box-sizing: border-box; }
+        #example1 td.inline-edit .select2-container { width: 100% !important; }
+        #example1 td.inline-edit .ie-error { color: #a94442; font-size: 12px; margin-top: 2px; white-space: normal; }
+        #example1 td.op-supplier { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
         /* Card folder (kata pertama nama produk): ringan, tanpa gambar. */
         .opf-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
@@ -181,6 +190,8 @@
                             @endif
                             <th>Barcode</th>
                             <th>Nama Product</th>
+                            <th>Kategori</th>
+                            <th>Supplier</th>
                             <th>HPP</th>
                             @foreach ($componentColumns as $label => $columns)
                                 <th class="text-center">{{ $label }}</th>
@@ -208,8 +219,10 @@
                                         @endif
                                     </td>
                                 @endif
-                                <td>{{ $price->product?->code ?: '—' }}</td>
-                                <td>{{ $price->product?->name }}</td>
+                                <td class="inline-edit" data-field="code" data-value="{{ $price->product?->code }}" data-id="{{ $price->product_id }}" title="Klik 2x untuk edit">{{ $price->product?->code ?: '—' }}</td>
+                                <td class="inline-edit" data-field="name" data-value="{{ $price->product?->name }}" data-id="{{ $price->product_id }}" title="Klik 2x untuk edit">{{ $price->product?->name }}</td>
+                                <td class="inline-edit" data-field="category_id" data-value="{{ $price->product?->category_id }}" data-id="{{ $price->product_id }}" title="Klik 2x untuk edit">{{ $price->category_name ?: '—' }}</td>
+                                <td class="op-supplier" title="{{ $price->supplier_name }}">{{ $price->supplier_name ?: '—' }}</td>
                                 <td>
                                     <button type="button" class="btn btn-xs btn-info btn-hpp-history"
                                         data-toggle="modal" data-target="#hppHistoryModal"
@@ -270,7 +283,7 @@
                                  Pesan kosong ditangani DataTables lewat language.emptyTable. --}}
                             @unless ($selectedOutletId)
                                 <tr>
-                                    <td colspan="15" class="text-center">Pilih outlet terlebih dahulu untuk melihat master harga.</td>
+                                    <td colspan="17" class="text-center">Pilih outlet terlebih dahulu untuk melihat master harga.</td>
                                 </tr>
                             @endunless
                         @endforelse
@@ -387,6 +400,147 @@
                     language: { emptyTable: 'Belum ada master harga untuk outlet ini.' }
                 });
             });
+        </script>
+
+        <script>
+            // Edit cepat: klik 2x pada Barcode / Nama Product / Kategori. Enter = simpan, Esc atau klik di luar = batal.
+            (function () {
+                const categories = @json(($categories ?? collect())->map(fn ($c) => ['id' => $c->id, 'name' => $c->name])->values());
+                const csrf = '{{ csrf_token() }}';
+
+                $(document).on('dblclick', '#example1 td.inline-edit', function () {
+                    const $td = $(this);
+                    if ($td.data('editing')) return;
+
+                    const field = $td.data('field');
+                    const isSelect = field === 'category_id';
+                    const original = String($td.attr('data-value') ?? '');
+                    const originalHtml = $td.html();
+                    // Lebar sel saat ini: input dibuat memenuhi kolom (tidak mengecil mengikuti isi).
+                    const cellWidth = $td.innerWidth() - parseFloat($td.css('padding-left')) - parseFloat($td.css('padding-right'));
+                    let finished = false;
+                    let saving = false;
+
+                    $td.data('editing', true);
+
+                    let $input;
+                    if (isSelect) {
+                        $input = $('<select class="ie-input">');
+                        $input.append($('<option value="">'));
+                        categories.forEach(function (c) {
+                            $input.append($('<option>').val(c.id).text(c.name).prop('selected', String(c.id) === original));
+                        });
+                    } else {
+                        $input = $('<input type="text" class="form-control input-sm ie-input" autocomplete="off">').val(original);
+                    }
+
+                    const $error = $('<div class="ie-error">').hide();
+                    $input.css('min-width', Math.max(cellWidth, 200) + 'px');
+                    $td.empty().append($input, $error);
+
+                    if (isSelect) {
+                        $input.select2({
+                            width: '100%',
+                            placeholder: '— Pilih kategori —',
+                            allowClear: false,
+                            dropdownAutoWidth: true,
+                        });
+                        $input.select2('open');
+                    } else {
+                        $input.trigger('focus');
+                        $input[0].select();
+                    }
+
+                    function teardown() {
+                        finished = true;
+                        $(document).off('mousedown.ie keydown.ie');
+                        if (isSelect) {
+                            try { $input.select2('destroy'); } catch (e) {}
+                        }
+                    }
+
+                    function cancel() {
+                        if (finished || saving) return;
+                        teardown();
+                        $td.data('editing', false).html(originalHtml);
+                    }
+
+                    function save() {
+                        if (finished || saving) return;
+                        const value = String($input.val() ?? '').trim();
+
+                        if (value === original || (isSelect && value === '')) { cancel(); return; }
+
+                        saving = true;
+                        if (!isSelect) $input.prop('disabled', true);
+                        $error.hide();
+
+                        $.ajax({
+                            url: '{{ url('/outlet-prices/products') }}/' + $td.data('id') + '/inline',
+                            method: 'PATCH',
+                            headers: { 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
+                            data: { field: field, value: value },
+                        }).done(function (res) {
+                            teardown();
+                            $td.attr('data-value', res.value);
+                            $td.data('editing', false).text(res.display || '—');
+                            $td.addClass('ie-saved');
+                            setTimeout(function () { $td.removeClass('ie-saved'); }, 900);
+                        }).fail(function (xhr) {
+                            saving = false;
+                            if (!isSelect) $input.prop('disabled', false).trigger('focus');
+                            const msg = xhr.responseJSON && (xhr.responseJSON.message || (xhr.responseJSON.errors && Object.values(xhr.responseJSON.errors)[0][0]))
+                                || 'Gagal menyimpan. Coba lagi.';
+                            $error.text(msg).show();
+                        });
+                    }
+
+                    if (isSelect) {
+                        // Memilih dengan keyboard (Enter di kotak pencarian select2) = simpan.
+                        // Memilih dengan mouse hanya mengganti pilihan; simpan tetap dengan Enter.
+                        $input.on('select2:select', function (e) {
+                            // Select2 hanya menyertakan originalEvent saat dipilih dengan mouse/sentuh; lewat Enter tidak ada.
+                            const oe = e.params && e.params.originalEvent;
+                            const byPointer = oe && /^(mouse|click|touch|pointer)/.test(oe.type);
+                            if (byPointer) {
+                                setTimeout(function () { $td.find('.select2-selection').trigger('focus'); }, 0);
+                            } else {
+                                setTimeout(save, 0);
+                            }
+                        });
+
+                        // Dropdown sudah tertutup dan fokus ada di kotak pilihan: Enter = simpan (bukan buka dropdown lagi).
+                        $td[0].addEventListener('keydown', function (e) {
+                            if (finished || e.key !== 'Enter') return;
+                            if ($input.data('select2') && $input.data('select2').isOpen()) return;
+                            e.preventDefault();
+                            e.stopPropagation();
+                            save();
+                        }, true);
+
+                        // Esc membatalkan (dropdown ada di luar sel, jadi didengarkan di document).
+                        $(document).on('keydown.ie', function (e) {
+                            if (e.key === 'Escape') { setTimeout(cancel, 0); }
+                        });
+                    } else {
+                        $input.on('keydown', function (e) {
+                            if (e.key === 'Enter') { e.preventDefault(); save(); }
+                            else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+                        });
+                        // Klik di luar (blur) dianggap batal, sama seperti Esc.
+                        $input.on('blur', function () { setTimeout(cancel, 0); });
+                    }
+
+                    // Klik di luar sel (dan di luar dropdown select2) = batal.
+                    if (isSelect) {
+                        $(document).on('mousedown.ie', function (e) {
+                            const $t = $(e.target);
+                            if ($t.closest($td).length || $t.closest('.select2-container').length) return;
+                            cancel();
+                        });
+                    }
+                });
+            })();
         </script>
     @endif
 @endsection

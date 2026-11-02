@@ -232,6 +232,13 @@
         </li>
         @endif
 
+        {{-- Metode Pembayaran (superadmin, staff-outlet) --}}
+        @if (in_array($role, ['superadmin', 'staff-outlet']))
+        <li class="{{ request()->is('payment*') ? 'active' : '' }}">
+            <a href="{{ route('payment.index') }}"><i class="fa fa-credit-card"></i><span>Metode Pembayaran</span></a>
+        </li>
+        @endif
+
         {{-- Pendapatan Lain / Other Income (tidak ditampilkan untuk admin-gudang & kasir; menu Kategori hanya superadmin & owner) --}}
         @if (! in_array($role, ['admin-gudang', 'kasir']))
         <li class="treeview {{ request()->is('other-income*') ? 'active' : '' }}">

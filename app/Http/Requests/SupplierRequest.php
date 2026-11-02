@@ -3,6 +3,8 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
+use App\Models\Supplier;
 
 class SupplierRequest extends FormRequest
 {
@@ -13,8 +15,17 @@ class SupplierRequest extends FormRequest
 
     public function rules()
     {
+        $supplier = $this->route('supplier');
+        $ignoreId = $supplier instanceof Supplier ? $supplier->id : $supplier;
+
         return [
-            'kode_supplier'            => 'required|string',
+            'kode_supplier'            => [
+                'required',
+                'string',
+                Rule::unique('suppliers', 'kode_supplier')
+                    ->whereNull('deleted_at')
+                    ->ignore($ignoreId),
+            ],
             'name'                     => 'required|string',
             'alamat'                   => 'required|string',
             'no_telp'                  => 'required|string',
@@ -30,6 +41,7 @@ class SupplierRequest extends FormRequest
         return [
             'kode_supplier.required' => 'Kode supplier wajib diisi.',
             'kode_supplier.string' => 'Kode supplier harus berupa teks.',
+            'kode_supplier.unique' => 'Kode supplier sudah digunakan supplier lain.',
 
             'name.required' => 'Nama supplier wajib diisi.',
             'name.string' => 'Nama supplier harus berupa teks.',
