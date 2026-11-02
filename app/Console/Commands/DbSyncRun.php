@@ -43,7 +43,15 @@ class DbSyncRun extends Command
                         $stats['baseline'] ?? 0, $stats['deferred'] ?? 0, $stats['conflicts'] ?? 0,
                     ));
                 }
-            }
+            },
+            [
+                'source' => 'cli',
+                'scope' => [
+                    'groups' => $this->option('group'),
+                    'tables' => $this->option('table'),
+                    'force' => (bool) $this->option('force'),
+                ],
+            ]
         );
 
         // Tabel yang gagal sebelum disinkron (mis. struktur kolom berbeda) tidak lewat callback di atas.
@@ -57,6 +65,10 @@ class DbSyncRun extends Command
             $this->error('Sinkron gagal: '.$result['error']);
 
             return self::FAILURE;
+        }
+
+        if ($result['status'] === 'cancelled') {
+            $this->warn('Sinkron dibatalkan dari dashboard. Jalankan lagi untuk melanjutkan; data yang sudah tersinkron tetap aman.');
         }
 
         $this->info(sprintf(

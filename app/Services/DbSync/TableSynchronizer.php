@@ -82,20 +82,52 @@ class TableSynchronizer
         }
 
         foreach (array_chunk($plan['pull_new'], $this->options['batch_size'], true) as $batch) {
+            if ($this->stopped()) {
+                return $this->cancelledStats();
+            }
             $this->pullNew($batch);
         }
 
         foreach (array_chunk($plan['push_new'], $this->options['batch_size'], true) as $batch) {
+            if ($this->stopped()) {
+                return $this->cancelledStats();
+            }
             $this->pushNew($batch);
         }
 
         foreach (array_chunk($plan['compare'], $this->options['batch_size'], true) as $batch) {
+            if ($this->stopped()) {
+                return $this->cancelledStats();
+            }
             $this->compare($batch);
         }
 
         foreach ($plan['rows'] as $id => [$action, $localHash, $serverHash]) {
+            if ($this->stopped()) {
+                return $this->cancelledStats();
+            }
             $this->syncRow($id, $action, $localHash, $serverHash);
         }
+
+        return $this->stats;
+    }
+
+    /**
+     * Dipanggil di antara batch: memperbarui progres + tanda hidup di DbSyncService dan
+     * mengembalikan true bila pengguna meminta pembatalan. Batch yang sudah berjalan selalu
+     * diselesaikan dulu, jadi tidak ada baris yang setengah tersinkron.
+     */
+    private function stopped(): bool
+    {
+        $callback = $this->options['cancelled'] ?? null;
+
+        return $callback ? (bool) $callback($this->stats) : false;
+    }
+
+    private function cancelledStats(): array
+    {
+        $this->stats['cancelled'] = true;
+        $this->stats['warnings'][] = 'Dibatalkan di tengah tabel ini; baris yang belum sempat diproses dilanjutkan pada sinkron berikutnya.';
 
         return $this->stats;
     }

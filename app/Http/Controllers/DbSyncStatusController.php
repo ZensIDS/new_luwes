@@ -24,6 +24,28 @@ class DbSyncStatusController extends Controller
         return response()->json($snapshot);
     }
 
+    /**
+     * Progres sinkron yang sedang berjalan (di-poll dashboard tiap beberapa detik). Ringan: hanya
+     * membaca database lokal, tanpa mengecek koneksi ke hosting.
+     */
+    public function progress(DbSyncStatus $status): JsonResponse
+    {
+        return response()->json([
+            'active' => $status->activeRun(),
+            'last' => $status->lastFinished(),
+        ]);
+    }
+
+    /** Batalkan sinkron yang sedang berjalan (jadwal otomatis maupun manual). */
+    public function cancel(Request $request, DbSyncStatus $status): JsonResponse
+    {
+        abort_unless($this->canManage($request), 403);
+
+        $result = $status->requestCancel($request->boolean('force'));
+
+        return response()->json($result, $result['ok'] ? 200 : 422);
+    }
+
     /** Sama dengan: php artisan dbsync:run [--dry-run] [--group=..] [--force] */
     public function run(Request $request, DbSyncService $sync): JsonResponse
     {
@@ -34,6 +56,9 @@ class DbSyncStatusController extends Controller
             'force' => ['boolean'],
             'groups' => ['nullable', 'array'],
             'groups.*' => ['string', Rule::in(array_keys($sync->groups()))],
+            // Dipakai "Ulangi Sinkron" bila sinkron sebelumnya dijalankan per tabel dari artisan.
+            'tables' => ['nullable', 'array'],
+            'tables.*' => ['string', Rule::in($sync->syncableTables())],
         ]);
 
         // Sinkron pertama bisa beberapa menit; jangan berhenti bila browser ditutup.
@@ -42,9 +67,18 @@ class DbSyncStatusController extends Controller
 
         try {
             $result = $sync->run(
-                $sync->tablesForGroups($data['groups'] ?? []),
+                array_values(array_unique(array_merge($data['tables'] ?? [], $sync->tablesForGroups($data['groups'] ?? [])))),
                 (bool) ($data['force'] ?? false),
                 (bool) ($data['dry_run'] ?? false),
+                null,
+                [
+                    'source' => 'manual',
+                    'scope' => [
+                        'groups' => $data['groups'] ?? [],
+                        'tables' => $data['tables'] ?? [],
+                        'force' => (bool) ($data['force'] ?? false),
+                    ],
+                ],
             );
         } catch (Throwable $e) {
             return response()->json(['message' => $e->getMessage()], 422);

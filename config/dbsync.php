@@ -163,4 +163,7 @@ return [
     // Riwayat sinkron disimpan sekian hari.
     'keep_runs_days' => 14,
 
+    // Sinkron berstatus "berjalan" tanpa tanda kehidupan sekian menit dianggap macet (proses mati / PC dimatikan).
+    'stall_minutes' => (int) env('DB_SYNC_STALL_MINUTES', 5),
+
 ];

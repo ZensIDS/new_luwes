@@ -19,6 +19,7 @@ class DbSyncStatus
         $isLocalNode = (bool) config('dbsync.enabled');
         $connection = $configured && $checkConnection ? $this->checkConnection() : null;
         $lastRun = $this->lastRun();
+        $activeRun = $this->activeRun();
         $lastSuccess = rescue(fn () => DB::table('db_sync_runs')
             ->whereIn('status', ['success', 'partial'])
             ->max('finished_at'), null, false);
@@ -37,9 +38,13 @@ class DbSyncStatus
                 .'lalu php artisan config:clear; tanpa itu id baru di lokal & hosting bisa bentrok.',
                 $wantOffset, $isLocalNode ? 'server lokal' : 'hosting', $autoIncrement['increment'], $autoIncrement['offset']
             )],
+            $activeRun => $activeRun['stalled']
+                ? ['warning', 'Sinkron tampak macet: tidak ada kemajuan sejak '.$activeRun['idle_minutes'].' menit lalu. Batalkan lalu ulangi.']
+                : ['ok', 'Sinkron sedang berjalan ('.$activeRun['percent'].'%).'],
             ! $isLocalNode && ! $lastRun && ! $configured => ['unconfigured', 'Belum ada server lokal yang tersinkron ke database ini.'],
             $isLocalNode && ! $configured => ['error', 'DB_SERVER_* belum diisi di .env server lokal.'],
             $lastRun && $lastRun['status'] === 'failed' => ['error', 'Sinkron terakhir gagal.'],
+            $lastRun && $lastRun['status'] === 'cancelled' => ['warning', 'Sinkron terakhir dibatalkan sebelum selesai. Klik "Ulangi Sinkron" untuk melanjutkan.'],
             $isLocalNode && ! $lastRun => ['warning', 'Belum pernah sinkron. Sinkron pertama berjalan otomatis dalam '
                 .config('dbsync.interval', 2).' menit (atau jalankan sekarang: make sync).'],
             $stale => ['warning', $isLocalNode
@@ -62,6 +67,7 @@ class DbSyncStatus
             'connection' => $connection,
             'interval' => (int) config('dbsync.interval', 2),
             'last_run' => $lastRun,
+            'active_run' => $activeRun,
             'last_success_at' => $lastSuccess ? Carbon::parse($lastSuccess)->toIso8601String() : null,
             'last_success_human' => $lastSuccess ? Carbon::parse($lastSuccess)->locale('id')->diffForHumans() : null,
             'checked_at' => now()->toIso8601String(),
@@ -76,6 +82,104 @@ class DbSyncStatus
 
             return ['increment' => (int) $row->i, 'offset' => (int) $row->o];
         }, null, false);
+    }
+
+    /**
+     * Sinkron yang sedang berjalan (jadwal otomatis, tombol dashboard, atau artisan), atau null.
+     * Dibaca dari db_sync_runs, jadi terlihat dari container / proses mana pun.
+     */
+    public function activeRun(): ?array
+    {
+        $run = rescue(fn () => DB::table('db_sync_runs')
+            ->where('status', 'running')
+            ->latest('started_at')
+            ->latest('id')
+            ->first(), null, false);
+
+        if (! $run) {
+            return null;
+        }
+
+        $startedAt = Carbon::parse($run->started_at);
+        $beat = Carbon::parse($run->updated_at ?? $run->started_at);
+        $elapsed = max(0, now()->timestamp - $startedAt->timestamp);
+        $idle = max(0, now()->timestamp - $beat->timestamp);
+        $total = (int) ($run->total_tables ?? 0);
+        $done = min((int) ($run->done_tables ?? 0), $total);
+        $stallSeconds = max(1, (int) config('dbsync.stall_minutes', 5)) * 60;
+
+        return [
+            'id' => (int) $run->id,
+            'source' => $run->source ?? 'cli',
+            'started_at' => $startedAt->toIso8601String(),
+            'elapsed_seconds' => $elapsed,
+            'total_tables' => $total,
+            'done_tables' => $done,
+            'current_table' => $run->current_table ?? null,
+            'rows_so_far' => (int) ($run->rows_so_far ?? 0),
+            'percent' => $total > 0 ? (int) floor($done / $total * 100) : 0,
+            // Perkiraan kasar (ukuran tabel berbeda-beda): rata-rata waktu per tabel yang sudah tuntas.
+            'eta_seconds' => $done >= 2 && $total > $done ? (int) round($elapsed / $done * ($total - $done)) : null,
+            'cancel_requested' => (bool) ($run->cancel_requested ?? false),
+            'idle_seconds' => $idle,
+            'idle_minutes' => (int) floor($idle / 60),
+            'stalled' => $idle >= $stallSeconds,
+            'trackable' => property_exists($run, 'total_tables'),
+        ];
+    }
+
+    /** Ringkasan sinkron terakhir yang sudah selesai (untuk pesan "selesai" setelah progres hilang). */
+    public function lastFinished(): ?array
+    {
+        $run = $this->latestRun();
+
+        return $run ? [
+            'id' => (int) $run->id,
+            'status' => $run->status,
+            'rows_changed' => (int) $run->rows_changed,
+            'error_count' => (int) $run->error_count,
+            'conflict_count' => (int) ($run->conflict_count ?? 0),
+            'duration_ms' => $run->duration_ms,
+            'error' => $run->error,
+        ] : null;
+    }
+
+    /**
+     * Minta sinkron yang sedang berjalan berhenti. Normalnya hanya memasang tanda: proses sinkron
+     * berhenti sendiri dengan aman setelah batch yang sedang berjalan selesai. Bila prosesnya
+     * sudah mati / macet (atau $force), barisnya langsung ditandai dibatalkan.
+     *
+     * @return array{ok: bool, message: string, forced?: bool}
+     */
+    public function requestCancel(bool $force = false): array
+    {
+        $active = $this->activeRun();
+
+        if (! $active) {
+            return ['ok' => false, 'message' => 'Tidak ada sinkron yang sedang berjalan.'];
+        }
+
+        if (! $active['trackable']) {
+            return ['ok' => false, 'message' => 'Jalankan "php artisan migrate" (di server lokal dan hosting) agar sinkron bisa dibatalkan dari dashboard.'];
+        }
+
+        if ($active['stalled'] || $force) {
+            DB::table('db_sync_runs')->where('id', $active['id'])->where('status', 'running')->update([
+                'status' => 'cancelled',
+                'finished_at' => now(),
+                'duration_ms' => $active['elapsed_seconds'] * 1000,
+                'error' => $active['stalled']
+                    ? 'Proses sinkron tidak merespons; dibatalkan manual dari dashboard.'
+                    : 'Dihentikan paksa dari dashboard.',
+                'updated_at' => now(),
+            ]);
+
+            return ['ok' => true, 'forced' => true, 'message' => 'Sinkron ditandai dibatalkan. Anda bisa mengulanginya sekarang.'];
+        }
+
+        DB::table('db_sync_runs')->where('id', $active['id'])->update(['cancel_requested' => true]);
+
+        return ['ok' => true, 'message' => 'Permintaan batal dikirim. Sinkron berhenti setelah batch yang sedang berjalan selesai.'];
     }
 
     public function checkConnection(): array
@@ -153,7 +257,9 @@ class DbSyncStatus
         [$errors, $conflicts] = $this->collect($run);
 
         return [
+            'id' => (int) $run->id,
             'status' => $run->status,
+            'scope' => ($run->scope ?? null) ? json_decode($run->scope, true) : null,
             'started_at' => Carbon::parse($run->started_at)->toIso8601String(),
             'started_human' => Carbon::parse($run->started_at)->locale('id')->diffForHumans(),
             'duration_ms' => $run->duration_ms,

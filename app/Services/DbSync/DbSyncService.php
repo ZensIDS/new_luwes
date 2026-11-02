@@ -31,8 +31,9 @@ class DbSyncService
     /**
      * @param  string[]  $onlyTables
      * @param  callable(string $table, array $stats):void|null  $progress
+     * @param  array{source?: string, scope?: array}  $meta  asal sinkron (manual|cli) + cakupannya, untuk dashboard
      */
-    public function run(array $onlyTables = [], bool $force = false, bool $dryRun = false, ?callable $progress = null): array
+    public function run(array $onlyTables = [], bool $force = false, bool $dryRun = false, ?callable $progress = null, array $meta = []): array
     {
         if (! self::isConfigured()) {
             throw new RuntimeException('DB_SERVER_HOST / DB_SERVER_DATABASE belum diisi di .env.');
@@ -45,38 +46,119 @@ class DbSyncService
         $started = microtime(true);
         $local = $this->localConnection();
         $server = DB::connection(config('dbsync.server_connection'));
+
+        // Kolom progres (migrasi 2026_11_02_000001) belum tentu sudah ada: tanpa itu sinkron tetap
+        // jalan seperti biasa, hanya tanpa progres / tombol batal di dashboard.
+        $tracked = ! $dryRun && (bool) rescue(
+            fn () => $local->getSchemaBuilder()->hasColumn('db_sync_runs', 'total_tables'), false, false
+        );
         $runId = $dryRun ? null : $local->table('db_sync_runs')->insertGetId([
             'node' => 'local',
             'status' => 'running',
             'started_at' => $startedAt,
             'created_at' => $startedAt,
             'updated_at' => $startedAt,
-        ]);
+        ] + ($tracked ? [
+            'source' => $meta['source'] ?? 'cli',
+            'scope' => isset($meta['scope']) ? json_encode($meta['scope']) : null,
+        ] : []));
+
+        $touch = fn (array $values) => $tracked && $runId
+            ? rescue(fn () => $local->table('db_sync_runs')->where('id', $runId)->update($values + ['updated_at' => now()]), null, false)
+            : null;
+
+        // Dipanggil di antara batch oleh TableSynchronizer: tanda hidup + jumlah baris + cek permintaan batal.
+        // Akses database dibatasi sekali per 2 detik.
+        $state = ['beat' => 0.0, 'cancel' => false, 'done_rows' => 0];
+        $checkpoint = function (array $stats = [], bool $immediate = false) use ($tracked, $runId, $local, &$state): bool {
+            if (! $tracked || ! $runId) {
+                return false;
+            }
+            if ($state['cancel']) {
+                return true;
+            }
+            $now = microtime(true);
+            if (! $immediate && $now - $state['beat'] < 2) {
+                return false;
+            }
+            $state['beat'] = $now;
+
+            rescue(function () use ($local, $runId, $stats, &$state) {
+                $local->table('db_sync_runs')->where('id', $runId)->update([
+                    'rows_so_far' => $state['done_rows'] + ($stats ? $this->changedRows($stats) : 0),
+                    'updated_at' => now(),
+                ]);
+                $state['cancel'] = (bool) $local->table('db_sync_runs')->where('id', $runId)->value('cancel_requested');
+            }, null, false);
+
+            return $state['cancel'];
+        };
 
         $summary = [];
         $synced = [];
+        $columns = [];
+        $done = 0;
         $fatal = null;
+        $cancelled = false;
+        $busy = false;
         $lockName = 'dbsync:'.$server->getDatabaseName();
         $locked = false;
 
         try {
             $locked = (int) $server->selectOne('SELECT GET_LOCK(?, 0) AS l', [$lockName])->l === 1;
             if (! $locked) {
+                $busy = true;
                 throw new RuntimeException('Sinkronisasi lain sedang berjalan ke database hosting ini.');
+            }
+
+            // Kunci sudah di tangan kita: baris "running" lain pasti milik proses yang sudah mati.
+            if ($runId) {
+                rescue(fn () => $local->table('db_sync_runs')
+                    ->where('status', 'running')->where('id', '<', $runId)
+                    ->update([
+                        'status' => 'failed',
+                        'finished_at' => now(),
+                        'error' => 'Proses sinkron sebelumnya terhenti tidak normal (PC mati / proses dihentikan).',
+                        'updated_at' => now(),
+                    ]), null, false);
             }
 
             $this->preflight($local, $server, $dryRun);
             $columns = $this->compareSchema($local, $server, $onlyTables, $summary);
-            $synced = array_keys($columns);
+            $touch(['total_tables' => count($columns)]);
+
             foreach ($columns as $table => $schema) {
+                if ($checkpoint([], true)) {
+                    $cancelled = true;
+                    break;
+                }
+
+                $touch(['current_table' => $table]);
+
                 try {
-                    $summary[$table] = $this->synchronizer($local, $server, $table, $schema, $force, $dryRun)->run();
+                    $summary[$table] = $this->synchronizer($local, $server, $table, $schema, $force, $dryRun, $checkpoint)->run();
                 } catch (Throwable $e) {
                     $summary[$table] = ['failed' => 1, 'errors' => [mb_strimwidth($e->getMessage(), 0, 300, '…')]];
                 }
 
+                $state['done_rows'] += $this->changedRows($summary[$table]);
+
+                // Tabel yang dibatalkan di tengah jalan tidak dihitung tuntas dan salinan konfliknya tidak diganti.
+                if (! empty($summary[$table]['cancelled'])) {
+                    $cancelled = true;
+                } else {
+                    $synced[] = $table;
+                    $done++;
+                }
+
+                $touch(['done_tables' => $done, 'rows_so_far' => $state['done_rows']]);
+
                 if ($progress) {
                     $progress($table, $summary[$table]);
+                }
+
+                if ($cancelled) {
+                    break;
                 }
             }
         } catch (Throwable $e) {
@@ -87,6 +169,11 @@ class DbSyncService
             }
         }
 
+        // Sinkron lain masih berjalan: baris ini tidak dicatat, supaya tidak menutupi hasil sinkron yang sebenarnya.
+        if ($busy && $runId) {
+            $local->table('db_sync_runs')->where('id', $runId)->delete();
+        }
+
         // Data perbedaan konflik disimpan terpisah (db_sync_conflicts), bukan di ringkasan riwayat sinkron.
         $snapshots = [];
         foreach ($summary as $table => $stats) {
@@ -95,12 +182,12 @@ class DbSyncService
         }
 
         $summary = array_filter($summary, fn ($s) => $this->changedRows($s) > 0
-            || ($s['failed'] ?? 0) > 0 || ($s['conflicts'] ?? 0) > 0 || ! empty($s['errors']));
+            || ($s['failed'] ?? 0) > 0 || ($s['conflicts'] ?? 0) > 0 || ! empty($s['errors']) || ! empty($s['cancelled']));
         $errorCount = array_sum(array_map(fn ($s) => (int) ($s['failed'] ?? 0), $summary));
         $conflictCount = array_sum(array_map(fn ($s) => (int) ($s['conflicts'] ?? 0), $summary));
 
         $result = [
-            'status' => $fatal ? 'failed' : ($errorCount + $conflictCount > 0 ? 'partial' : 'success'),
+            'status' => $fatal ? 'failed' : ($cancelled ? 'cancelled' : ($errorCount + $conflictCount > 0 ? 'partial' : 'success')),
             'started_at' => $startedAt,
             'finished_at' => now(),
             'duration_ms' => (int) round((microtime(true) - $started) * 1000),
@@ -111,8 +198,13 @@ class DbSyncService
             'tables' => $summary,
         ];
 
-        if (! $dryRun) {
-            $this->recordRun($local, $server, $runId, $result);
+        if (! $dryRun && ! $busy) {
+            $this->recordRun($local, $server, $runId, $result, $tracked ? [
+                'total_tables' => count($columns),
+                'done_tables' => $done,
+                'current_table' => null,
+                'rows_so_far' => $result['rows_changed'],
+            ] : []);
             $this->storeConflicts($server, $synced, $summary, $snapshots);
         }
 
@@ -323,7 +415,7 @@ class DbSyncService
     }
 
     /** @param  array{0: string[], 1: string[], 2: bool}  $schema */
-    private function synchronizer(Connection $local, Connection $server, string $table, array $schema, bool $force, bool $dryRun): TableSynchronizer
+    private function synchronizer(Connection $local, Connection $server, string $table, array $schema, bool $force, bool $dryRun, ?callable $cancelled = null): TableSynchronizer
     {
         [$names, $generated, $intKey] = $schema;
 
@@ -347,6 +439,7 @@ class DbSyncService
                 'append_only' => in_array($table, config('dbsync.append_only', []), true),
                 'force' => $force,
                 'dry_run' => $dryRun,
+                'cancelled' => $cancelled,
             ],
         );
     }
@@ -538,7 +631,8 @@ class DbSyncService
         }, report: false);
     }
 
-    private function recordRun(Connection $local, Connection $server, ?int $runId, array $result): void
+    /** @param  array<string, mixed>  $localOnly  kolom progres akhir (hanya di tabel lokal) */
+    private function recordRun(Connection $local, Connection $server, ?int $runId, array $result, array $localOnly = []): void
     {
         $record = [
             'node' => 'local',
@@ -555,7 +649,7 @@ class DbSyncService
         ];
         $cutoff = now()->subDays((int) config('dbsync.keep_runs_days', 14));
 
-        $local->table('db_sync_runs')->where('id', $runId)->update($record);
+        $local->table('db_sync_runs')->where('id', $runId)->update($record + $localOnly);
         $local->table('db_sync_runs')->where('started_at', '<', $cutoff)->delete();
 
         // Salinan ke hosting supaya dashboard hosting tahu status server lokal.

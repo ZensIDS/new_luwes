@@ -434,6 +434,29 @@
                     </div>
                     <div class="box-body">
                         <p id="dbSyncMessage" class="text-muted" style="margin-bottom:10px">Memeriksa koneksi ke database hosting…</p>
+
+                        {{-- Progres sinkron yang sedang berjalan (otomatis terjadwal maupun manual) --}}
+                        <div id="dbSyncProgress" style="display:none;margin-bottom:12px;padding:10px 12px;border:1px solid #d2d6de;border-radius:3px;background:#fafafa">
+                            <div class="clearfix" style="margin-bottom:6px">
+                                <b id="dbSyncProgTitle">Sinkron sedang berjalan</b>
+                                <span class="pull-right text-muted small" id="dbSyncProgTime"></span>
+                            </div>
+                            <div class="progress progress-sm active" style="margin-bottom:6px">
+                                <div class="progress-bar progress-bar-primary progress-bar-striped" id="dbSyncProgBar" role="progressbar" style="width:0%"></div>
+                            </div>
+                            <div class="small" id="dbSyncProgDetail"></div>
+                            @if(in_array(auth()->user()->role, \App\Http\Controllers\DbSyncStatusController::MANAGER_ROLES, true))
+                            <div style="margin-top:8px">
+                                <button type="button" class="btn btn-danger btn-xs" id="dbSyncBtnCancel">
+                                    <i class="fa fa-stop"></i> Batalkan Sinkron
+                                </button>
+                                <button type="button" class="btn btn-default btn-xs" id="dbSyncBtnForce" style="display:none"
+                                    title="Gunakan hanya bila proses sudah mati / tidak bergerak">
+                                    <i class="fa fa-bolt"></i> Paksa Berhenti
+                                </button>
+                            </div>
+                            @endif
+                        </div>
                         <table class="table table-condensed" style="margin-bottom:0">
                             <tbody>
                                 <tr><th style="width:200px">Mode aplikasi ini</th><td id="dbSyncNode">—</td></tr>
@@ -509,6 +532,10 @@
                                 </button>
                                 <button type="button" class="btn btn-primary btn-sm" id="dbSyncBtnRun">
                                     <i class="fa fa-refresh"></i> Sinkron Sekarang
+                                </button>
+                                <button type="button" class="btn btn-success btn-sm" id="dbSyncBtnRetry" style="display:none"
+                                    title="Jalankan lagi sinkron terakhir dengan cakupan yang sama">
+                                    <i class="fa fa-repeat"></i> Ulangi Sinkron
                                 </button>
                                 <div class="btn-group">
                                     <button type="button" class="btn btn-warning btn-sm dropdown-toggle" id="dbSyncBtnBulk" data-toggle="dropdown" disabled
@@ -829,13 +856,18 @@
                 error: { box: 'box-danger', label: 'label-danger', text: 'Error' },
                 unconfigured: { box: 'box-default', label: 'label-default', text: 'Belum dikonfigurasi' },
             };
-            const STATUS = { success: 'Berhasil', partial: 'Sebagian gagal', failed: 'Gagal', running: 'Berjalan' };
+            const STATUS = { success: 'Berhasil', partial: 'Sebagian gagal', failed: 'Gagal', running: 'Berjalan', cancelled: 'Dibatalkan' };
             const esc = (s) => $('<div>').text(s ?? '').html();
             let canManage = false;
             let node = null;
             let groups = {};
             let resolved = { run: null, keys: new Set() };   // konflik yang sudah diselesaikan sejak sinkron terakhir
             let conflicts = [];                               // konflik yang masih tampil
+            let activeRun = null;                             // sinkron yang sedang berjalan (dari /db-sync/progress)
+            let busyOn = false;                               // permintaan dari halaman ini sedang berjalan
+            let lastRunInfo = null;                           // sinkron terakhir yang selesai (untuk "Ulangi")
+            let cancelAskedAt = 0;                            // kapan tombol Batalkan ditekan
+            let pollTimer = null;
 
             function render(s) {
                 const h = HEALTH[s.health] || HEALTH.unconfigured;
@@ -876,6 +908,12 @@
 
                 canManage = !!s.can_manage;
                 node = s.node;
+                lastRunInfo = run || null;
+                if (s.active_run !== undefined) {
+                    activeRun = s.active_run;
+                    renderProgress(activeRun);
+                }
+                applyActive();
                 if (resolved.run !== run?.started_at) {
                     resolved = { run: run?.started_at, keys: new Set() };
                 }
@@ -947,12 +985,103 @@
             }
 
             function busy(on, text) {
+                busyOn = on;
                 $('#dbSyncActions button, .dbsync-keep').prop('disabled', on);
                 if (on) {
                     $('#dbSyncResult').show().html('<p class="text-muted"><i class="fa fa-spinner fa-spin"></i> ' + esc(text) + '</p>');
                 } else {
                     updateBulk();
+                    applyActive();
                 }
+            }
+
+            const fmtDur = (sec) => {
+                sec = Math.max(0, Math.round(sec));
+                const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), x = sec % 60;
+                const pad = (n) => String(n).padStart(2, '0');
+                return (h ? h + ':' + pad(m) : m) + ':' + pad(x);
+            };
+            const nf = new Intl.NumberFormat('id-ID');
+            const SOURCE = { manual: 'dijalankan manual dari dashboard', cli: 'terjadwal / perintah artisan' };
+
+            // Selama ada sinkron berjalan, tombol sinkron dikunci supaya tidak bentrok / dobel.
+            function applyActive() {
+                const lock = busyOn || !!activeRun;
+                $('#dbSyncBtnRun, #dbSyncBtnDry').prop('disabled', lock);
+                $('#dbSyncBtnRetry').prop('disabled', lock)
+                    .toggle(canManage && !activeRun && !!lastRunInfo && ['cancelled', 'failed', 'partial'].includes(lastRunInfo.status));
+            }
+
+            function renderProgress(a) {
+                $('#dbSyncProgress').toggle(!!a);
+                if (!a) {
+                    cancelAskedAt = 0;
+                    return;
+                }
+
+                const total = a.total_tables, done = a.done_tables;
+                $('#dbSyncProgBar').css('width', Math.max(a.percent, total ? 2 : 0) + '%')
+                    .toggleClass('progress-bar-danger', !!a.cancel_requested)
+                    .toggleClass('progress-bar-primary', !a.cancel_requested);
+                $('#dbSyncProgTitle').text((a.cancel_requested ? 'Membatalkan sinkron… ' : 'Sinkron sedang berjalan — ') + (total ? a.percent + '%' : 'menyiapkan'));
+                $('#dbSyncProgTime').text('Berjalan ' + fmtDur(a.elapsed_seconds)
+                    + (a.eta_seconds ? ' · sisa ± ' + fmtDur(a.eta_seconds) + ' (perkiraan kasar)' : ''));
+
+                let detail;
+                if (!a.trackable) {
+                    detail = 'Sinkron berjalan, tetapi detail progres belum aktif: jalankan <code>php artisan migrate</code> di server lokal dan hosting.';
+                } else if (!total) {
+                    detail = 'Menyiapkan: memeriksa struktur database lokal &amp; hosting…';
+                } else {
+                    detail = 'Tabel <code>' + esc(a.current_table || '—') + '</code> (ke-' + Math.min(done + 1, total) + ' dari ' + total + ')'
+                        + ' · ' + done + ' tabel tuntas · <b>' + nf.format(a.rows_so_far) + '</b> baris berubah sejauh ini';
+                }
+                detail += '<br><span class="text-muted">' + esc(SOURCE[a.source] || a.source) + '. Persentase dihitung dari jumlah tabel; tabel besar bisa lebih lama dari yang lain.</span>';
+
+                if (a.cancel_requested) {
+                    detail += '<br><span class="text-danger">Pembatalan diminta; berhenti setelah batch yang sedang diproses selesai (data aman, bisa dilanjutkan).</span>';
+                }
+                if (a.stalled) {
+                    detail += '<br><span class="text-danger"><b>Tidak ada kemajuan sejak ' + a.idle_minutes + ' menit lalu.</b> Proses mungkin sudah mati (PC / container dimatikan). Gunakan Paksa Berhenti lalu Ulangi.</span>';
+                }
+                $('#dbSyncProgDetail').html(detail);
+
+                // Paksa Berhenti: hanya bila macet, atau permintaan batal tidak direspons > 45 detik.
+                $('#dbSyncBtnForce').toggle(a.stalled || (a.cancel_requested && cancelAskedAt && Date.now() - cancelAskedAt > 45000));
+                $('#dbSyncBtnCancel').prop('disabled', !!a.cancel_requested || a.stalled);
+            }
+
+            function onFinished(last) {
+                load();
+                if (busyOn || !last) {
+                    return;   // hasil lengkap sudah ditampilkan oleh permintaan dari halaman ini
+                }
+                const cls = last.status === 'success' ? 'success' : (last.status === 'failed' ? 'danger' : 'warning');
+                $('#dbSyncResult').show().html('<div class="alert alert-' + cls + '" style="padding:8px 12px">'
+                    + '<b>Sinkron selesai:</b> ' + esc(STATUS[last.status] || last.status) + ' · ' + nf.format(last.rows_changed) + ' baris berubah · '
+                    + (last.conflict_count || 0) + ' konflik · ' + last.error_count + ' error'
+                    + (last.duration_ms ? ' · ' + fmtDur(last.duration_ms / 1000) : '')
+                    + (last.error ? '<br>' + esc(last.error) : '')
+                    + (last.status === 'cancelled' ? '<br>Dibatalkan. Data yang sudah tersinkron tetap aman; klik <b>Ulangi Sinkron</b> untuk melanjutkan.' : '')
+                    + '</div>');
+            }
+
+            // Cek progres: tiap 2 detik saat ada sinkron berjalan, tiap 8 detik saat idle (mendeteksi sinkron terjadwal yang mulai).
+            function poll() {
+                clearTimeout(pollTimer);
+                $.getJSON(@json(route('db-sync.progress')))
+                    .done((r) => {
+                        const was = activeRun;
+                        activeRun = r.active;
+                        renderProgress(activeRun);
+                        applyActive();
+                        if (was && !activeRun) {
+                            onFinished(r.last);
+                        } else if (!was && activeRun && !$('#dbSyncResult').children('.alert').length) {
+                            $('#dbSyncResult').hide().empty();
+                        }
+                    })
+                    .always(() => { pollTimer = setTimeout(poll, activeRun ? 2000 : 8000); });
             }
 
             // Konflik yang ikut "Selesaikan Semua Konflik" (bila modul dipilih: hanya tabel modul itu).
@@ -988,22 +1117,37 @@
 
             $('#dbSyncGroups').on('change', () => { renderScope(); updateBulk(); });
 
-            function runSync(dryRun) {
-                const keys = $('#dbSyncGroups').val() || [];
-                const force = $('#dbSyncForce').is(':checked');
-                const scope = keys.length ? 'modul ' + keys.map((k) => groups[k]?.label || k).join(', ') : 'SEMUA tabel';
+            // override = { groups, tables, force } dari "Ulangi Sinkron"; tanpa override memakai pilihan di layar.
+            function runSync(dryRun, override) {
+                const keys = override ? (override.groups || []) : ($('#dbSyncGroups').val() || []);
+                const tables = override ? (override.tables || []) : [];
+                const force = override ? !!override.force : $('#dbSyncForce').is(':checked');
+                const scope = keys.length ? 'modul ' + keys.map((k) => groups[k]?.label || k).join(', ')
+                    : (tables.length ? tables.length + ' tabel pilihan' : 'SEMUA tabel');
 
-                if (!dryRun && !confirm('Sinkron sekarang untuk ' + scope + (force ? ' DAN izinkan penghapusan massal' : '') + '?')) {
+                if (!dryRun && !confirm((override ? 'Ulangi sinkron untuk ' : 'Sinkron sekarang untuk ') + scope + (force ? ' DAN izinkan penghapusan massal' : '') + '?')) {
                     return;
                 }
 
                 busy(true, dryRun
                     ? 'Menghitung rencana sinkron…'
-                    : 'Menyinkronkan… sinkron pertama bisa memakan beberapa menit, jangan tutup halaman ini.');
+                    : 'Sinkron dimulai. Pantau progres di atas; proses tetap berjalan di server walau halaman ditutup.');
 
-                post(@json(route('db-sync.run')), { dry_run: dryRun ? 1 : 0, force: force ? 1 : 0, groups: keys })
+                if (!dryRun) {
+                    window.setTimeout(poll, 1500);
+                }
+
+                post(@json(route('db-sync.run')), { dry_run: dryRun ? 1 : 0, force: force ? 1 : 0, groups: keys, tables })
                     .done((r) => { renderResult(r); if (!dryRun) load(); })
-                    .fail((xhr) => $('#dbSyncResult').show().html('<div class="alert alert-danger" style="padding:8px 12px">' + esc(failMessage(xhr)) + '</div>'))
+                    .fail((xhr) => {
+                        // Timeout / koneksi putus: sinkron kemungkinan masih berjalan di server, jangan dianggap gagal.
+                        if (!dryRun && (xhr.status === 0 || [502, 503, 504].includes(xhr.status))) {
+                            $('#dbSyncResult').show().html('<div class="alert alert-info" style="padding:8px 12px">Koneksi ke server terputus / timeout, tetapi sinkron kemungkinan masih berjalan. Pantau progres di atas; hasil akhir muncul setelah selesai.</div>');
+                            poll();
+                        } else {
+                            $('#dbSyncResult').show().html('<div class="alert alert-danger" style="padding:8px 12px">' + esc(failMessage(xhr)) + '</div>');
+                        }
+                    })
                     .always(() => busy(false));
             }
 
@@ -1041,6 +1185,29 @@
             $('#dbSyncBtnStatus').on('click', load);
             $('#dbSyncBtnDry').on('click', () => runSync(true));
             $('#dbSyncBtnRun').on('click', () => runSync(false));
+            $('#dbSyncBtnRetry').on('click', () => runSync(false, lastRunInfo?.scope || { groups: $('#dbSyncGroups').val() || [], force: false }));
+
+            function cancelSync(force) {
+                const text = force
+                    ? 'Paksa berhenti? Pakai hanya bila proses sinkron sudah mati / tidak bergerak. Sinkron ditandai dibatalkan dan bisa diulang.'
+                    : 'Batalkan sinkron yang sedang berjalan?\n\nData yang sudah tersinkron tetap aman dan sisanya dilanjutkan saat sinkron diulang.';
+                if (!confirm(text)) {
+                    return;
+                }
+                $('#dbSyncBtnCancel, #dbSyncBtnForce').prop('disabled', true);
+                post(@json(route('db-sync.cancel')), { force: force ? 1 : 0 })
+                    .done((r) => {
+                        cancelAskedAt = Date.now();
+                        $('#dbSyncResult').show().html('<div class="alert alert-info" style="padding:8px 12px">' + esc(r.message) + '</div>');
+                        poll();
+                    })
+                    .fail((xhr) => {
+                        $('#dbSyncResult').show().html('<div class="alert alert-danger" style="padding:8px 12px">' + esc(failMessage(xhr)) + '</div>');
+                        poll();
+                    });
+            }
+            $('#dbSyncBtnCancel').on('click', () => cancelSync(false));
+            $('#dbSyncBtnForce').on('click', () => cancelSync(true));
 
             // Modal perbedaan data lokal vs hosting untuk satu baris konflik.
             const STATE = {
@@ -1157,6 +1324,7 @@
             $('#dbSyncRefresh').on('click', load);
             load();
             setInterval(load, 60000);
+            poll();
         })();
     </script>
     @endif
