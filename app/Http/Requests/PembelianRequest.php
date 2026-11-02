@@ -26,10 +26,31 @@ class PembelianRequest extends FormRequest
         }
     }
 
+    /**
+     * Ubah input angka (format Indonesia "16.666,67", atau "16666.67") menjadi angka desimal (max 2 digit).
+     * Koma = desimal, titik = ribuan. Titik tunggal dengan 1-2 digit di belakangnya
+     * (mis. "16666.67") dianggap desimal.
+     */
     private function cleanNumeric($value)
     {
-        // Remove all non-digit characters (thousand separators: comma or dot)
-        return preg_replace('/[^\d]/', '', $value);
+        if ($value === null || $value === '') {
+            return $value;
+        }
+
+        $s = preg_replace('/[^\d.,]/', '', (string) $value);
+
+        if (strpos($s, ',') !== false) {
+            $s = str_replace('.', '', $s);
+            $s = str_replace(',', '.', $s);
+        } elseif (! preg_match('/^\d+\.\d{1,2}$/', $s)) {
+            $s = str_replace('.', '', $s);
+        }
+
+        if ($s === '' || ! is_numeric($s)) {
+            return 0;
+        }
+
+        return round((float) $s, 2);
     }
 
     public function authorize()

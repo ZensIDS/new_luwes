@@ -299,6 +299,60 @@
             }, 400);
         }
 
+
+        // ===== Helper harga (mendukung desimal, format Indonesia: 16.666,67) =====
+        function parseHarga(v) {
+            if (v === null || v === undefined || v === '') return 0;
+            if (typeof v === 'number') return isFinite(v) ? v : 0;
+            let s = String(v).trim().replace(/[^\d.,]/g, '');
+            if (s.indexOf(',') !== -1) {
+                s = s.replace(/\./g, '').replace(',', '.');
+            } else if (!/^\d+\.\d{1,2}$/.test(s)) {
+                s = s.replace(/\./g, '');
+            }
+            let n = parseFloat(s);
+            return isFinite(n) ? n : 0;
+        }
+
+        function formatHarga(num) {
+            let n = Number(num);
+            if (!isFinite(n)) return '';
+            n = Math.round(n * 100) / 100;
+            let parts = n.toFixed(2).split('.');
+            let int = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+            return parts[1] === '00' ? int : int + ',' + parts[1];
+        }
+
+        function setHarga($el, num) {
+            $el.val(formatHarga(parseHarga(num)));
+        }
+
+        // Format otomatis saat mengetik: titik = ribuan, koma = desimal (maks 2 digit)
+        $(document).on('input', '.harga_beli', function() {
+            let el = this;
+            let raw = el.value;
+            let caret = el.selectionStart || 0;
+            let sig = raw.slice(0, caret).replace(/[^\d,]/g, '').length;
+
+            let cleaned = raw.replace(/[^\d,]/g, '');
+            let idx = cleaned.indexOf(',');
+            let intPart = idx === -1 ? cleaned : cleaned.slice(0, idx);
+            let decPart = idx === -1 ? null : cleaned.slice(idx + 1).replace(/,/g, '').slice(0, 2);
+
+            intPart = intPart.replace(/^0+(?=\d)/, '').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+            let out = decPart === null ? intPart : intPart + ',' + decPart;
+
+            if (out !== raw) {
+                el.value = out;
+                let pos = 0, seen = 0;
+                while (pos < out.length && seen < sig) {
+                    if (/[\d,]/.test(out[pos])) seen++;
+                    pos++;
+                }
+                try { el.setSelectionRange(pos, pos); } catch (e) {}
+            }
+        });
+
         let currentProducts = null;
         let productMap = {};
         let supplierRequest = null;
@@ -461,7 +515,6 @@
         }
 
         function initializeProductRow($row) {
-            $row.find('.numeral-mask').mask("#,##0", { reverse: true });
             $row.find('.select2').select2();
             $row.data('prev-product', String($row.find('.product').data('current-product') || ''));
 
@@ -588,8 +641,7 @@
 
         // Helper: format number with thousand separators (Indonesian style)
         function formatRupiah(angka) {
-            if (!angka) return '0';
-            return angka.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+            return formatHarga(angka || 0) || '0';
         }
 
         $('#add-row').on('click', function() {
@@ -601,10 +653,8 @@
         function updateRowSubtotal($row) {
             let qty = parseFloat($row.find('.qty').val()) || 0;
             let $hargaInput = $row.find('.harga_beli');
-            let harga_beli = ($hargaInput.data('mask') !== undefined)
-                ? ($hargaInput.cleanVal() || 0)
-                : (parseFloat($hargaInput.val()) || 0);
-            let subtotal = qty * harga_beli;
+            let harga_beli = parseHarga($hargaInput.val());
+            let subtotal = Math.round(qty * harga_beli * 100) / 100;
             $row.find('.subtotal').val(formatRupiah(subtotal));
             return subtotal;
         }
@@ -635,9 +685,7 @@
             const productId = rowProductId($row);
             const qty       = parseFloat($row.find('.qty').val()) || 0;
             const $hargaInput = $row.find('.harga_beli');
-            const hargaBeli = ($hargaInput.data('mask') !== undefined)
-                ? ($hargaInput.cleanVal() || 0)
-                : (parseFloat($hargaInput.val()) || 0);
+            const hargaBeli = parseHarga($hargaInput.val());
 
             updateRowSubtotal($row);
 
@@ -754,7 +802,8 @@
             }
 
             if (product_id) {
-                $row.find('.harga_beli').val(hargaFromOption || 0).trigger('input');
+                setHarga($row.find('.harga_beli'), hargaFromOption || 0);
+                updateRowSubtotal($row);
             }
 
             updateKonversiDisplay($row);
@@ -801,7 +850,10 @@
             }
         });
 
-        $('.numeral-mask').mask("#,##0", { reverse: true });
+        // Format ulang nilai awal harga beli dari server (mis. 16666.67 -> 16.666,67)
+        $('.harga_beli').each(function() {
+            setHarga($(this), $(this).val());
+        });
 
         // ---- Cek Barang Modal ----
         let cekBarangTable = null;
@@ -993,7 +1045,8 @@
                 $productSelect.val(item.product_id).trigger('change.select2');
                 $productSelect.data('current-product', String(item.product_id));
                 $newRow.data('prev-product', String(item.product_id));
-                $hargaInput.val(item.harga).trigger('input');
+                setHarga($hargaInput, item.harga);
+                updateRowSubtotal($newRow);
                 $qtyInput.val(item.qty);
 
                 updateKonversiDisplay($newRow);

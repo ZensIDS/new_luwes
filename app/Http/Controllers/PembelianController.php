@@ -373,8 +373,8 @@ class PembelianController extends Controller
             }
 
             $qty = $product->is_serialized && $serialNumbers ? count($serialNumbers) : (int) $data['qty'];
-            $hargaBeli = (int) $data['harga_beli'];
-            $subtotal = $qty * $hargaBeli;
+            $hargaBeli = round((float) $data['harga_beli'], 2);
+            $subtotal = round($qty * $hargaBeli, 2);
 
             $attributes = [
                 'product_id' => $product->id,
@@ -1022,7 +1022,7 @@ class PembelianController extends Controller
                 // Update product HPP
                 $newHPP = $product->calculateHPP($qtyDiterima, $pembelianProduct->harga_beli);
                 $product->update([
-                    'harga_beli' => (int) $newHPP,
+                    'harga_beli' => round((float) $newHPP, 2),
                 ]);
                 $product->updateStockValue();
             }
@@ -1214,7 +1214,7 @@ class PembelianController extends Controller
 
             // Update product HPP
             $newHPP = $product->calculateHPP($qtyDiterima, $pembelianProduct->harga_beli);
-            $product->update(['harga_beli' => (int) $newHPP]);
+            $product->update(['harga_beli' => round((float) $newHPP, 2)]);
             $product->updateStockValue();
 
             DB::commit();
@@ -1285,7 +1285,7 @@ class PembelianController extends Controller
                 $hppRestored = false;
                 if ($isLatest && $remainingTotal > 0) {
                     $previousHpp = (($product->harga_beli * $totalWithBatch) - ($qty * $price)) / $remainingTotal;
-                    $product->harga_beli = (int) max(0, round($previousHpp));
+                    $product->harga_beli = max(0, round($previousHpp, 2));
                     $hppRestored = true;
                 }
 
@@ -1439,9 +1439,9 @@ class PembelianController extends Controller
                                     'serial_number' => $serial
                                 ],
                                 [
-                                    'harga_beli' => (int) str_replace(',', '', $productData->harga_beli),
+                                    'harga_beli' => round((float) $productData->harga_beli, 2),
                                     'qty' => 1, // Always 1 for serialized items
-                                    'subtotal' => (int) str_replace(',', '', $productData->harga_beli),
+                                    'subtotal' => round((float) $productData->harga_beli, 2),
                                     'expired_at' => $productData->expired_at ?? null,
                                     'condition' => 'new',
                                 ]
@@ -1463,9 +1463,9 @@ class PembelianController extends Controller
                     Stock::updateOrCreate(
                         ['pembelian_id' => $pembelian->id, 'product_id' => $productData->product_id],
                         [
-                            'harga_beli' => (int) str_replace(',', '', $productData->harga_beli),
+                            'harga_beli' => round((float) $productData->harga_beli, 2),
                             'qty' => $qty,
-                            'subtotal' => (int) $productData->subtotal,
+                            'subtotal' => round((float) $productData->subtotal, 2),
                             'expired_at' => $productData->expired_at ?? null,
                             'condition' => 'new',
                         ]
@@ -1478,7 +1478,7 @@ class PembelianController extends Controller
                     ])->decrement('qty', $qty);
                 }
 
-                $product->update(['harga_beli' => (int) str_replace(',', '', $productData->harga_beli)]);
+                $product->update(['harga_beli' => round((float) $productData->harga_beli, 2)]);
             }
         } else {
             if (isset($request->product)) {
@@ -1499,9 +1499,9 @@ class PembelianController extends Controller
                     PembelianProduct::updateOrCreate(
                         ['pembelian_id' => $pembelian->id, 'product_id' => $productData['product_id']],
                         [
-                            'harga_beli' => (int) str_replace(',', '', $productData['harga_beli']),
+                            'harga_beli' => round((float) $productData['harga_beli'], 2),
                             'qty' => (int) $productData['qty'],
-                            'subtotal' => (int) $productData['subtotal'],
+                            'subtotal' => round((float) $productData['subtotal'], 2),
                             // 'expired_at' => $productData['expired'] ?? null,
                             'serial_numbers' => $serialNumbers,
                         ]
@@ -1517,9 +1517,9 @@ class PembelianController extends Controller
                                     'serial_number' => $serial
                                 ],
                                 [
-                                    'harga_beli' => (int) str_replace(',', '', $productData['harga_beli']),
+                                    'harga_beli' => round((float) $productData['harga_beli'], 2),
                                     'qty' => 1,
-                                    'subtotal' => (int) str_replace(',', '', $productData['harga_beli']),
+                                    'subtotal' => round((float) $productData['harga_beli'], 2),
                                     // 'expired_at' => $productData['expired'] ?? null,
                                     'condition' => 'new',
                                     'status' => 'available',
@@ -1530,9 +1530,9 @@ class PembelianController extends Controller
                         StockPembelian::updateOrCreate(
                             ['pembelian_id' => $pembelian->id, 'product_id' => $productData['product_id']],
                             [
-                                'harga_beli' => (int) str_replace(',', '', $productData['harga_beli']),
+                                'harga_beli' => round((float) $productData['harga_beli'], 2),
                                 'qty' => (int) $productData['qty'],
-                                'subtotal' => (int) $productData['subtotal'],
+                                'subtotal' => round((float) $productData['subtotal'], 2),
                                 // 'expired_at' => $productData['expired'] ?? null,
                                 'condition' => 'new',
                                 'status' => 'available',
@@ -1540,7 +1540,7 @@ class PembelianController extends Controller
                         );
                     }
 
-                    $product->update(['harga_beli' => (int) str_replace(',', '', $productData['harga_beli'])]);
+                    $product->update(['harga_beli' => round((float) $productData['harga_beli'], 2)]);
                 }
             }
         }

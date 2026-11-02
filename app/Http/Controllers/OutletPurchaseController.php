@@ -317,7 +317,7 @@ class OutletPurchaseController extends Controller
                 'satuan_besar' => $product->satuan_besar,
                 'satuan' => $product->satuan,
                 // Harga awal baris = HPP terbaru outlet (fallback harga_beli produk), dibulatkan: form harga memakai angka bulat.
-                'harga_beli' => (int) round($data['price']),
+                'harga_beli' => round((float) $data['price'], 2),
                 'stock_count' => $stock,
                 'on_order' => $onOrder,
                 'effective_min' => $minFinal,
@@ -454,7 +454,7 @@ class OutletPurchaseController extends Controller
                 'product_id' => $product->id,
                 'qty' => $qty,
                 'harga_beli' => $hargaBeli,
-                'subtotal' => $qty * $hargaBeli,
+                'subtotal' => round($qty * $hargaBeli, 2),
             ];
             // expired_at sengaja tidak disentuh di sini: diisi saat penerimaan (receive). Nilai lama pada POUT
             // pending yang dibuat sebelum perubahan ini tetap terbawa sebagai nilai awal di form penerimaan.
