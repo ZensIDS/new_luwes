@@ -14,6 +14,8 @@
         $w = $isA4 ? 68 : $paper;
         $k = $w / 80; // faktor skala dari ukuran dasar 80 mm
         $mm = fn (float $v) => round($v * $k, 2) . 'mm';
+        // Kertas/label 68 mm (termasuk A4 label 68 mm): label promo dibuat lebih tinggi, maksimal 40 mm (4 cm).
+        $tall = $w === 68;
     @endphp
     <style>
         * { box-sizing: border-box; }
@@ -31,7 +33,8 @@
 
         /* ===== Label harga =====
            Tinggi label dikunci: promo (ada diskon) maks 32,4 mm di kertas 80 mm (< 3,3 cm), tanpa diskon 21,6 mm.
-           Ukuran lain mengikuti skala $k (68 mm / A4 => promo 27,5 mm & tanpa diskon 18,4 mm). */
+           Ukuran lain mengikuti skala $k (58 mm => promo 23,5 mm & tanpa diskon 15,7 mm).
+           Khusus 68 mm / A4 label 68 mm: promo maks 40 mm (4 cm), tanpa diskon 18,4 mm (lihat blok override di bawah). */
         .label-sheet { width: {{ $isA4 ? '204mm' : $w . 'mm' }}; margin: 0 auto; {{ $isA4 ? 'display:grid; grid-template-columns:repeat(3, 68mm); gap:0; align-items:start;' : '' }} }
         .label-outer { width: {{ $w }}mm; padding: 0; break-inside: avoid; page-break-inside: avoid; background: #fff; {{ $isA4 ? 'outline:0.2mm dashed #888; outline-offset:-0.2mm;' : '' }} }
         .lbl { --accent: {{ $mode === 'warna' ? '#e0577a' : '#000' }}; --soft: {{ $mode === 'warna' ? '#fbe6ea' : '#fff' }}; --boxline: {{ $mode === 'warna' ? 'none' : '0.25mm solid #000' }};
@@ -67,6 +70,22 @@
         .lbl.plain .bc { height: {{ $mm(3.6) }}; }
         .lbl.plain .digits { font-size: {{ $mm(2.2) }}; }
         .lbl.plain .date { margin-left: auto; font-size: {{ $mm(1.9) }}; white-space: nowrap; }
+        @if ($tall)
+        /* ===== Override 68 mm: label promo setinggi 40 mm (maks 4 cm); lingkaran diskon dinaikkan ke tengah-atas box harga. ===== */
+        .lbl.promo { height: 40mm; padding: 1.6mm {{ $mm(3.5) }} 1.2mm; }
+        .lbl.promo .name { height: 6.6mm; font-size: 2.9mm; }
+        .lbl.promo .box { margin-top: 3.2mm; padding: 2.6mm 15mm 1.8mm 2.2mm; }
+        .lbl.promo .pill { font-size: 2.3mm; top: -2.2mm; padding: 1.1mm 2.8mm; }
+        .lbl.promo .normal { margin-top: 1.4mm; font-size: 2.9mm; }
+        .lbl.promo .normal del { font-size: 3.2mm; }
+        .lbl .circle { top: 8.5mm; right: 4mm; width: 13.4mm; height: 13.4mm; }
+        .lbl .circle .c-top { font-size: 2.3mm; }
+        .lbl .circle .c-pct { font-size: 5.4mm; margin-top: .5mm; }
+        .lbl.promo .foot { padding-right: 0; gap: 2.4mm; }
+        .lbl.promo .bc { flex: 0 1 34mm; height: 5.2mm; }
+        .lbl.promo .digits { font-size: 2.6mm; }
+        .lbl.promo .digits small { font-size: 2mm; }
+        @endif
         .cut-line { width: {{ $w }}mm; text-align: center; font-size: 8px; color: #555; padding: 1.5mm 0; letter-spacing: 1px; }
 
         @page { size: {{ $isA4 ? 'A4' : $w . 'mm auto' }}; margin: {{ $isA4 ? '3mm' : '0' }}; }
@@ -158,6 +177,8 @@
                 // Ukuran harga dasar (kertas 80 mm): promo 7,8 mm, tanpa diskon 9 mm; mengecil bila angkanya panjang.
                 if ($hasDisc) {
                     $priceScale = $digitsLen <= 10 ? 1 : .8;
+                    // 68 mm: lingkaran lebih ke dalam, harga 6 digit ke atas dikecilkan sedikit agar tidak menabrak.
+                    if ($tall && $digitsLen >= 7) { $priceScale *= .92; }
                     $priceSize = round(12 * $k * $priceScale, 2) . 'mm';
                 } else {
                     $priceScale = $digitsLen <= 10 ? 1 : .8;
