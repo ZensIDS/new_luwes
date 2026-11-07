@@ -101,6 +101,8 @@
                             <i class="fa fa-print"></i> Cetak label terpilih
                             (<span id="selected-outlet-price-count">0</span>)
                         </button>
+                        <button type="button" id="clear-selected-outlet-price-labels" class="btn btn-default btn-sm"
+                            title="Hapus semua pilihan di semua halaman">Hapus pilihan</button>
                     </form>
                 @endif
                 <form class="form-inline pull-right" method="GET">
@@ -185,7 +187,7 @@
                             @if ($selectedOutletId)
                                 <th class="text-center">
                                     <input type="checkbox" id="select-all-outlet-price-labels"
-                                        title="Pilih semua produk pada halaman ini">
+                                        title="Pilih semua produk pada halaman ini (pilihan di halaman lain tetap tersimpan)">
                                 </th>
                             @endif
                             <th>Barcode</th>
@@ -211,7 +213,6 @@
                                     <td class="text-center">
                                         @if ($price->product?->code)
                                             <input type="checkbox" class="outlet-price-label-checkbox"
-                                                form="outlet-price-label-print-form" name="product_ids[]"
                                                 value="{{ $price->product_id }}"
                                                 aria-label="Pilih {{ $price->product?->name }}">
                                         @else
@@ -325,23 +326,90 @@
     @if ($selectedOutletId)
         <script>
             $(function () {
+                // Pilihan disimpan di Set supaya tidak hilang saat pindah halaman DataTables
+                // (baris halaman lain dicabut dari DOM).
+                // Pagination server-side (reload tiap halaman) -> simpan di sessionStorage per outlet.
+                var labelStorageKey = 'outlet-price-label-selected:{{ $selectedOutletId }}';
+                var selectedLabelIds = new Set();
+                try {
+                    JSON.parse(sessionStorage.getItem(labelStorageKey) || '[]').forEach(function (id) {
+                        selectedLabelIds.add(String(id));
+                    });
+                } catch (e) { /* abaikan */ }
+                var labelTable = null;
+
+                function persistLabelSelection() {
+                    try {
+                        sessionStorage.setItem(labelStorageKey, JSON.stringify(Array.from(selectedLabelIds)));
+                    } catch (e) { /* abaikan */ }
+                }
+
                 function updateSelectedOutletPriceLabels() {
-                    var selected = $('.outlet-price-label-checkbox:checked').length;
-                    $('#selected-outlet-price-count').text(selected);
-                    $('#print-selected-outlet-price-labels').prop('disabled', selected === 0);
+                    persistLabelSelection();
+                    var count = selectedLabelIds.size;
+                    $('#selected-outlet-price-count').text(count);
+                    $('#print-selected-outlet-price-labels').prop('disabled', count === 0);
+
+                    var $visible = allLabelCheckboxes();
                     $('#select-all-outlet-price-labels').prop(
                         'checked',
-                        selected > 0 && selected === $('.outlet-price-label-checkbox').length
+                        $visible.length > 0 && $visible.filter(':checked').length === $visible.length
                     );
                 }
 
+                // Semua checkbox milik halaman server ini, termasuk baris yang sedang
+                // disembunyikan oleh paging DataTables.
+                function allLabelCheckboxes() {
+                    if (labelTable) {
+                        return labelTable.rows().nodes().to$().find('.outlet-price-label-checkbox');
+                    }
+                    return $('.outlet-price-label-checkbox');
+                }
+
+                function restoreLabelChecks() {
+                    allLabelCheckboxes().each(function () {
+                        $(this).prop('checked', selectedLabelIds.has(String(this.value)));
+                    });
+                    updateSelectedOutletPriceLabels();
+                }
+
                 $('#select-all-outlet-price-labels').on('change', function () {
-                    $('.outlet-price-label-checkbox').prop('checked', this.checked);
+                    var checked = this.checked;
+                    // Hanya baris di halaman yang sedang tampil
+                    allLabelCheckboxes().each(function () {
+                        $(this).prop('checked', checked);
+                        if (checked) { selectedLabelIds.add(String(this.value)); }
+                        else { selectedLabelIds.delete(String(this.value)); }
+                    });
                     updateSelectedOutletPriceLabels();
                 });
 
-                $(document).on('change', '.outlet-price-label-checkbox', updateSelectedOutletPriceLabels);
-                updateSelectedOutletPriceLabels();
+                $(document).on('change', '.outlet-price-label-checkbox', function () {
+                    if (this.checked) { selectedLabelIds.add(String(this.value)); }
+                    else { selectedLabelIds.delete(String(this.value)); }
+                    updateSelectedOutletPriceLabels();
+                });
+
+                // Saat cetak: kirim semua ID terpilih dari semua halaman
+                $('#outlet-price-label-print-form').on('submit', function () {
+                    var $form = $(this);
+                    $form.find('input.js-selected-product-id').remove();
+                    selectedLabelIds.forEach(function (id) {
+                        $('<input type="hidden" class="js-selected-product-id" name="product_ids[]">')
+                            .val(id).appendTo($form);
+                    });
+
+                    // Setelah cetak: kosongkan pilihan (submit sudah membaca input di atas).
+                    setTimeout(function () {
+                        selectedLabelIds.clear();
+                        restoreLabelChecks();
+                    }, 0);
+                });
+                $('#clear-selected-outlet-price-labels').on('click', function () {
+                    selectedLabelIds.clear();
+                    restoreLabelChecks();
+                });
+
 
                 // Modal riwayat HPP (cara kerjanya sama seperti Price History di index Product)
                 function hppHistoryRow(cells) {
@@ -393,12 +461,14 @@
                 }
                 // The query is already ordered by updated_at DESC. Keep that
                 // order instead of letting DataTables sort by outlet name.
-                $('#example1').DataTable({
+                labelTable = $('#example1').DataTable({
                     dom: 'lrtip', // search bawaan (cocokkan di tengah kata, hanya 25 baris) dimatikan; pakai search server di atas
                     ordering: false,
                     pageLength: 25,
                     language: { emptyTable: 'Belum ada master harga untuk outlet ini.' }
                 });
+                labelTable.on('draw', restoreLabelChecks);
+                restoreLabelChecks();
             });
         </script>
 

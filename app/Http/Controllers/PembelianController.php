@@ -428,7 +428,7 @@ class PembelianController extends Controller
                 );
             }
 
-            $product->update(['harga_beli' => $hargaBeli]);
+            // Harga beli PO TIDAK lagi mengubah products.harga_beli (hanya tercatat di item PO & batch stok).
 
             $pembelian->update(['total' => $pembelian->pembelianProducts()->sum('subtotal')]);
 
@@ -1019,11 +1019,7 @@ class PembelianController extends Controller
                     ]);
                 }
 
-                // Update product HPP
-                $newHPP = $product->calculateHPP($qtyDiterima, $pembelianProduct->harga_beli);
-                $product->update([
-                    'harga_beli' => round((float) $newHPP, 2),
-                ]);
+                // HPP produk (products.harga_beli) TIDAK diubah oleh penerimaan PO; hanya nilai stok dihitung ulang.
                 $product->updateStockValue();
             }
 
@@ -1212,9 +1208,7 @@ class PembelianController extends Controller
                 ]);
             }
 
-            // Update product HPP
-            $newHPP = $product->calculateHPP($qtyDiterima, $pembelianProduct->harga_beli);
-            $product->update(['harga_beli' => round((float) $newHPP, 2)]);
+            // HPP produk (products.harga_beli) TIDAK diubah oleh penerimaan PO; hanya nilai stok dihitung ulang.
             $product->updateStockValue();
 
             DB::commit();
@@ -1278,16 +1272,8 @@ class PembelianController extends Controller
                 $sku     = (string) $stock->sku;
                 $price   = (float) $stock->harga_beli;
 
-                // --- HPP: balikkan hanya jika batch ini penerimaan terbaru produk tsb ---
-                $totalWithBatch = (int) $product->stocks()->sum('qty');
-                $isLatest = ! Stock::where('product_id', $product->id)->where('id', '>', $stock->id)->exists();
-                $remainingTotal = $totalWithBatch - $qty;
+                // --- HPP: penerimaan PO tidak mengubah products.harga_beli, jadi tidak ada yang perlu dibalikkan ---
                 $hppRestored = false;
-                if ($isLatest && $remainingTotal > 0) {
-                    $previousHpp = (($product->harga_beli * $totalWithBatch) - ($qty * $price)) / $remainingTotal;
-                    $product->harga_beli = max(0, round($previousHpp, 2));
-                    $hppRestored = true;
-                }
 
                 // --- Stock movement: hapus semua baris penerimaan milik batch (SKU) ini ---
                 $pattern = '/SKU: ?' . preg_quote($sku, '/') . '(?=,|\s|$)/';
@@ -1478,7 +1464,7 @@ class PembelianController extends Controller
                     ])->decrement('qty', $qty);
                 }
 
-                $product->update(['harga_beli' => round((float) $productData->harga_beli, 2)]);
+                // products.harga_beli tidak diubah oleh PO.
             }
         } else {
             if (isset($request->product)) {
@@ -1540,7 +1526,7 @@ class PembelianController extends Controller
                         );
                     }
 
-                    $product->update(['harga_beli' => round((float) $productData['harga_beli'], 2)]);
+                    // products.harga_beli tidak diubah oleh PO.
                 }
             }
         }

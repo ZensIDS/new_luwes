@@ -50,8 +50,8 @@
                                     <tr>
                                         <td>Nama Product</td>
                                         <td>Qty</td>
-                                        <td>Harga Beli</td>
-                                        <td>Sub Total</td>
+                                        <td style="display:none">Harga Beli</td>
+                                        <td style="display:none">Sub Total</td>
                                         <td>Aksi</td>
                                     </tr>
                                 </thead>
@@ -68,11 +68,11 @@
                                                 value="1" min="1">
                                             <span class="konversi-display"></span>
                                         </td>
-                                        <td>
+                                        <td style="display:none">
                                             <input type="text" class="form-control harga_beli numeral-mask"
-                                                name="product[0][harga_beli]" required>
+                                                name="product[0][harga_beli]" value="0">
                                         </td>
-                                        <td>
+                                        <td style="display:none">
                                             <input class="form-control subtotal" name="product[0][subtotal]" required
                                                 readonly>
                                         </td>
@@ -93,9 +93,9 @@
                                 </button>
                             </div>
                             <hr>
-                            <div class="form-group">
+                            <div class="form-group" style="display:none">
                                 <label>Total</label>
-                                <input type="text" required class="form-control" name="total" id="total" readonly>
+                                <input type="text" class="form-control" name="total" id="total" readonly>
                             </div>
                         </div><!-- /.box-body -->
 
@@ -259,8 +259,8 @@
                         <input type="number" required value="1" min="1" class="form-control qty" name="product[${index}][qty]">
                         <span class="konversi-display"></span>
                     </td>
-                    <td><input required type="text" class="form-control harga_beli numeral-mask" name="product[${index}][harga_beli]"></td>
-                    <td><input type="text" required class="form-control subtotal" name="product[${index}][subtotal]" readonly></td>
+                    <td style="display:none"><input type="text" class="form-control harga_beli numeral-mask" name="product[${index}][harga_beli]" value="0"></td>
+                    <td style="display:none"><input type="text" required class="form-control subtotal" name="product[${index}][subtotal]" readonly></td>
                     <td><button class="btn btn-sm btn-danger" onclick="removeBahanBaku(this)" type="button">Remove</button></td>
                 </tr>`;
         }

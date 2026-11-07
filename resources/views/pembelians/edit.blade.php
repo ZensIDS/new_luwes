@@ -76,8 +76,8 @@
                                         <td>Nama Product</td>
                                         <td>Qty</td>
                                         <td>Konversi</td>
-                                        <td>Harga Beli</td>
-                                        <td>Sub Total</td>
+                                        <td style="display:none">Harga Beli</td>
+                                        <td style="display:none">Sub Total</td>
                                         <td width="90">Status</td>
                                         <td>Aksi</td>
                                     </tr>
@@ -96,11 +96,11 @@
                                                     min="1" {{ $stock->product->is_serialized ? 'readonly' : '' }}>
                                             </td>
                                             <td class="konversi-ratio text-center text-muted">-</td>
-                                            <td>
+                                            <td style="display:none">
                                                 <input type="text" class="form-control harga_beli numeral-mask"
-                                                    required value="{{ $stock->harga_beli }}">
+                                                    value="{{ $stock->harga_beli }}">
                                             </td>
-                                            <td>
+                                            <td style="display:none">
                                                 <input class="form-control subtotal" required readonly>
                                             </td>
                                             <td class="text-center row-status"><span class="label label-success">Tersimpan</span></td>
@@ -119,10 +119,10 @@
                                                 <input type="number" class="form-control qty" required value="1" min="1">
                                             </td>
                                             <td class="konversi-ratio text-center text-muted">-</td>
-                                            <td>
-                                                <input type="text" class="form-control harga_beli numeral-mask" required value="0">
+                                            <td style="display:none">
+                                                <input type="text" class="form-control harga_beli numeral-mask" value="0">
                                             </td>
-                                            <td>
+                                            <td style="display:none">
                                                 <input class="form-control subtotal" required readonly>
                                             </td>
                                             <td class="text-center row-status"><span class="label label-default">Belum tersimpan</span></td>
@@ -143,7 +143,7 @@
                                 </button>
                             </div>
                             <hr>
-                            <div class="form-group">
+                            <div class="form-group" style="display:none">
                                 <label>Total</label>
                                 <input type="text" class="form-control" id="total" readonly
                                     value="{{ number_format($pembelian->total ?? 0, 0, ',', '.') }}">
@@ -507,8 +507,8 @@
                         <span class="konversi-display"></span>
                     </td>
                     <td class="konversi-ratio text-center text-muted">-</td>
-                    <td><input type="text" required value="0" class="form-control harga_beli numeral-mask"></td>
-                    <td><input type="text" required class="form-control subtotal" readonly></td>
+                    <td style="display:none"><input type="text" value="0" class="form-control harga_beli numeral-mask"></td>
+                    <td style="display:none"><input type="text" required class="form-control subtotal" readonly></td>
                     <td class="text-center row-status"><span class="label label-default">Belum tersimpan</span></td>
                     <td><button class="btn btn-sm btn-danger remove-row" type="button">Remove</button></td>
                 </tr>`;
