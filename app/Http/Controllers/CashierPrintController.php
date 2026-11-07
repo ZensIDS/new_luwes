@@ -104,13 +104,12 @@ class CashierPrintController extends Controller
             $product->setAttribute('print_price_margin', $marginLabel);
             $product->setAttribute('print_price_strike', $priceStrike);
             $product->setAttribute('print_price_net', $price['price']);
-            // Persen diskon = selisih harga coret terhadap harga jual, dibagi harga coret.
-            // Dibulatkan ke bilangan bulat; bila hasilnya 0% dianggap tidak ada diskon.
-            $discountPercent = $priceStrike > 0
-                ? (int) round((($priceStrike - $price['price']) / $priceStrike) * 100)
-                : 0;
+            // Persen diskon label = diskon yang diatur di Master Harga Jual (outlet-prices):
+            // Disc Reg + Disc 1-4 + Disc Toko, dihitung bertingkat (20% + 5% = 24%), bukan dihitung dari selisih harga coret vs harga jual,
+            // karena harga jual sudah terkena margin & pembulatan sehingga persennya bisa meleset.
+            $discountPercent = $rule ? $this->labelDiscountPercent($price) : 0;
             $discountPercent = max(0, min(99, $discountPercent));
-            $hasDiscount = $priceStrike > $price['price'] && $discountPercent >= 1;
+            $hasDiscount = $discountPercent >= 1;
             $product->setAttribute('print_has_discount', $hasDiscount);
             $product->setAttribute('print_discount_percent', $hasDiscount ? $discountPercent : 0);
             $product->setAttribute('print_qty', max(1, min(100, (int) $this->quantityFor($product->id, $request))));
@@ -129,6 +128,42 @@ class CashierPrintController extends Controller
             // Tanggal saat user menekan tombol cetak label (request POST print=1).
             'printedAt' => $printing ? now()->timezone('Asia/Jakarta') : null,
         ]);
+    }
+
+    /**
+     * Persen diskon efektif dari aturan outlet-prices, dihitung BERTINGKAT seperti PriceCalculator:
+     * Disc Reg -> Disc 1 -> Disc 2 -> Disc 3 -> Disc 4 -> Disc Toko, masing-masing dipotong dari
+     * harga yang sudah terkena diskon sebelumnya. Contoh 20% + 5% = 1 - (0,80 x 0,95) = 24%.
+     * Diskon nominal dikonversi ke persen terhadap harga dasar tempat diskon itu diterapkan.
+     */
+    private function labelDiscountPercent(array $price): int
+    {
+        $bases = [
+            'disc_brand' => (float) $price['hpp_setelah_pajak'],
+            'disc_tambahan' => (float) $price['harga_akhir'],
+        ];
+        // Disc Tambahan 2-4 bertingkat: basis = harga setelah diskon sebelumnya.
+        $running = max(0, (float) $price['harga_akhir'] - (float) $price['disc_tambahan_amount']);
+        foreach ([2, 3, 4] as $n) {
+            $bases["disc_tambahan_{$n}"] = $running;
+            $running = max(0, $running - (float) $price["disc_tambahan_{$n}_amount"]);
+        }
+        $bases['disc_toko'] = (float) $price['harga_aktif'];
+
+        $remaining = 1.0; // bagian harga yang tersisa setelah semua diskon
+        foreach ($bases as $key => $base) {
+            $value = (float) ($price["{$key}_value"] ?? 0);
+            if ($value <= 0) {
+                continue;
+            }
+            $type = strtolower(trim((string) ($price["{$key}_type"] ?? '')));
+            $fraction = $type === 'percentage'
+                ? min(100, $value) / 100
+                : ($base > 0 ? min(1, (float) ($price["{$key}_amount"] ?? 0) / $base) : 0);
+            $remaining *= (1 - $fraction);
+        }
+
+        return (int) round((1 - $remaining) * 100);
     }
 
     private function applyProductIndexFilters($query, Request $request, ?int $outletId): void
