@@ -32,9 +32,9 @@
         th { background: #f5f5f5; }
 
         /* ===== Label harga =====
-           Tinggi label dikunci: promo (ada diskon) maks 32,4 mm di kertas 80 mm (< 3,3 cm), tanpa diskon 21,6 mm.
+           Tinggi label dikunci: promo (ada diskon) maks 32,4 mm di kertas 80 mm (< 3,3 cm), tanpa diskon sama dengan promo (32,4 mm).
            Ukuran lain mengikuti skala $k (58 mm => promo 23,5 mm & tanpa diskon 15,7 mm).
-           Khusus 68 mm / A4 label 68 mm: promo maks 35 mm (3,5 cm), tanpa diskon 18,4 mm (lihat blok override di bawah). */
+           Khusus 68 mm / A4 label 68 mm: promo maks 35 mm (3,5 cm), tanpa diskon juga 34,5 mm (lihat blok override di bawah). */
         .label-sheet { width: {{ $isA4 ? '204mm' : $w . 'mm' }}; margin: 0 auto; {{ $isA4 ? 'display:grid; grid-template-columns:repeat(3, 68mm); gap:0; align-items:start;' : '' }} }
         .label-outer { width: {{ $w }}mm; padding: 0; break-inside: avoid; page-break-inside: avoid; background: #fff; {{ $isA4 ? 'border-right:0.25mm dotted #444; border-bottom:0.25mm dotted #444;' : '' }} }
         @if ($isA4)
@@ -45,13 +45,13 @@
                position: relative; display: flex; flex-direction: column; overflow: hidden; padding: {{ $mm(1.4) }} {{ $mm(3.5) }} {{ $mm(1.2) }}; color: #000; background: #fff; font-family: Arial, Helvetica, sans-serif;
                -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .lbl.promo { height: {{ $mm(32.4) }}; }
-        .lbl.plain { height: {{ $mm(21.6) }}; padding-top: {{ $mm(.8) }}; padding-bottom: {{ $mm(.7) }}; }
+        .lbl.plain { height: {{ $mm(32.4) }}; padding-top: {{ $mm(1.4) }}; padding-bottom: {{ $mm(1) }}; }
         .lbl .name { flex: none; font-size: {{ $mm(3.1) }}; font-weight: 900; text-transform: uppercase; line-height: 1.08; letter-spacing: .1px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
         .lbl.promo .name { height: {{ $mm(6.7) }}; }
-        .lbl.plain .name { font-size: {{ $mm(2.7) }}; }
+        .lbl.plain .name { height: {{ $mm(6.7) }}; font-size: {{ $mm(3.1) }}; }
         .lbl .box { position: relative; flex: none; background: var(--soft); border: var(--boxline); border-radius: {{ $mm(2.2) }}; }
         .lbl.promo .box { margin-top: {{ $mm(2.4) }}; padding: {{ $mm(2) }} {{ $mm(13) }} {{ $mm(.8) }} {{ $mm(2.6) }}; }
-        .lbl.plain .box { margin-top: auto; padding: {{ $mm(.3) }} {{ $mm(2.6) }}; }
+        .lbl.plain .box { margin-top: {{ $mm(2.4) }}; flex: 1; display: flex; align-items: center; padding: {{ $mm(.3) }} {{ $mm(2.6) }}; }
         .lbl .pill { position: absolute; top: {{ $mm(-2) }}; left: {{ $mm(-.8) }}; background: var(--accent); color: #fff; font-size: {{ $mm(2.3) }}; font-weight: 800; letter-spacing: .2px; line-height: 1; padding: {{ $mm(1) }} {{ $mm(2.6) }}; border-radius: 99px; }
         .lbl .price { color: var(--accent); font-weight: 900; line-height: 1; white-space: nowrap; display: flex; align-items: baseline; gap: {{ $mm(1) }}; }
         .lbl .price .rp { font-size: 0.54em; font-weight: 800; }
@@ -70,13 +70,16 @@
         .lbl .digits { flex: 0 1 auto; min-width: 0; text-align: right; font-family: 'Courier New', monospace; font-size: {{ $mm(2.3) }}; font-weight: 700; letter-spacing: {{ $mm(.1) }}; line-height: 1.1; white-space: nowrap; }
         .lbl .digits small { display: block; font-family: Arial, sans-serif; font-size: {{ $mm(1.8) }}; font-weight: 400; letter-spacing: 0; margin-top: {{ $mm(.3) }}; }
         /* Tanpa diskon: nama, box harga (besar), lalu baris bawah = barcode kecil + kode + tanggal cetak. */
-        .lbl.plain .foot { margin-top: {{ $mm(.6) }}; padding-right: 0; align-items: center; }
+        .lbl.plain .foot { margin-top: {{ $mm(1.2) }}; padding-right: 0; align-items: center; }
         .lbl.plain .bc { height: {{ $mm(3.6) }}; }
         .lbl.plain .digits { font-size: {{ $mm(2.2) }}; }
         .lbl.plain .date { margin-left: auto; font-size: {{ $mm(1.9) }}; white-space: nowrap; }
         @if ($tall)
         /* ===== Override 68 mm / A4 label 68 mm: label promo maks 35 mm (3,5 cm); lingkaran diskon kecil, di tengah sisi kanan box harga. ===== */
         .lbl.promo { height: 34.5mm; padding: 1.4mm {{ $mm(3.5) }} 1mm; }
+        .lbl.plain { height: 34.5mm; padding: 1.4mm {{ $mm(3.5) }} 1mm; }
+        .lbl.plain .name { height: 6mm; font-size: 2.7mm; }
+        .lbl.plain .box { margin-top: 2.8mm; }
         .lbl.promo .name { height: 6mm; font-size: 2.7mm; }
         .lbl.promo .box { margin-top: 2.8mm; padding: 2.2mm 13mm 1.2mm 2.2mm; }
         .lbl.promo .pill { font-size: 2.2mm; top: -2.1mm; padding: 1mm 2.6mm; }
@@ -189,7 +192,7 @@
                     $priceSize = round(12 * $k * $priceScale, 2) . 'mm';
                 } else {
                     $priceScale = $digitsLen <= 10 ? 1 : .8;
-                    $priceSize = round(12 * $k * $priceScale, 2) . 'mm';
+                    $priceSize = round(14 * $k * $priceScale, 2) . 'mm';
                 }
                 // Barcode Code 128 (sama seperti voucher); beri viewBox agar pas selebar area.
                 $barcodeSvg = DNS1D::getBarcodeSVG((string) $product->code, 'C128', 1, 30, 'black', false, false);
