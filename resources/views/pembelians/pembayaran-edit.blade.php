@@ -45,9 +45,9 @@
                                                     <tr>
                                                         <th>Produk</th>
                                                         <th>Satuan</th>
-                                                        <th>Harga Beli</th>
+                                                        <th style="display:none">Harga Beli</th>
                                                         <th>Qty</th>
-                                                        <th>Subtotal</th>
+                                                        <th style="display:none">Subtotal</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -55,9 +55,9 @@
                                                         <tr>
                                                             <td>{{ $item->product?->name }}</td>
                                                             <td>{{ $item->product?->unit }}</td>
-                                                            <td>Rp.{{ number_format($item->harga_beli, 0, ',', '.') }}</td>
+                                                            <td style="display:none">Rp.{{ number_format($item->harga_beli, 0, ',', '.') }}</td>
                                                             <td>{{ $item->qty }}</td>
-                                                            <td>Rp.{{ number_format($item->subtotal, 0, ',', '.') }}</td>
+                                                            <td style="display:none">Rp.{{ number_format($item->subtotal, 0, ',', '.') }}</td>
                                                         </tr>
                                                     @endforeach
                                                 </tbody>

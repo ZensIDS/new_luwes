@@ -286,16 +286,6 @@
                                     <table class="table table-condensed" style="margin:0">
                                         <tr><th width="130">Kode PO</th><td><strong>{{ $pembelian->code }}</strong></td></tr>
                                         <tr><th>Supplier</th><td>{{ $pembelian->supplier->name }}</td></tr>
-                                        <tr><th>Total</th><td>Rp {{ $pembelian->total }}</td></tr>
-                                        <tr>
-                                            <th>Status Bayar</th>
-                                            <td>
-                                                @php $ps = $pembelian->pembelianTransaction?->status ?? 'unpaid'; @endphp
-                                                <span class="label label-{{ $ps === 'paid' ? 'success' : ($ps === 'partial' ? 'warning' : 'danger') }}">
-                                                    {{ strtoupper($ps) }}
-                                                </span>
-                                            </td>
-                                        </tr>
                                     </table>
                                 </div>
                             </div>

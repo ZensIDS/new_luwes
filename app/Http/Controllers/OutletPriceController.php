@@ -110,6 +110,19 @@ class OutletPriceController extends Controller
         return array_filter(['outlet_id' => $outletId]) + ['latest' => 1];
     }
 
+    /**
+     * Parameter index setelah aturan harga BARU dibuat: kembali ke folder atau pencarian yang tadi dibuka
+     * (halaman 1). Selain itu (kartu folder, "Semua Barang" A-Z, outlet lain) -> "Terakhir Ditambahkan".
+     */
+    private function returnParamsAfterCreate(?int $outletId): array
+    {
+        $params = $this->indexParams($outletId, false);
+
+        return (isset($params['folder']) || isset($params['search']))
+            ? $params
+            : $this->latestParams($outletId);
+    }
+
     private function lastOutletId(): ?int
     {
         $lastId = (int) session(self::LAST_OUTLET_SESSION, 0);
@@ -279,7 +292,7 @@ class OutletPriceController extends Controller
      * "Deferred join": query pengurutan HANYA mengambil kolom id (sort kecil, tidak membebani memori
      * walau satu outlet punya puluhan ribu aturan harga); baris lengkap + relasi baru dimuat untuk
      * 25 id di halaman ini. Search berbasis AWALAN (LIKE 'kata%') lewat subquery IN.
-     * Urutan: abjad nama produk (A-Z), juga saat search/filter outlet dipakai.
+     * Urutan: lihat komentar di orderBy di bawah (folder & pencarian = terakhir diperbarui, Semua Barang = A-Z).
      */
     private function pricePage(int $outletId, string $search, ?string $folder = null, bool $latest = false): LengthAwarePaginator
     {
@@ -296,11 +309,17 @@ class OutletPriceController extends Controller
             ->leftJoin('products', 'products.id', '=', 'outlet_prices.product_id')
             // Di dalam folder: kunci folder dihitung dari nama produk (sama dengan hitungan card folder).
             ->when($folder !== null, fn ($query) => app(PriceFolderIndex::class)->constrain($query, $folder))
-            // "Terakhir Ditambahkan": yang paling baru dibuat di atas. Lainnya: abjad nama produk.
+            // Urutan:
+            //  - "Terakhir Ditambahkan": yang paling baru dibuat di atas.
+            //  - "Semua Barang (A-Z)" (tanpa folder & tanpa pencarian): abjad nama produk.
+            //  - Folder apa pun & hasil pencarian: aturan harga yang paling baru diperbarui di atas
+            //    (aturan baru / habis diedit langsung ada di urutan pertama).
             ->when(
                 $latest,
                 fn ($query) => $query->orderByDesc('outlet_prices.created_at')->orderByDesc('outlet_prices.id'),
-                fn ($query) => $query->orderBy('products.name')->orderBy('outlet_prices.id')
+                fn ($query) => ($folder !== null || $prefix !== null)
+                    ? $query->orderByDesc('outlet_prices.updated_at')->orderByDesc('outlet_prices.id')
+                    : $query->orderBy('products.name')->orderBy('outlet_prices.id')
             )
             ->paginate(25)
             ->withQueryString()
@@ -566,12 +585,14 @@ class OutletPriceController extends Controller
             $this->syncLatestHpp($request, $price);
         });
 
-        // Aturan BARU: tampilkan di folder "Terakhir Ditambahkan". Kalau hanya memperbarui aturan lama,
-        // kembali ke halaman terakhir yang dibuka (sama seperti edit).
+        // Aturan BARU: kembali ke folder / pencarian yang tadi dibuka (halaman 1, karena urutannya terakhir
+        // diperbarui, jadi aturan baru ada paling atas). Kalau tadi tidak sedang di folder/pencarian
+        // (kartu folder, "Semua Barang" A-Z, atau outlet lain), pakai folder "Terakhir Ditambahkan".
+        // Kalau hanya memperbarui aturan lama, kembali ke halaman terakhir yang dibuka (sama seperti edit).
         return redirect()
             ->route('outlet-prices.index', $wasUpdate
-                ? $this->indexParams((int) $request->outlet_id)
-                : $this->latestParams((int) $request->outlet_id))
+                ? $this->indexParams((int) $request->outlet_id, false)
+                : $this->returnParamsAfterCreate((int) $request->outlet_id))
             ->with('toast_success', $wasUpdate
                 ? 'Aturan harga yang sudah ada berhasil diperbarui.'
                 : 'Master harga outlet berhasil disimpan.');
@@ -959,7 +980,7 @@ class OutletPriceController extends Controller
         });
 
         return redirect()
-            ->route('outlet-prices.index', $this->indexParams((int) $outletPrice->outlet_id))
+            ->route('outlet-prices.index', $this->indexParams((int) $outletPrice->outlet_id, false))
             ->with('toast_success', 'Master harga outlet berhasil diperbarui.');
     }
 
@@ -974,7 +995,7 @@ class OutletPriceController extends Controller
         $outletPrice->setUpdatedAt(now());
         $outletPrice->save();
 
-        return redirect()->route('outlet-prices.index', $this->indexParams((int) $outletPrice->outlet_id));
+        return redirect()->route('outlet-prices.index', $this->indexParams((int) $outletPrice->outlet_id, false));
     }
 
     public function destroy(OutletPrice $outletPrice)
