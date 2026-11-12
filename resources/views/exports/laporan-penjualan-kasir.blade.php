@@ -7,6 +7,7 @@
             <th>Disc Toko</th>
             <th>Promo Otomatis</th>
             <th>Voucher</th>
+            <th>Kresek</th>
             <th>Grand Total</th>
         </tr>
     </thead>
@@ -18,7 +19,8 @@
                 <td>{{ $penjualan->kasir->name ?? ''}}</td>
                 <td>@currency($penjualan->discount_total ?? $penjualan->discount)</td>
                 <td>@currency($penjualan->promotion_total ?? 0)</td>
-                <td>@currency($penjualan->voucher_total ?? 0)</td>
+                <td>@currency($penjualan->voucher_cashback_total)</td>
+                <td>@currency($penjualan->kresek_total ?? 0)</td>
                 <td>@currency($penjualan->grand_total ?? $penjualan->total)</td>
             </tr>
         @endforeach

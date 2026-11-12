@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\CashierSession;
+use App\Models\Kresek;
 use App\Models\OutletPrice;
 use App\Models\OwnerStock;
 use App\Models\PaymentMethod;
@@ -154,10 +155,30 @@ class CashierSaleService
             }
 
             $voucherTotal = array_sum($voucherAmounts);
+
+            // Cashback (qty lembar + total nominal) dari kasir: mengurangi total bayar persis seperti voucher
+            // (dipotong setelah promo dan voucher, sebelum kresek). Batas: tidak boleh melebihi total belanja.
+            $cashbackQty = max(0, (int) ($data['cashback_qty'] ?? 0));
+            $cashbackTotal = max(0, (int) round((float) ($data['cashback_total'] ?? 0)));
+            if ($cashbackTotal > 0 && $cashbackQty < 1) {
+                throw new RuntimeException('Isi jumlah (qty) cashback.');
+            }
+            if ($cashbackTotal <= 0) {
+                $cashbackQty = 0;
+                $cashbackTotal = 0;
+            }
+            $cashbackLimit = max(0, (int) $subtotal - (int) $voucherTotal);
+            if ($cashbackTotal > $cashbackLimit) {
+                throw new RuntimeException('Nominal cashback (Rp ' . number_format($cashbackTotal, 0, ',', '.') . ') tidak boleh melebihi total belanja (Rp ' . number_format($cashbackLimit, 0, ',', '.') . ').');
+            }
             // Tidak ada pembulatan di total transaksi. Pembulatan sudah terjadi di harga jual tiap produk
             // (PriceCalculator::calculateItem). Kolom rounding_amount dipertahankan (selalu 0 untuk transaksi
             // baru) agar nota/invoice lama yang punya pembulatan tetap tampil benar.
-            $grandTotal = max(0, $subtotal - $voucherTotal);
+            // Kresek ditambahkan SETELAH promo dan voucher: tidak ikut dasar voucher/promo, tanpa stok,
+            // tetapi ikut grand total (jadi ikut total bayar, kas penjualan, dan laporan).
+            $kresekRows = $this->resolveKreseks($data['kreseks'] ?? []);
+            $kresekTotal = (float) collect($kresekRows)->sum('subtotal');
+            $grandTotal = max(0, $subtotal - $voucherTotal - $cashbackTotal) + $kresekTotal;
             $roundingAmount = 0.0;
 
             // Metode pembayaran bisa punya biaya tambahan (%) dan/atau "nominal fix". Biaya dihitung server dari
@@ -191,6 +212,9 @@ class CashierSaleService
                 'discount_total' => $discountTotal,
                 'promotion_total' => $promotionTotal,
                 'voucher_total' => $voucherTotal,
+                'cashback_qty' => $cashbackQty,
+                'cashback_total' => $cashbackTotal,
+                'kresek_total' => $kresekTotal,
                 'rounding_amount' => $roundingAmount,
                 'grand_total' => $grandTotal,
                 'paid_amount' => $paidAmount,
@@ -243,6 +267,10 @@ class CashierSaleService
                 $order->promotionApplications()->create($application);
             }
 
+            foreach ($kresekRows as $row) {
+                $order->kreseks()->create($row);
+            }
+
             foreach ($vouchers as $voucher) {
                 VoucherRedemption::create([
                     'voucher_id' => $voucher->id,
@@ -267,10 +295,53 @@ class CashierSaleService
 
             $user->cart()->wherePivot('outlet_id', (string) $outletId)->detach();
 
-            return $order->load(['items.product', 'cashierShift', 'vouchers', 'promotionApplications.promotion', 'paymentMethod']);
+            return $order->load(['items.product', 'kreseks', 'cashierShift', 'vouchers', 'promotionApplications.promotion', 'paymentMethod']);
             // 3 percobaan: bila MySQL membatalkan salah satu transaksi karena deadlock,
             // Laravel mengulang checkout otomatis (semua langkahnya ada di dalam transaksi).
         }, 3);
+    }
+
+    /**
+     * Pilihan kresek dari kasir ([{id, qty}]) -> baris penjualan_kreseks (nama + harga disalin).
+     * Harga selalu dari master (bukan dari client). Kresek nonaktif/terhapus ditolak.
+     *
+     * @return array<int, array{kresek_id:int,name:string,price:float,qty:int,subtotal:float}>
+     */
+    private function resolveKreseks(array $selected): array
+    {
+        $qtyById = [];
+        foreach ($selected as $row) {
+            $id = (int) ($row['id'] ?? 0);
+            $qty = (int) ($row['qty'] ?? 0);
+            if ($id <= 0 || $qty <= 0) {
+                continue;
+            }
+            $qtyById[$id] = ($qtyById[$id] ?? 0) + $qty;
+        }
+
+        if ($qtyById === []) {
+            return [];
+        }
+
+        $kreseks = Kresek::active()->whereIn('id', array_keys($qtyById))->get()->keyBy('id');
+        if ($kreseks->count() !== count($qtyById)) {
+            throw new RuntimeException('Kresek yang dipilih tidak ditemukan atau sudah nonaktif. Pilih ulang kresek (F9).');
+        }
+
+        $rows = [];
+        foreach ($qtyById as $id => $qty) {
+            $kresek = $kreseks->get($id);
+            $price = (float) $kresek->price;
+            $rows[] = [
+                'kresek_id' => $kresek->id,
+                'name' => $kresek->name,
+                'price' => $price,
+                'qty' => $qty,
+                'subtotal' => (float) round($price * $qty),
+            ];
+        }
+
+        return $rows;
     }
 
     private function lockedStocksForCartItem($product, int $outletId)

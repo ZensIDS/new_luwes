@@ -13,6 +13,9 @@ class CashierSession extends Model
     use LogsActivity;
     use SoftDeletes;
 
+    /** Batas edit History Kasir untuk role kasir (role lain tanpa batas). */
+    public const KASIR_EDIT_LIMIT = 2;
+
     protected $fillable = [
         'outlet_id',
         'cashier_id',
@@ -30,6 +33,7 @@ class CashierSession extends Model
         'closing_note',
         'opened_at',
         'closed_at',
+        'edit_count',
     ];
 
     protected $casts = [
@@ -44,7 +48,32 @@ class CashierSession extends Model
         'discrepancy' => 'float',
         'opened_at' => 'datetime',
         'closed_at' => 'datetime',
+        'edit_count' => 'integer',
     ];
+
+    /**
+     * Sesi yang sudah ditutup boleh diedit. Kasir: hanya sesinya sendiri dan maksimal
+     * KASIR_EDIT_LIMIT kali. staff-outlet: hanya sesinya sendiri. Role lain: tanpa batas.
+     */
+    public function canBeEditedBy(?User $user): bool
+    {
+        if (! $user || $this->status !== 'closed') {
+            return false;
+        }
+
+        if (in_array($user->role, ['staff-outlet', 'kasir'], true)) {
+            if ((int) $this->cashier_id !== (int) $user->getAuthIdentifier()
+                || (int) $this->outlet_id !== (int) $user->outlet_id) {
+                return false;
+            }
+        }
+
+        if ($user->role === 'kasir' && (int) $this->edit_count >= self::KASIR_EDIT_LIMIT) {
+            return false;
+        }
+
+        return true;
+    }
 
     public function outlet()
     {
@@ -109,8 +138,11 @@ class CashierSession extends Model
             'sales_total' => 0.0,
             'non_cash_total' => 0.0,
             'payments' => [],
+            // voucher_* sudah termasuk cashback (cashback tampil menyatu dengan voucher).
             'voucher_count' => 0,
             'voucher_total' => 0.0,
+            'cashback_count' => 0,
+            'cashback_total' => 0.0,
         ];
     }
 
@@ -136,7 +168,7 @@ class CashierSession extends Model
         $payments = Penjualan::query()
             ->whereIn('cashier_session_id', $sessionIds)
             ->where('status', 'paid')
-            ->selectRaw("cashier_session_id, {$methodExpr} as method, COUNT(*) as trx, SUM(COALESCE(grand_total, total, 0)) as total")
+            ->selectRaw("cashier_session_id, {$methodExpr} as method, COUNT(*) as trx, SUM(COALESCE(grand_total, total, 0)) as total, SUM(COALESCE(cashback_qty, 0)) as cashback_qty, SUM(COALESCE(cashback_total, 0)) as cashback_total")
             ->groupByRaw("cashier_session_id, {$methodExpr}")
             ->get();
 
@@ -151,6 +183,8 @@ class CashierSession extends Model
                 'count' => (int) $row->trx,
                 'total' => $total,
             ];
+            $result[$id]['cashback_count'] += (int) $row->cashback_qty;
+            $result[$id]['cashback_total'] += (float) $row->cashback_total;
             $result[$id]['sales_count'] += (int) $row->trx;
             $result[$id]['sales_total'] += $total;
             if (! $isCash) {
@@ -176,6 +210,13 @@ class CashierSession extends Model
             $id = (int) $row->cashier_session_id;
             $result[$id]['voucher_count'] = (int) $row->qty;
             $result[$id]['voucher_total'] = (float) $row->total;
+        }
+
+        // Cashback digabung ke voucher: lembar = voucher + qty cashback, nominal = voucher + cashback.
+        // Penjualan yang dihapus/dibatalkan sudah tidak ikut (query Penjualan membuang soft delete).
+        foreach ($result as $id => $breakdown) {
+            $result[$id]['voucher_count'] += $breakdown['cashback_count'];
+            $result[$id]['voucher_total'] += $breakdown['cashback_total'];
         }
 
         return $result;

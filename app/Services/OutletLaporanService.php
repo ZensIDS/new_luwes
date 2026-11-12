@@ -542,7 +542,8 @@ class OutletLaporanService
                 $remaining -= $amount;
             }
         }
-        $missing = max(0, (float) ($sale->voucher_total ?? 0) - array_sum($allocated));
+        // Cashback diperlakukan seperti voucher tanpa kode: selisihnya dibagi proporsional ke item.
+        $missing = max(0, (float) ($sale->voucher_total ?? 0) + (float) ($sale->cashback_total ?? 0) - array_sum($allocated));
         $base = array_sum($balances);
         foreach (array_keys($balances) as $itemId) {
             $amount = $base > 0 ? $missing * $balances[$itemId] / $base : 0;

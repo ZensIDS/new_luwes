@@ -59,4 +59,13 @@ class User extends Authenticatable
     {
         return $this->belongsTo(Outlet::class);
     }
+
+    /**
+     * Angka kas (saldo awal, penjualan tunai, kas masuk, kas seharusnya, isi laci)
+     * hanya boleh dilihat superadmin dan staff-outlet. Role lain (kasir, owner, admin) tidak.
+     */
+    public function canSeeCashFigures(): bool
+    {
+        return in_array($this->role, ['superadmin', 'staff-outlet'], true);
+    }
 }

@@ -1,5 +1,17 @@
 import React, { forwardRef, useImperativeHandle, useRef, useState } from "react";
 import { formatRupiah } from "../utils";
+// Label promo per item: "Nama promo -Rp x" (dari breakdown server); bila tidak ada rincian, pakai nama promo saja.
+const promoLabels = (item) => {
+    const breakdown = Array.isArray(item.cashier_promotion_breakdown) ? item.cashier_promotion_breakdown : [];
+    if (breakdown.length) {
+        return breakdown.map((promo) => {
+            const name = promo.promotion_name || promo.promotion_code || "Promo";
+            return Number(promo.amount) > 0 ? `${ name } -${ formatRupiah(promo.amount) }` : name;
+        });
+    }
+    return Array.isArray(item.cashier_promotions) ? item.cashier_promotions.filter(Boolean) : [];
+};
+
 const CartTableBody = forwardRef(({
     cart,
     handleChangeQty,
@@ -146,6 +158,20 @@ const CartTableBody = forwardRef(({
                                 title="Batch expired tidak ikut dijual dan tidak dihitung sebagai stok tersedia."
                             >
                                 Ada batch expired di sistem ({Number(c.expired_qty)}), informasikan admin outlet
+                            </div>
+                        )}
+                        {promoLabels(c).length > 0 && (
+                            <div>
+                                {promoLabels(c).map((promo, promoIndex) => (
+                                    <span
+                                        key={`promo-${ index }-${ promoIndex }`}
+                                        className="label label-success"
+                                        style={{ display: "inline-block", marginRight: 4, marginTop: 3, fontSize: 12, fontWeight: 500 }}
+                                        title="Promo yang dipakai pada item ini"
+                                    >
+                                        <i className="fa fa-tag"></i> {promo}
+                                    </span>
+                                ))}
                             </div>
                         )}
                     </td>

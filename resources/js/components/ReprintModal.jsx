@@ -12,6 +12,7 @@ const ReprintModal = ({ open, outletId, onClose }) => {
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
+    const [notice, setNotice] = useState("");
     const [active, setActive] = useState(0);
     const inputRef = useRef(null);
     const listRef = useRef(null);
@@ -33,6 +34,7 @@ const ReprintModal = ({ open, outletId, onClose }) => {
                 setRows(Array.isArray(response.data?.data) ? response.data.data : []);
                 setActive(0);
                 setError("");
+                setNotice(response.data?.message || "");
             })
             .catch((err) => {
                 if (axios.isCancel(err) || err.code === "ERR_CANCELED") return;
@@ -52,6 +54,7 @@ const ReprintModal = ({ open, outletId, onClose }) => {
         setRows([]);
         setActive(0);
         setError("");
+        setNotice("");
         load("");
         const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 0);
         return () => {
@@ -145,7 +148,8 @@ const ReprintModal = ({ open, outletId, onClose }) => {
                 <div ref={listRef} style={{ overflowY: "auto", padding: "0 10px 10px" }}>
                     {error && <div className="alert alert-danger" style={{ margin: "6px 5px" }}>{error}</div>}
                     {!error && loading && !rows.length && <p className="text-muted" style={{ padding: "6px 5px" }}>Memuat...</p>}
-                    {!error && !loading && !rows.length && <p className="text-muted" style={{ padding: "6px 5px" }}>Tidak ada penjualan yang cocok.</p>}
+                    {!error && !loading && !rows.length && notice && <div className="alert alert-warning" style={{ margin: "6px 5px" }}>{notice}</div>}
+                    {!error && !loading && !rows.length && !notice && <p className="text-muted" style={{ padding: "6px 5px" }}>Tidak ada penjualan yang cocok di sesi kasir ini.</p>}
                     {rows.length > 0 && (
                         <table className="table table-condensed table-hover" style={{ marginBottom: 0 }}>
                             <thead>

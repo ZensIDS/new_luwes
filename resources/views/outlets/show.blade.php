@@ -6,6 +6,7 @@
 
 @section('container')
     @php($summary = $cashierSummary ?? [])
+    @php($canSeeCash = (bool) auth()->user()?->canSeeCashFigures())
     @php($activeShift = $cashierSession?->activeShifts?->first())
     <section class="content">
         <div class="pos-header">
@@ -24,13 +25,17 @@
                     <div class="pos-cash-summary">
                         <span>Kassa <b>{{ $cashierSession->cashier?->name ?? '—' }}</b></span>
                         <span>Nama kasir <b>{{ $activeShift?->name ?? '—' }}</b></span>
-                        <span>Saldo awal <b>Rp {{ number_format($summary['opening_cash'] ?? 0, 0, ',', '.') }}</b></span>
-                        <span>Penjualan tunai <b>Rp {{ number_format($summary['cash_sales'] ?? 0, 0, ',', '.') }}</b></span>
-                        <span>Non-tunai <b>Rp {{ number_format($summary['breakdown']['non_cash_total'] ?? 0, 0, ',', '.') }}</b></span>
+                        @if ($canSeeCash)
+                            <span>Saldo awal <b>Rp {{ number_format($summary['opening_cash'] ?? 0, 0, ',', '.') }}</b></span>
+                            <span>Penjualan tunai <b>Rp {{ number_format($summary['cash_sales'] ?? 0, 0, ',', '.') }}</b></span>
+                            <span>Non-tunai <b>Rp {{ number_format($summary['breakdown']['non_cash_total'] ?? 0, 0, ',', '.') }}</b></span>
+                        @endif
                         <span>Voucher <b>{{ number_format($summary['breakdown']['voucher_count'] ?? 0, 0, ',', '.') }}x / Rp {{ number_format($summary['breakdown']['voucher_total'] ?? 0, 0, ',', '.') }}</b></span>
                         <span>BON <b class="text-danger">Rp {{ number_format($summary['cash_out'] ?? 0, 0, ',', '.') }}</b></span>
-                        <span title="Penjualan tunai + kas masuk - BON, di luar saldo awal">Kas penjualan <b>Rp {{ number_format($summary['expected_cash'] ?? 0, 0, ',', '.') }}</b></span>
-                        <span title="Saldo awal + kas penjualan">Isi laci <b>Rp {{ number_format($summary['drawer_total'] ?? 0, 0, ',', '.') }}</b></span>
+                        @if ($canSeeCash)
+                            <span title="Penjualan tunai + kas masuk - BON, di luar saldo awal">Kas penjualan <b>Rp {{ number_format($summary['expected_cash'] ?? 0, 0, ',', '.') }}</b></span>
+                            <span title="Saldo awal + kas penjualan">Isi laci <b>Rp {{ number_format($summary['drawer_total'] ?? 0, 0, ',', '.') }}</b></span>
+                        @endif
                     </div>
                 @endif
             </div>
@@ -218,13 +223,17 @@
                         <div class="modal-body">
                             <table class="table table-condensed table-bordered" style="margin-bottom:10px;">
                                 <tbody>
-                                    <tr><td>Penjualan tunai</td><td class="text-right">Rp {{ number_format($summary['cash_sales'] ?? 0, 0, ',', '.') }}</td></tr>
-                                    <tr><td>Kas masuk (mis. selisih tukar barang)</td><td class="text-right">Rp {{ number_format($summary['cash_in'] ?? 0, 0, ',', '.') }}</td></tr>
+                                    @if ($canSeeCash)
+                                        <tr><td>Penjualan tunai</td><td class="text-right">Rp {{ number_format($summary['cash_sales'] ?? 0, 0, ',', '.') }}</td></tr>
+                                        <tr><td>Kas masuk (mis. selisih tukar barang)</td><td class="text-right">Rp {{ number_format($summary['cash_in'] ?? 0, 0, ',', '.') }}</td></tr>
+                                    @endif
                                     <tr><td>BON / uang keluar</td><td class="text-right text-danger">- Rp {{ number_format($summary['cash_out'] ?? 0, 0, ',', '.') }}</td></tr>
-                                    <tr id="closeExpectedRow" class="info" data-expected="{{ (float) ($summary['expected_cash'] ?? 0) }}">
-                                        <th>Uang hasil penjualan yang seharusnya ada</th>
-                                        <th class="text-right">Rp {{ number_format($summary['expected_cash'] ?? 0, 0, ',', '.') }}</th>
-                                    </tr>
+                                    @if ($canSeeCash)
+                                        <tr id="closeExpectedRow" class="info" data-expected="{{ (float) ($summary['expected_cash'] ?? 0) }}">
+                                            <th>Uang hasil penjualan yang seharusnya ada</th>
+                                            <th class="text-right">Rp {{ number_format($summary['expected_cash'] ?? 0, 0, ',', '.') }}</th>
+                                        </tr>
+                                    @endif
                                     <tr id="closeDifferenceRow">
                                         <td>Selisih dengan uang fisik</td>
                                         <td class="text-right"><strong id="closeDifferenceText">isi uang fisik</strong></td>
@@ -235,11 +244,13 @@
                                     </tr>
                                 </tbody>
                             </table>
-                            <p class="text-muted small" style="margin-top:-4px;">
-                                Saldo awal Rp {{ number_format($summary['opening_cash'] ?? 0, 0, ',', '.') }} tidak ikut dihitung di atas.
-                            </p>
+                            @if ($canSeeCash)
+                                <p class="text-muted small" style="margin-top:-4px;">
+                                    Saldo awal Rp {{ number_format($summary['opening_cash'] ?? 0, 0, ',', '.') }} tidak ikut dihitung di atas.
+                                </p>
+                            @endif
 
-                            @include('cashier._breakdown', ['breakdown' => $summary['breakdown'] ?? \App\Models\CashierSession::emptyBreakdown()])
+                            @include('cashier._breakdown', ['breakdown' => $summary['breakdown'] ?? \App\Models\CashierSession::emptyBreakdown(), 'showCash' => $canSeeCash])
 
                             <div class="row">
                                 <div class="col-sm-6 form-group">
@@ -282,8 +293,9 @@
         window.user = @json(auth()->user());
     </script>
     <script>
-        // Selisih tutup kasir dihitung langsung saat uang fisik / saldo besok diketik.
-        // Baris "seharusnya" hijau bila pas, merah bila selisih, biru selama uang fisik belum diisi.
+        // Selisih tutup kasir dihitung saat uang fisik / saldo besok diketik.
+        // - superadmin & staff-outlet: dihitung di browser dari angka "seharusnya" di halaman.
+        // - role lain: angka "seharusnya" tidak ada di HTML; selisih ditanya ke server (hanya selisih yang kembali).
         (function () {
             const expectedRow = document.getElementById('closeExpectedRow');
             const diffRow = document.getElementById('closeDifferenceRow');
@@ -291,18 +303,52 @@
             const carry = document.getElementById('carry_over_cash');
             const text = document.getElementById('closeDifferenceText');
             const drawer = document.getElementById('closeDrawerTotal');
-            if (!expectedRow || !diffRow || !closing || !carry || !text || !drawer) return;
+            if (!diffRow || !closing || !carry || !text || !drawer) return;
 
-            const expected = Number(expectedRow.dataset.expected || 0);
+            const remote = !expectedRow;
+            const differenceUrl = @json($cashierSession ? route('cashier.close-difference', $cashierSession) : null);
+            const expected = remote ? 0 : Number(expectedRow.dataset.expected || 0);
             const toNumber = (value) => Number(String(value || '').replace(/[^\d]/g, '')) || 0;
             const rp = (value) => 'Rp ' + Math.abs(value).toLocaleString('id-ID');
             const states = ['info', 'success', 'danger'];
+            const rows = () => (expectedRow ? [expectedRow, diffRow] : [diffRow]);
 
             const paint = (state) => {
-                [expectedRow, diffRow].forEach((row) => {
+                rows().forEach((row) => {
                     states.forEach((name) => row.classList.remove(name));
                     row.classList.add(state);
                 });
+            };
+
+            const showDiff = (diff) => {
+                if (diff === 0) {
+                    text.textContent = 'Pas (Rp 0)';
+                    paint('success');
+                } else {
+                    text.textContent = (diff > 0 ? '+ ' : '- ') + rp(diff);
+                    paint('danger');
+                }
+            };
+
+            let timer = null;
+            let requestSeq = 0;
+
+            const fetchDiff = (physical) => {
+                const seq = ++requestSeq;
+                text.textContent = 'menghitung...';
+                fetch(differenceUrl + '?closing_cash=' + encodeURIComponent(physical), {
+                    headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                })
+                    .then((response) => (response.ok ? response.json() : Promise.reject(response)))
+                    .then((json) => {
+                        if (seq !== requestSeq) return;
+                        showDiff(Number(json.difference || 0));
+                    })
+                    .catch(() => {
+                        if (seq !== requestSeq) return;
+                        text.textContent = 'gagal menghitung selisih';
+                    });
             };
 
             const render = () => {
@@ -311,21 +357,24 @@
                 drawer.textContent = rp(physical + toNumber(carry.value));
 
                 if (!hasClosing) {
+                    requestSeq++;
+                    clearTimeout(timer);
                     text.textContent = 'isi uang fisik';
-                    expectedRow.classList.remove('success', 'danger');
-                    expectedRow.classList.add('info');
+                    if (expectedRow) {
+                        expectedRow.classList.remove('success', 'danger');
+                        expectedRow.classList.add('info');
+                    }
                     diffRow.classList.remove('info', 'success', 'danger');
                     return;
                 }
 
-                const diff = physical - expected;
-                if (diff === 0) {
-                    text.textContent = 'Pas (Rp 0)';
-                    paint('success');
-                } else {
-                    text.textContent = (diff > 0 ? 'Lebih ' : 'Kurang ') + rp(diff);
-                    paint('danger');
+                if (remote) {
+                    clearTimeout(timer);
+                    timer = setTimeout(() => fetchDiff(physical), 250);
+                    return;
                 }
+
+                showDiff(physical - expected);
             };
 
             closing.addEventListener('input', render);

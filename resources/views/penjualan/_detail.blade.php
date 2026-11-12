@@ -16,12 +16,25 @@
             </tr>
         @php $totalCost += $item->subtotal ?? ($item->qty * $item->price); @endphp
         @endforeach
+        @foreach ($value->kreseks as $kresek)
+            <tr>
+                <td>{{ $kresek->name }}</td>
+                <td>{{ $kresek->qty }}</td>
+                <td>@currency($kresek->price)</td>
+                <td>@currency($kresek->subtotal)</td>
+            </tr>
+        @endforeach
         <tr>
             <th>Disc Toko : @currency($value->discount_total ?? $value->discount)</th>
             <th>Promo : @currency($value->promotion_total ?? 0)</th>
-            <th>Voucher : @currency($value->voucher_total ?? 0)</th>
+            <th>Voucher : @currency($value->voucher_cashback_total)</th>
             <th class="text-right">Subtotal : @currency($value->subtotal ?? $totalCost)</th>
         </tr>
+        @if (($value->kresek_total ?? 0) > 0)
+            <tr>
+                <th colspan="4" class="text-right">Kresek : +@currency($value->kresek_total)</th>
+            </tr>
+        @endif
         <tr>
             <th colspan="4" class="text-right">Grand Total : @currency($value->grand_total ?? ($totalCost - $value->discount - $value->voucher?->value))</th>
         </tr>

@@ -68,6 +68,14 @@
                                     </tr>
                                     @php $totalCost += $item->subtotal ?? ($item->qty * $item->price); @endphp
                                 @endforeach
+                                @foreach ($penjualan->kreseks as $kresek)
+                                    <tr>
+                                        <td>{{ $kresek->name }}</td>
+                                        <td>{{ $kresek->qty }}</td>
+                                        <td>@currency($kresek->price)</td>
+                                        <td>@currency($kresek->subtotal)</td>
+                                    </tr>
+                                @endforeach
                                 @php $grandTotal = $penjualan->grand_total ?? ($totalCost - $penjualan->discount - $penjualan->voucher?->value); @endphp
                                 <tr>
                                     <th colspan="4" class="text-sm text-right">Subtotal setelah Disc Toko : @currency(($penjualan->subtotal ?? $totalCost) + ($penjualan->promotion_total ?? 0))</th>
@@ -82,8 +90,13 @@
                                     <th colspan="4" class="text-sm text-right">Disc Toko : -@currency($penjualan->discount_total ?? $penjualan->discount)</th>
                                 </tr>
                                 <tr>
-                                    <th colspan="4" class="text-sm text-right">Voucher : -@currency($penjualan->voucher_total ?? 0)</th>
+                                    <th colspan="4" class="text-sm text-right">Voucher : -@currency($penjualan->voucher_cashback_total)</th>
                                 </tr>
+                                @if (($penjualan->kresek_total ?? 0) > 0)
+                                    <tr>
+                                        <th colspan="4" class="text-sm text-right">Kresek : +@currency($penjualan->kresek_total)</th>
+                                    </tr>
+                                @endif
                                 @if (($penjualan->rounding_amount ?? 0) > 0)
                                     <tr>
                                         <th colspan="4" class="text-sm text-right">Pembulatan : +@currency($penjualan->rounding_amount)</th>
@@ -124,7 +137,7 @@
                     </div><!-- /.box-body -->
                     <div class="box-footer">
                         <a href="{{ route('penjualan.index') }}" class="btn btn-default">Kembali</a>
-                        @if ($canManageSales)
+                        @if ($canDeleteSales)
                             @if ($deleteBlock)
                                 <button type="button" class="btn btn-danger" disabled title="{{ $deleteBlock }}">Hapus Penjualan</button>
                                 <span class="text-muted" style="margin-left:8px">{{ $deleteBlock }}</span>
@@ -147,7 +160,7 @@
 @endsection
 
 @section('page-script')
-    @if ($canManageSales && ! $deleteBlock)
+    @if ($canDeleteSales && ! $deleteBlock)
         @include('penjualan._delete-script')
     @endif
 @endsection

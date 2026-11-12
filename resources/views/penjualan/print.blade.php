@@ -83,11 +83,15 @@
                 'net' => $net,
             ];
         });
-        $subtotalGross = (float) $lines->sum('gross');
+        // Kresek tampil sebagai baris item biasa dan ikut Subtotal, supaya Subtotal - Diskon - Voucher = TOTAL.
+        $kresekLines = $penjualan->kreseks;
+        $kresekTotal = (float) ($penjualan->kresek_total ?? 0);
+        $subtotalGross = (float) $lines->sum('gross') + $kresekTotal;
         $storeDiscountTotal = (float) $lines->sum('store');
         $promotionTotal = (float) $lines->sum('promo');
         $discountTotal = $storeDiscountTotal + $promotionTotal;
-        $voucherTotal = (float) ($penjualan->voucher_total ?? 0);
+        // Cashback digabung ke baris voucher (tanpa tulisan "Cashback" di nota).
+        $voucherTotal = (float) ($penjualan->voucher_total ?? 0) + (float) ($penjualan->cashback_total ?? 0);
         $roundingAmount = (float) ($penjualan->rounding_amount ?? 0);
         $grandTotal = (float) ($penjualan->grand_total
             ?? max(0, $subtotalGross - $discountTotal - $voucherTotal + $roundingAmount));
@@ -139,7 +143,13 @@
                 'unit' => $fmtRaw($l['unit']),
                 'gross' => $fmtRaw($l['gross']),
                 'disc' => ($l['store'] + $l['promo']) > 0 ? $fmtRaw($l['store'] + $l['promo']) : null,
-            ])->values()->all(),
+            ])->concat($kresekLines->map(fn ($k) => [
+                'name' => (string) $k->name,
+                'qty' => (int) $k->qty,
+                'unit' => $fmtRaw($k->price),
+                'gross' => $fmtRaw($k->subtotal),
+                'disc' => null,
+            ]))->values()->all(),
             'summary' => $summaryRaw,
             'pay' => $payRaw,
             'saved' => ($discountTotal + $voucherTotal) > 0 ? $fmtRaw($discountTotal + $voucherTotal) : null,
@@ -278,6 +288,15 @@
             @if ($lineDiscount > 0)
                 <div class="row item-disc"><span class="key">Disc.</span><span class="val">-{{ number_format($lineDiscount, 0, ',', '.') }}</span></div>
             @endif
+        </div>
+    @endforeach
+    @foreach ($kresekLines as $kresek)
+        <div class="item">
+            <div class="item-name">{{ $kresek->name }}</div>
+            <div class="row">
+                <span class="key item-calc">{{ $kresek->qty }} x {{ number_format($kresek->price, 0, ',', '.') }}</span>
+                <span class="val">{{ number_format($kresek->subtotal, 0, ',', '.') }}</span>
+            </div>
         </div>
     @endforeach
 

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Requests\PenjualanRequest;
+use App\Models\CashierSession;
 use App\Models\Kas;
 use App\Models\Outlet;
 use App\Models\Penjualan;
@@ -78,6 +79,8 @@ class PenjualanController extends Controller
             'selectedCashierId' => $selectedCashierId ? (int) $selectedCashierId : null,
             'isCashier' => $isCashier,
             'canManageSales' => ! $isStaffOutlet,
+            // Hapus penjualan: hanya superadmin.
+            'canDeleteSales' => $user->role === 'superadmin',
         ]);
     }
 
@@ -92,7 +95,7 @@ class PenjualanController extends Controller
         $user = $request->user();
         $isCashier = $user->role === 'kasir';
         $isStaffOutlet = $user->role === 'staff-outlet';
-        $canManageSales = ! $isStaffOutlet;
+        $canDeleteSales = $user->role === 'superadmin';
 
         $draw = (int) $request->input('draw');
         $empty = fn () => response()->json([
@@ -173,6 +176,7 @@ class PenjualanController extends Controller
             'cashierShift',
             'cashierSession:id,status',
             'voucher',
+            'kreseks',
             // withTrashed: produk yang sudah di-soft-delete tetap tampil di riwayat penjualan
             'items.product' => fn ($q) => $q->withTrashed()->select('id', 'code', 'name'),
         ])
@@ -182,12 +186,12 @@ class PenjualanController extends Controller
             ->sortBy(fn ($penjualan) => $order[$penjualan->id])
             ->values();
 
-        $data = $penjualans->map(function ($value) use ($canManageSales, $cancellation, $user) {
+        $data = $penjualans->map(function ($value) use ($canDeleteSales, $cancellation, $user) {
             $aksi = '<div class="btn-group">'
                 . '<button type="button" class="btn btn-default btn-sm btn-toggle-detail" title="Lihat rincian barang"><i class="fa fa-chevron-down"></i> Detail</button>'
                 . '<a class="btn btn-info btn-sm" href="' . e(route('penjualan.show', $value->id)) . '" title="Buka halaman penjualan"><i class="fa fa-eye"></i> Show</a>'
                 . '<a class="btn btn-warning btn-sm btn-reprint" href="' . e(route('penjualan.print', ['penjualan' => $value->id, 'reprint' => 1])) . '" title="Cetak ulang nota (F4)"><i class="fa fa-print"></i> Re-Print</a>';
-            if ($canManageSales) {
+            if ($canDeleteSales) {
                 $block = $cancellation->blockReason($value, $user);
                 if ($block) {
                     $aksi .= '<button type="button" class="btn btn-danger btn-sm" disabled title="' . e($block) . '"><i class="fa fa-trash"></i> Hapus</button>';
@@ -198,7 +202,7 @@ class PenjualanController extends Controller
             $aksi .= '</div>';
 
             // Bila boleh dihapus, grup tombol dibungkus form hapus (.btn-delete-sale mencari form terdekat).
-            if ($canManageSales && ! ($block ?? null)) {
+            if ($canDeleteSales && ! ($block ?? null)) {
                 $aksi = '<form action="' . e(route('penjualan.destroy', $value->id)) . '" method="post" class="form-delete-sale" style="display:inline;"'
                     . ' data-code="' . e($value->code) . '"'
                     . ' data-items="' . (int) $value->items->count() . '"'
@@ -301,6 +305,11 @@ class PenjualanController extends Controller
             'voucher_codes.*' => 'string|max:100',
             'promotion_codes' => 'nullable|array',
             'promotion_codes.*' => 'string|max:100',
+            'cashback_qty' => 'nullable|integer|min:0|max:999',
+            'cashback_total' => 'nullable|numeric|min:0|max:999999999',
+            'kreseks' => 'nullable|array|max:50',
+            'kreseks.*.id' => 'required|integer',
+            'kreseks.*.qty' => 'required|integer|min:1|max:999',
         ]);
 
         // Kasir / staff outlet hanya boleh bertransaksi di outletnya sendiri.
@@ -332,7 +341,7 @@ class PenjualanController extends Controller
         // return $pdf->download('penjualan_'.$penjualan->id.'.pdf');
         return view('penjualan.show', [
             'penjualan' => $penjualan,
-            'canManageSales' => auth()->user()->role !== 'staff-outlet',
+            'canDeleteSales' => auth()->user()->role === 'superadmin',
             'deleteBlock' => $cancellation->blockReason($penjualan, auth()->user()),
         ]);
     }
@@ -348,9 +357,26 @@ class PenjualanController extends Controller
         $user = $request->user();
         $term = trim((string) $request->input('q', ''));
 
+        // Reprint (F4) hanya untuk nota dari sesi kasir yang sedang buka milik akun ini di outlet ini.
+        // Nota sesi yang sudah ditutup (mis. kemarin) dan nota akun kasir lain tidak ditampilkan.
+        $session = CashierSession::query()
+            ->where('outlet_id', $outletId)
+            ->where('cashier_id', $user->getAuthIdentifier())
+            ->where('status', 'open')
+            ->latest('opened_at')
+            ->first();
+
+        if (! $session) {
+            return response()->json([
+                'data' => [],
+                'message' => 'Kasir belum dibuka. Reprint hanya untuk nota dari sesi kasir yang sedang buka.',
+            ]);
+        }
+
         $query = Penjualan::query()
             ->with('customer')
-            ->where('outlet_id', $outletId);
+            ->where('outlet_id', $outletId)
+            ->where('cashier_session_id', $session->id);
 
         if ($user->role === 'kasir') {
             $query->where('kasir_id', (string) $user->getAuthIdentifier());
@@ -406,8 +432,8 @@ class PenjualanController extends Controller
     public function destroy(Request $request, Penjualan $penjualan, SaleCancellationService $cancellation)
     {
         $this->ensurePenjualanAccess($penjualan);
-        // staff-outlet hanya boleh melihat penjualan
-        abort_if(auth()->user()->role === 'staff-outlet', 403, 'Staff outlet tidak dapat menghapus penjualan.');
+        // Hanya superadmin yang boleh menghapus penjualan.
+        abort_unless(auth()->user()->role === 'superadmin', 403, 'Hanya superadmin yang dapat menghapus penjualan.');
 
         $validator = Validator::make($request->all(), [
             'reason' => [$penjualan->outlet_id ? 'required' : 'nullable', 'string', 'min:5', 'max:255'],

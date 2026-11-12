@@ -26,8 +26,9 @@ class SaleCancellationService
      */
     public function blockReason(Penjualan $penjualan, Authenticatable $user): ?string
     {
-        if ($user->role === 'staff-outlet') {
-            return 'Staff outlet tidak dapat menghapus penjualan.';
+        // Hanya superadmin yang boleh menghapus penjualan (guard server, dipakai juga oleh cancel()).
+        if ($user->role !== 'superadmin') {
+            return 'Hanya superadmin yang dapat menghapus penjualan.';
         }
 
         if ($penjualan->outlet_id === null) {
@@ -107,6 +108,8 @@ class SaleCancellationService
             }
 
             $locked->items()->delete(); // soft delete
+            // Kresek tanpa stok: cukup ikut di-soft-delete (laporan membaca lewat penjualan induk).
+            $locked->kreseks()->delete();
             $locked->forceFill([
                 'delete_reason' => $reason ? mb_substr(trim($reason), 0, 255) : null,
                 'deleted_by' => $user->getAuthIdentifier(),

@@ -94,17 +94,22 @@ class ProductController extends Controller
             if ($exactIds->isNotEmpty()) {
                 $products = $products->whereIn('products.id', $exactIds);
             } else {
-                // Halaman product (non-kasir): nama dicari dari AWAL nama ("jet" menemukan "JET SWEET",
-                // "sweet" tidak). Pencarian kasir (compact) tetap mencari di mana saja.
-                $nameLike = $request->boolean('compact')
-                    ? "%{$search}%"
-                    : addcslashes($search, '\\%_') . '%';
+                // Nama dicari dari AWAL nama ("mus" menemukan "MUSTIKA AYU", bukan "HAIR MUSK").
+                // Berlaku untuk halaman product dan pencarian kasir (F2).
+                $isCompact = $request->boolean('compact');
+                $nameLike = addcslashes($search, '\\%_') . '%';
 
-                $products = $products->where(function ($query) use ($search, $nameLike, $outletId, $outletStockScope) {
-                    $query->where('name', 'LIKE', $nameLike)
-                        ->orWhere('code', 'LIKE', "%{$search}%")
-                        ->orWhere('brand', 'LIKE', "%{$search}%")
-                        ->orWhere('model', 'LIKE', "%{$search}%");
+                $products = $products->where(function ($query) use ($search, $nameLike, $isCompact, $outletId, $outletStockScope) {
+                    $query->where('name', 'LIKE', $nameLike);
+
+                    if ($isCompact) {
+                        // Kasir (F2): kode/barcode juga dari awal; brand/model tidak ikut dicari agar hasil tidak melebar.
+                        $query->orWhere('code', 'LIKE', $nameLike);
+                    } else {
+                        $query->orWhere('code', 'LIKE', "%{$search}%")
+                            ->orWhere('brand', 'LIKE', "%{$search}%")
+                            ->orWhere('model', 'LIKE', "%{$search}%");
+                    }
 
                     if (! $outletId) {
                         // Pencarian harga hanya dipertahankan di daftar produk gudang (admin);
@@ -240,6 +245,8 @@ class ProductController extends Controller
             $products = $products
                 ->with($relations)
                 ->latest()
+                // Tie-break id: halaman berikutnya (scroll kasir) tidak menggandakan / melewatkan baris yang created_at-nya sama.
+                ->orderByDesc('products.id')
                 ->paginate(10);
 
             return ProductResource::collection($products);

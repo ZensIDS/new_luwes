@@ -23,27 +23,28 @@ use Throwable;
  *  - Riwayat stok toko: stock_movements dengan owner_id terisi, stock_adjustments (opname/Set Stock toko) dengan owner_id terisi.
  *  - Set Stock: set_stock_drafts + set_stock_draft_items (keranjang scan aktif maupun yang sudah selesai).
  *  - Pembelian outlet: outlet_purchases + outlet_purchase_items.
- *  - Penjualan toko (outlet_id terisi) beserta item, transaksi pembayaran (transactions), promo terpakai,
- *    voucher terpakai, refund penjualan.
+ *  - Penjualan toko (outlet_id terisi) beserta item, kresek (penjualan_kreseks), transaksi pembayaran (transactions),
+ *    promo terpakai, pemakaian voucher, refund penjualan. (Cashback tersimpan di baris penjualan, ikut terhapus.)
  *  - Kasir: cashier_sessions, cashier_shifts, cashier_drawer_entries, invoice_sequences (nomor invoice mulai lagi),
  *    keranjang kasir (user_cart yang punya outlet_id).
  *  - Pendapatan Lain (other_incomes, termasuk Listing & Sewa): SEMUA baris tanpa --outlet. Dengan --outlet
  *    atau --keep-other-incomes hanya yang punya outlet_id.
- *  - Voucher: SEMUA voucher beserta produk/outlet/pemakaiannya (hanya tanpa --outlet dan tanpa --keep-vouchers).
- *    Penjualan marketplace yang pernah memakai voucher tetap ada; hanya tautan voucher_id-nya dikosongkan
- *    (FK ke voucher itu cascade delete, jadi tanpa langkah ini penjualan marketplace ikut terhapus).
  *  - Log aktivitas milik data di atas: OwnerStock, CashierSession, CashierDrawerEntry, OtherIncome.
  *
- * DIPERBAIKI (bukan dihapus):
+ * DIKEMBALIKAN UTUH (bukan dihapus):
+ *  - Voucher TIDAK PERNAH dihapus. Yang dihapus hanya baris pemakaiannya (voucher_redemptions) pada transaksi toko
+ *    yang direset, jadi voucher yang terpakai saat ujicoba bisa dipakai lagi (kuota/limit pemakaian kembali utuh).
+ *    Pemakaian voucher di penjualan marketplace tidak disentuh.
  *  - promotions.used_qty dikurangi sebesar pemakaian pada penjualan toko yang dihapus, supaya kuota flash sale /
  *    bundle tidak "habis" oleh transaksi yang sudah tidak ada. Promo marketplace tidak ikut berubah.
  *  - Cache badge stok minus, notice expired, dan peta min stok dibuang setelah --apply.
  *
- * TIDAK DISENTUH:
+ * TIDAK DISENTUH (master & pengaturan yang sudah dibuat):
+ *  - Voucher, promo (rafaksi / flash sale / bundling), diskon toko dan harga jual (outlet_prices), master Kresek.
  *  - Stok gudang (stocks) & Kartu Stok gudang (movement tanpa owner_id, termasuk "keluar ke outlet").
  *  - Request Order, Picking List, Delivery Order (riwayat tetap ada).
  *  - Penjualan marketplace (outlet_id kosong), pembelian gudang, kas, pengeluaran, refund pembelian.
- *  - Master: outlet, user, produk, harga outlet (outlet_prices), promo, metode bayar, kategori pendapatan lain.
+ *  - Master: outlet, user, produk, metode bayar, kategori pendapatan lain.
  *
  * Default = simulasi; pakai --apply untuk menulis. Backup database dulu sebelum --apply.
  *
@@ -55,7 +56,6 @@ class ResetOutletData extends Command
     protected $signature = 'outlet:reset-data
         {--apply : Hapus data di database (default: hanya simulasi)}
         {--outlet=* : Batasi ke outlet tertentu (ID outlet, boleh diulang). Default: semua outlet}
-        {--keep-vouchers : Jangan hapus voucher (pemakaian voucher pada penjualan toko tetap dibersihkan)}
         {--keep-other-incomes : Jangan hapus Pendapatan Lain yang tidak punya outlet (Listing, Sewa umum, dll)}
         {--force : Lewati pertanyaan konfirmasi saat --apply}';
 
@@ -82,7 +82,6 @@ class ResetOutletData extends Command
         }
 
         $all = empty($ids);
-        $deleteVouchers = $all && ! $this->option('keep-vouchers');
         $deleteAllIncomes = $all && ! $this->option('keep-other-incomes');
 
         $byOutlet = fn ($q, string $col) => $q->whereNotNull($col)->when($ids, fn ($x) => $x->whereIn($col, $ids));
@@ -127,20 +126,17 @@ class ResetOutletData extends Command
             ['Log aktivitas Pendapatan Lain', $activityTable, $activityOf(OtherIncome::class, fn () => $otherIncomes()->select('id'))],
         ];
 
-        if ($deleteVouchers) {
-            // Penjualan marketplace (tanpa outlet) yang memakai voucher: kosongkan tautannya dulu.
-            // penjualans.voucher_id = FK cascadeOnDelete, jadi tanpa ini menghapus voucher menghapus penjualannya.
-            $steps[] = ['Lepas voucher dari penjualan marketplace (update)', 'penjualans', fn () => DB::table('penjualans')->whereNull('outlet_id')->whereNotNull('voucher_id'), ['voucher_id' => null]];
-        }
-
         array_push($steps,
-            ['Voucher terpakai (voucher_redemptions)', 'voucher_redemptions', fn () => $deleteVouchers
-                ? DB::table('voucher_redemptions')
-                : DB::table('voucher_redemptions')->whereIn('penjualan_id', $penjualanIds())],
+            // Voucher sendiri TIDAK dihapus; hanya pemakaiannya pada transaksi toko, supaya voucher ujicoba bisa dipakai lagi.
+            // (isActive() menghitung limit dari baris voucher_redemptions.) Pemakaian di marketplace tidak ikut.
+            ['Pemakaian voucher toko dikembalikan (voucher_redemptions)', 'voucher_redemptions', fn () => DB::table('voucher_redemptions')
+                ->where(fn ($q) => $q->whereIn('penjualan_id', $penjualanIds())
+                    ->orWhere(fn ($x) => $byOutlet($x, 'outlet_id')))],
             ['Promo terpakai (promotion_applications)', 'promotion_applications', fn () => DB::table('promotion_applications')->whereIn('penjualan_id', $penjualanIds())],
             ['Item refund penjualan', 'refund_penjualan_items', fn () => DB::table('refund_penjualan_items')->whereIn('refund_penjualan_id', $refundPenjualanIds())],
             ['Refund penjualan', 'refund_penjualans', fn () => DB::table('refund_penjualans')->whereIn('penjualan_id', $penjualanIds())],
             ['Transaksi pembayaran penjualan (transactions)', 'transactions', fn () => DB::table('transactions')->whereIn('penjualan_id', $penjualanIds())],
+            ['Kresek penjualan toko', 'penjualan_kreseks', fn () => DB::table('penjualan_kreseks')->whereIn('penjualan_id', $penjualanIds())],
             ['Item penjualan toko', 'penjualan_items', fn () => DB::table('penjualan_items')->whereIn('penjualan_id', $penjualanIds())],
             ['Penjualan toko', 'penjualans', fn () => $byOutlet(DB::table('penjualans'), 'outlet_id')],
             ['Entri laci kasir', 'cashier_drawer_entries', fn () => $byOutlet(DB::table('cashier_drawer_entries'), 'outlet_id')],
@@ -158,17 +154,9 @@ class ResetOutletData extends Command
             ['Stok toko (owner_stocks)', 'owner_stocks', fn () => $ids ? DB::table('owner_stocks')->whereIn('owner_id', $ids) : DB::table('owner_stocks')],
         );
 
-        // Voucher dihapus semua; hanya saat tanpa --outlet dan tanpa --keep-vouchers (voucher bersifat global).
-        if ($deleteVouchers) {
-            array_push($steps,
-                ['Produk voucher (voucher_products)', 'voucher_products', fn () => DB::table('voucher_products')],
-                ['Outlet voucher (voucher_outlets)', 'voucher_outlets', fn () => DB::table('voucher_outlets')],
-                ['Voucher', 'vouchers', fn () => DB::table('vouchers')],
-            );
-        } elseif (! $all) {
-            $this->warn('Dengan --outlet, voucher TIDAK dihapus (bersifat global) dan Pendapatan Lain hanya milik outlet terpilih. Jalankan tanpa --outlet untuk menghapus semuanya.');
-        } else {
-            $this->warn('--keep-vouchers: voucher TIDAK dihapus; hanya pemakaian voucher pada penjualan toko yang dibersihkan.');
+        $this->line('Voucher, promo (rafaksi/flash sale/bundling), diskon toko, dan harga outlet TIDAK dihapus; pemakaiannya dikembalikan utuh.');
+        if (! $all) {
+            $this->warn('Dengan --outlet, Pendapatan Lain hanya milik outlet terpilih. Jalankan tanpa --outlet untuk menghapus semuanya.');
         }
 
         if ($all && $this->option('keep-other-incomes')) {
@@ -240,6 +228,14 @@ class ResetOutletData extends Command
             $promoCount = $promoUsage()->count();
             $total += $promoCount;
             $rows[] = ['Kuota promo dikembalikan (promotions.used_qty dikurangi)', 'promotions', $promoCount];
+        }
+
+        // Info: voucher yang kuotanya kembali utuh.
+        if (Schema::hasTable('voucher_redemptions')) {
+            $voucherBack = DB::table('voucher_redemptions')
+                ->where(fn ($q) => $q->whereIn('penjualan_id', $penjualanIds())->orWhere(fn ($x) => $byOutlet($x, 'outlet_id')))
+                ->distinct()->count('voucher_id');
+            $this->line("Voucher yang dipakai kembali utuh: {$voucherBack} voucher.");
         }
 
         $this->table(['Data', 'Tabel', 'Baris terdampak'], $rows);
@@ -320,7 +316,7 @@ class ResetOutletData extends Command
 
         $this->flushCaches($ids);
 
-        $this->info('Selesai. Data sisi toko sudah bersih; stok & riwayat gudang tidak berubah.');
+        $this->info('Selesai. Transaksi dan stok toko sudah bersih; voucher, promo, dan harga tetap ada dengan kuota utuh. Stok & riwayat gudang tidak berubah.');
 
         return self::SUCCESS;
     }

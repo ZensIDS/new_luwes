@@ -14,6 +14,12 @@
             </div>
             <div class="box-body table-responsive">
                 @php($rp = fn ($number) => 'Rp ' . number_format((float) $number, 0, ',', '.'))
+                @php($canSeeCash = $canSeeCash ?? false)
+                @php($colspan = $canSeeCash ? 12 : 10)
+                @php($authUser = auth()->user())
+                @php($editLogs = $canSeeCash
+                    ? $activities->filter(fn ($a) => $a->subject_type === \App\Models\CashierSession::class && isset($a->properties['edit_number']))->groupBy('subject_id')
+                    : collect())
                 <p class="text-muted small" style="margin-bottom:8px;">
                     <strong>Uang fisik</strong> = uang hasil penjualan tunai (ditambah kas masuk, dikurangi BON), dihitung terpisah dari
                     <strong>saldo besok</strong>. <strong>Selisih</strong> = uang fisik &minus; kas seharusnya.
@@ -25,9 +31,13 @@
                             <th>Periode</th>
                             <th>Outlet / Kassa</th>
                             <th>Saldo awal</th>
-                            <th>Penjualan tunai</th>
+                            @if ($canSeeCash)
+                                <th>Penjualan tunai</th>
+                            @endif
                             <th>BON</th>
-                            <th>Kas seharusnya</th>
+                            @if ($canSeeCash)
+                                <th>Kas seharusnya</th>
+                            @endif
                             <th>Uang fisik</th>
                             <th>Selisih</th>
                             <th>Saldo besok</th>
@@ -62,9 +72,13 @@
                                     @endforelse
                                 </td>
                                 <td>@currency($session->opening_cash)</td>
-                                <td>@currency($sessionSummary['cash_sales'] ?? 0)</td>
+                                @if ($canSeeCash)
+                                    <td>@currency($sessionSummary['cash_sales'] ?? 0)</td>
+                                @endif
                                 <td class="text-danger">@currency($sessionSummary['cash_out'] ?? 0)</td>
-                                <td>@currency($sessionSummary['expected_cash'] ?? 0)</td>
+                                @if ($canSeeCash)
+                                    <td>@currency($sessionSummary['expected_cash'] ?? 0)</td>
+                                @endif
                                 <td>{!! $isOpen ? '<span class="text-muted">—</span>' : $rp($session->closing_cash) !!}</td>
                                 <td class="{{ $difference === null ? 'text-muted' : ($difference == 0 ? 'text-success' : 'text-danger') }}">
                                     @if ($difference === null)
@@ -72,8 +86,7 @@
                                     @elseif ($difference == 0)
                                         <strong>Pas</strong>
                                     @else
-                                        <strong>{{ $difference > 0 ? 'Lebih' : 'Kurang' }}</strong><br>
-                                        {{ $difference > 0 ? '+' : '-' }}{{ $rp(abs($difference)) }}
+                                        <strong>{{ $difference > 0 ? '+' : '-' }} {{ $rp(abs($difference)) }}</strong>
                                     @endif
                                 </td>
                                 <td>{!! $isOpen ? '<span class="text-muted">—</span>' : $rp($session->carry_over_cash) !!}</td>
@@ -85,13 +98,36 @@
                                     @else
                                         <span class="label label-default">CLOSED</span><br>
                                         <a href="{{ route('cashier.print-close', ['cashierSession' => $session->id, 'reprint' => 1, 'auto' => 1, 'from' => 'history']) }}" class="btn btn-warning btn-xs" style="margin-top:4px;" title="Cetak ulang ringkasan tutup kasir"><i class="fa fa-print"></i> Re-Print</a>
+                                        @if ($session->canBeEditedBy($authUser))
+                                            <button type="button" class="btn btn-primary btn-xs js-edit-session" style="margin-top:4px;"
+                                                data-action="{{ route('cashier.update-close', $session) }}"
+                                                data-difference-url="{{ route('cashier.close-difference', $session) }}"
+                                                data-closing="{{ (float) $session->closing_cash }}"
+                                                data-carry="{{ (float) $session->carry_over_cash }}"
+                                                data-note="{{ $session->closing_note }}"
+                                                data-edits="{{ (int) $session->edit_count }}"
+                                                @if ($canSeeCash) data-expected="{{ (float) ($session->expected_cash ?? 0) }}" @endif
+                                                data-title="{{ $session->opened_at?->format('d/m/Y H:i') }} - {{ $session->outlet?->name }}"
+                                                title="Edit uang fisik, saldo besok, dan catatan"><i class="fa fa-pencil"></i> Edit</button>
+                                        @endif
+                                        @if ((int) $session->edit_count > 0)
+                                            <br><small class="text-muted">Diedit {{ (int) $session->edit_count }} kali</small>
+                                        @endif
                                     @endif
                                 </td>
                             </tr>
                             <tr class="active">
-                                <td colspan="12">
-                                    @include('cashier._breakdown', ['breakdown' => $breakdown])
+                                <td colspan="{{ $colspan }}">
+                                    @include('cashier._breakdown', ['breakdown' => $breakdown, 'showCash' => $canSeeCash])
                                     <strong>Catatan:</strong> {{ $session->closing_note ?: $session->opening_note ?: '-' }}
+                                    @foreach ($editLogs[$session->id] ?? [] as $log)
+                                        <div class="small text-muted" style="margin-top:3px;">
+                                            <i class="fa fa-pencil"></i> Edit ke-{{ $log->properties['edit_number'] }} oleh {{ $log->causer?->name ?? 'System' }} ({{ $log->created_at?->format('d/m/Y H:i') }}):
+                                            uang fisik {{ $rp($log->properties['old']['closing_cash'] ?? 0) }} &rarr; {{ $rp($log->properties['attributes']['closing_cash'] ?? 0) }},
+                                            saldo besok {{ $rp($log->properties['old']['carry_over_cash'] ?? 0) }} &rarr; {{ $rp($log->properties['attributes']['carry_over_cash'] ?? 0) }},
+                                            catatan "{{ $log->properties['old']['closing_note'] ?? '-' }}" &rarr; "{{ $log->properties['attributes']['closing_note'] ?? '-' }}"
+                                        </div>
+                                    @endforeach
                                     @if ($session->drawerEntries->isNotEmpty())
                                         <span style="margin-left:18px;"><strong>Aktivitas drawer:</strong>
                                             @foreach ($session->drawerEntries as $entry)
@@ -109,7 +145,7 @@
                                 </td>
                             </tr>
                         @empty
-                            <tr><td colspan="12" class="text-center text-muted">Belum ada history kasir.</td></tr>
+                            <tr><td colspan="{{ $colspan }}" class="text-center text-muted">Belum ada history kasir.</td></tr>
                         @endforelse
                     </tbody>
                 </table>
@@ -137,4 +173,66 @@
             {{-- </div> --}}
         {{-- </div> --}}
     </section>
+
+        {{-- Modal edit sesi yang sudah ditutup; field sama dengan form Tutup kasir. --}}
+        <div class="modal fade" id="editSessionModal" tabindex="-1" role="dialog" aria-labelledby="editSessionModalLabel">
+            <div class="modal-dialog" role="document">
+                <div class="modal-content">
+                    <form id="editSessionForm" action="#" method="POST" autocomplete="off">
+                        @csrf
+                        @method('PUT')
+                        <div class="modal-header">
+                            <button type="button" class="close" data-dismiss="modal">&times;</button>
+                            <h4 class="modal-title" id="editSessionModalLabel"><i class="fa fa-pencil"></i> Edit tutup kasir</h4>
+                            <small class="text-muted" id="editSessionTitle"></small>
+                        </div>
+                        <div class="modal-body">
+                            <div class="alert alert-warning" id="editSessionLimitInfo" style="display:none;"></div>
+                            <table class="table table-condensed table-bordered" style="margin-bottom:10px;">
+                                <tbody>
+                                    @if ($canSeeCash)
+                                        <tr class="info"><th>Uang hasil penjualan yang seharusnya ada</th><th class="text-right" id="editExpectedText">Rp 0</th></tr>
+                                    @endif
+                                    <tr id="editDifferenceRow"><td>Selisih dengan uang fisik</td><td class="text-right"><strong id="editDifferenceText">isi uang fisik</strong></td></tr>
+                                    <tr><td>Total uang di laci setelah tutup <small class="text-muted">(uang fisik + saldo besok)</small></td><td class="text-right"><strong id="editDrawerTotal">Rp 0</strong></td></tr>
+                                </tbody>
+                            </table>
+                            <div class="row">
+                                <div class="col-sm-6 form-group">
+                                    <label for="edit_closing_cash">Uang fisik hasil penjualan tunai</label>
+                                    <div class="input-group">
+                                        <span class="input-group-addon">Rp</span>
+                                        <input id="edit_closing_cash" type="text" inputmode="numeric" name="closing_cash" class="form-control" data-currency-input data-currency-decimals="0" autocomplete="off" required>
+                                    </div>
+                                </div>
+                                <div class="col-sm-6 form-group">
+                                    <label for="edit_carry_over_cash">Saldo disisakan besok</label>
+                                    <div class="input-group">
+                                        <span class="input-group-addon">Rp</span>
+                                        <input id="edit_carry_over_cash" type="text" inputmode="numeric" name="carry_over_cash" class="form-control" data-currency-input data-currency-decimals="0" autocomplete="off" required>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="edit_closing_note">Catatan</label>
+                                <textarea id="edit_closing_note" name="closing_note" class="form-control" rows="2" maxlength="1000"></textarea>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-default" data-dismiss="modal">Batal</button>
+                            <button type="submit" class="btn btn-primary" id="editSessionSubmit"><i class="fa fa-save"></i> Simpan perubahan</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+@endsection
+
+@section('page-script')
+    <script>
+        window.CASH_KASIR_EDIT_LIMIT = {{ \App\Models\CashierSession::KASIR_EDIT_LIMIT }};
+        window.CASH_ROLE = @json(auth()->user()?->role);
+        window.CASH_CAN_SEE = @json((bool) ($canSeeCash ?? false));
+    </script>
+    @include('cashier._edit-session-script')
 @endsection
