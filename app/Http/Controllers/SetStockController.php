@@ -11,6 +11,7 @@ use App\Models\SetStockDraftItem;
 use App\Services\LatestHpp;
 use App\Services\OutletStockService;
 use App\Services\PriceCalculator;
+use App\Services\SetStockDraftMerger;
 use App\Support\OutletAccess;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
@@ -87,7 +88,7 @@ class SetStockController extends Controller
             ->sum('qty');
 
         $item = null;
-        $draft = SetStockDraft::where('active_outlet_id', $outletId)->first();
+        $draft = SetStockDraft::where('active_outlet_id', $outletId)->orderBy('id')->first();
         if ($draft) {
             $item = SetStockDraftItem::with('updater:id,name')
                 ->where('draft_id', $draft->id)
@@ -124,7 +125,7 @@ class SetStockController extends Controller
     public function draft(Request $request): JsonResponse
     {
         $outletId = OutletAccess::id($request);
-        $draft = SetStockDraft::where('active_outlet_id', $outletId)->first();
+        $draft = SetStockDraft::where('active_outlet_id', $outletId)->orderBy('id')->first();
 
         $items = collect();
         if ($draft) {
@@ -230,7 +231,7 @@ class SetStockController extends Controller
     public function destroyItem(Request $request, SetStockDraftItem $item): JsonResponse
     {
         $outletId = OutletAccess::id($request);
-        $draft = SetStockDraft::where('active_outlet_id', $outletId)->first();
+        $draft = SetStockDraft::where('active_outlet_id', $outletId)->orderBy('id')->first();
         abort_unless($draft && (int) $item->draft_id === (int) $draft->id, 404, 'Item tidak ditemukan di keranjang toko ini.');
 
         $item->delete();
@@ -328,7 +329,11 @@ class SetStockController extends Controller
     /** Draft aktif toko, dikunci. $create = buat bila belum ada. */
     private function lockedActiveDraft(int $outletId, bool $create): ?SetStockDraft
     {
-        $find = fn () => SetStockDraft::where('active_outlet_id', $outletId)->lockForUpdate()->first();
+        // Serialkan pembuatan / penggabungan draft per toko (tanpa UNIQUE di DB, karena sinkron dua database).
+        Outlet::whereKey($outletId)->lockForUpdate()->value('id');
+        app(SetStockDraftMerger::class)->mergeActive($outletId);
+
+        $find = fn () => SetStockDraft::where('active_outlet_id', $outletId)->orderBy('id')->lockForUpdate()->first();
         $draft = $find();
 
         if (! $draft && $create) {
