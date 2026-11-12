@@ -5,13 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cetak Label Voucher</title>
     @php
-        $paper = in_array((int) request('paper'), [58, 68, 80], true) ? (int) request('paper') : 80;
+        // 58/68/80 = kertas thermal. 100 = A4 (label 68 mm, 3 kolom per baris), sama dengan label harga.
+        $paper = in_array((int) request('paper'), [58, 68, 80, 100], true) ? (int) request('paper') : 80;
+        $isA4 = $paper === 100;
+        $w = $isA4 ? 68 : $paper; // lebar satu label (mm)
+        // Mode cetak sama dengan label harga: thermal (hitam putih) atau warna (aksen pink).
+        $mode = request('mode') === 'warna' ? 'warna' : 'thermal';
+        // Label 68 mm (termasuk A4 label 68 mm): tinggi label maksimal 35 mm, sama dengan label harga.
+        $tall = $w === 68;
+        $barcodeH = $tall ? '5mm' : '6mm';
         // Ukuran per kertas: [padding luar, padding isi, font nominal, font kode]
         $paperStyle = [
-            58 => ['outer' => '1.5mm', 'content' => '1.5mm', 'value' => '20px', 'code' => '9px'],
-            68 => ['outer' => '2mm', 'content' => '2.2mm', 'value' => '22px', 'code' => '9.5px'],
-            80 => ['outer' => '2.5mm', 'content' => '3mm', 'value' => '24px', 'code' => '10px'],
-        ][$paper];
+            58 => ['outer' => '1.5mm', 'content' => '1.5mm', 'value' => '28px', 'code' => '9px'],
+            68 => ['outer' => '2mm', 'content' => '2.2mm', 'value' => '32px', 'code' => '9.5px'],
+            80 => ['outer' => '2.5mm', 'content' => '3mm', 'value' => '36px', 'code' => '10px'],
+        ][$w];
         $labelName = strtoupper($outlets->firstWhere('id', (int) $outletId)?->name ?? 'LUWES');
         $labelStrip = str_repeat($labelName . ' • VOUCHER • ', 5);
     @endphp
@@ -28,26 +36,33 @@
         th, td { padding:7px; border:1px solid #ddd; text-align:left; }
         th { background:#f5f5f5; }
         /* Desain voucher ringkas (pipih) mengikuti label harga: strip outlet di atas dan kiri-kanan */
-        .label-grid { width:{{ $paper }}mm; margin:0 auto; }
-        .label-outer { width:{{ $paper }}mm; padding:1.2mm {{ $paperStyle['outer'] }}; break-inside:avoid; page-break-inside:avoid; background:#fff; border-bottom:1px dashed #777; }
-        .frame { display:grid; grid-template-columns:2.6mm 1fr 2.6mm; grid-template-rows:2.6mm 1fr; border:1px solid #000; background:#fff; }
-        .strip { background:#fff; color:#000; overflow:hidden; white-space:nowrap; font-size:5px; font-weight:800; letter-spacing:.5px; }
-        .strip-top { grid-column:1 / 4; display:flex; align-items:center; border-bottom:1px solid #000; }
-        .strip-left, .strip-right { display:flex; align-items:center; justify-content:center; border-right:1px solid #000; }
-        .strip-right { border-right:none; border-left:1px solid #000; }
+        .label-grid { width:{{ $isA4 ? '204mm' : $w . 'mm' }}; margin:0 auto; {{ $isA4 ? 'display:grid; grid-template-columns:repeat(3, 68mm); gap:0; align-items:start;' : '' }} }
+        .label-outer { width:{{ $w }}mm; padding:1.2mm {{ $paperStyle['outer'] }}; break-inside:avoid; page-break-inside:avoid; background:#fff; {{ $isA4 ? 'border-right:0.25mm dotted #444; border-bottom:0.25mm dotted #444;' : 'border-bottom:1px dashed #777;' }}
+               {{ $tall ? 'height:34.5mm; overflow:hidden;' : '' }} -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+        @if ($isA4)
+        .label-outer:nth-child(3n+1) { border-left:0.25mm dotted #444; }
+        .label-outer:nth-child(-n+3) { border-top:0.25mm dotted #444; }
+        @endif
+        /* Warna aksen sama dengan label harga: thermal hitam putih, warna = pink (#e0577a) + latar pink muda. */
+        .frame { --accent:{{ $mode === 'warna' ? '#e0577a' : '#000' }}; --soft:{{ $mode === 'warna' ? '#fbe6ea' : '#fff' }}; --stripbg:{{ $mode === 'warna' ? '#e0577a' : '#fff' }}; --stripfg:{{ $mode === 'warna' ? '#fff' : '#000' }};
+                 display:grid; grid-template-columns:2.6mm 1fr 2.6mm; grid-template-rows:2.6mm 1fr; border:1px solid var(--accent); background:var(--soft); {{ $tall ? 'height:100%;' : '' }} }
+        .strip { background:var(--stripbg); color:var(--stripfg); overflow:hidden; white-space:nowrap; font-size:5px; font-weight:800; letter-spacing:.5px; }
+        .strip-top { grid-column:1 / 4; display:flex; align-items:center; border-bottom:1px solid var(--accent); }
+        .strip-left, .strip-right { display:flex; align-items:center; justify-content:center; border-right:1px solid var(--accent); }
+        .strip-right { border-right:none; border-left:1px solid var(--accent); }
         .strip-left span, .strip-right span { writing-mode:vertical-rl; transform:rotate(180deg); white-space:nowrap; }
-        .label-content { padding:1mm {{ $paperStyle['content'] }} 1.2mm; text-align:center; }
-        .value-label { font-size:7.5px; font-weight:900; letter-spacing:2.5px; line-height:1.2; }
-        .value-main { font-size:{{ $paperStyle['value'] }}; font-weight:900; line-height:1.05; letter-spacing:.2px; }
-        .value-main .rp { font-size:11px; font-weight:700; vertical-align:3px; margin-right:1px; }
-        .value-main .pct { font-size:14px; font-weight:800; margin-left:1px; }
-        .value-sub { font-size:8px; font-weight:700; line-height:1.25; }
-        .voucher-barcode { height:9mm; margin:1mm 0 .6mm; padding:0 1.5mm; overflow:hidden; }
-        .voucher-barcode svg { display:block; width:100%; height:9mm; shape-rendering:crispEdges; }
+        .label-content { padding:1mm {{ $paperStyle['content'] }} 1.2mm; text-align:center; min-width:0; overflow:hidden; }
+        .value-label { font-size:7.5px; font-weight:900; letter-spacing:2.5px; line-height:1.2; color:var(--accent); }
+        .value-main { font-size:{{ $paperStyle['value'] }}; font-weight:900; line-height:1.05; letter-spacing:.2px; color:var(--accent); }
+        .value-main .rp { font-size:15px; font-weight:700; vertical-align:3px; margin-right:1px; }
+        .value-main .pct { font-size:20px; font-weight:800; margin-left:1px; }
+        .value-sub { font-size:8px; font-weight:700; line-height:1.25; {{ $tall ? 'display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;' : '' }} }
+        .voucher-barcode { height:{{ $barcodeH }}; width:70%; margin:1mm auto .6mm; padding:0; overflow:hidden; background:#fff; }
+        .voucher-barcode svg { display:block; width:100%; height:{{ $barcodeH }}; shape-rendering:crispEdges; }
         .code { font-family:'Courier New', monospace; font-size:{{ $paperStyle['code'] }}; font-weight:700; letter-spacing:1.2px; text-align:center; line-height:1.2; }
-        @page { size:{{ $paper }}mm auto; margin:0; }
+        @page { size:{{ $isA4 ? 'A4' : $paper . 'mm auto' }}; margin:{{ $isA4 ? '3mm' : '0' }}; }
         @media print {
-            body { width:{{ $paper }}mm; margin:0 auto; padding:0; background:#fff; }
+            body { width:{{ $isA4 ? 'auto' : $paper . 'mm' }}; margin:0 auto; padding:0; background:#fff; }
             .toolbar { display:none !important; }
         }
     </style>
@@ -56,7 +71,7 @@
     @if (! $printing)
         <div class="toolbar">
             <h2>Cetak voucher promo</h2>
-            <p class="muted">Voucher satuan menampilkan nominal potongan otomatis dari produk yang dipilih. Voucher bundling tidak menampilkan harga produk.</p>
+            <p class="muted">Voucher satuan menampilkan nominal potongan otomatis dari produk yang dipilih. Voucher bundling tidak menampilkan harga produk. Mendukung kertas thermal 58/68/80 mm dan A4 (label 68 mm, 3 kolom, untuk printer warna), mode Thermal atau Warna seperti label harga.</p>
             <form method="GET" action="{{ route('cashier.print.vouchers') }}" target="_blank">
                 @if ($outlets->count() > 1)
                     <label>Outlet <select name="outlet_id">
@@ -72,11 +87,18 @@
                 <form method="GET" action="{{ route('cashier.print.vouchers') }}" target="_blank" style="display:block;">
                     @if ($outletId)<input type="hidden" name="outlet_id" value="{{ $outletId }}">@endif
                     <input type="hidden" name="print" value="1">
-                    <label>Ukuran kertas thermal
+                    <label>Ukuran kertas
                         <select name="paper">
                             <option value="80" {{ $paper === 80 ? 'selected' : '' }}>80 mm</option>
                             <option value="68" {{ $paper === 68 ? 'selected' : '' }}>68 mm</option>
                             <option value="58" {{ $paper === 58 ? 'selected' : '' }}>58 mm</option>
+                            <option value="100" {{ $paper === 100 ? 'selected' : '' }}>A4 (label 68 mm)</option>
+                        </select>
+                    </label>
+                    <label>Mode cetak
+                        <select name="mode">
+                            <option value="thermal" {{ $mode === 'thermal' ? 'selected' : '' }}>Thermal (hitam putih)</option>
+                            <option value="warna" {{ $mode === 'warna' ? 'selected' : '' }}>Warna</option>
                         </select>
                     </label>
                     <table>

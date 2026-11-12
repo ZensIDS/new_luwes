@@ -242,7 +242,7 @@
         {{-- Master Kresek (superadmin, staff-outlet) --}}
         @if (in_array($role, ['superadmin', 'staff-outlet']))
         <li class="{{ request()->is('kresek*') ? 'active' : '' }}">
-            <a href="{{ route('kresek.index') }}"><i class="fa fa-shopping-bag"></i><span>Master Kresek</span></a>
+            <a href="{{ route('kresek.index') }}"><i class="fa fa-bookmark"></i><span>Master Kresek</span></a>
         </li>
         @endif
 
