@@ -26,6 +26,8 @@ use Spatie\Activitylog\Models\Activity;
  *   3. log batch outlet: HPP awal saat batch dibuat (> 0)
  *   4. log produk: harga_beli "X -> 0"
  *   5. HPP > 0 yang masih terbaca sistem sekarang (batch lama / harga_beli produk)
+ *   6. harga beli > 0 terakhir di Pembelian Outlet (outlet ini)
+ *   7. HPP > 0 terbaru produk ini di outlet mana pun / harga_beli produk (cadangan terakhir)
  * Produk yang tidak punya riwayat > 0 dilewati dan dilaporkan, tidak ditebak. Produk yang HPP-nya sengaja
  * dinolkan lewat Master Harga Jual (catatan terakhir di log = 0) juga dilewati.
  *
@@ -45,6 +47,7 @@ class RestoreZeroHpp extends Command
     protected $signature = 'hpp:restore-zero
         {--outlet= : Batasi ke id outlet ini (pisahkan koma)}
         {--product= : Batasi ke id atau kode produk ini (pisahkan koma)}
+        {--include-intentional : Pulihkan juga yang catatan terakhir Master Harga Jual-nya HPP 0 (default dilewati)}
         {--apply : Tulis perubahan ke database (default: hanya simulasi)}
         {--force : Lewati konfirmasi saat --apply}';
 
@@ -147,6 +150,9 @@ class RestoreZeroHpp extends Command
             }
         }
 
+        foreach (collect($skipped)->groupBy('reason') as $reason => $group) {
+            $this->line('  - ' . $group->count() . ' dilewati: ' . $reason);
+        }
         $this->info('Dipulihkan: ' . count($restore) . ' | Dilewati: ' . count($skipped) . ' | CSV: ' . $csv);
         $this->line('Catatan: bila outlet tidak punya batch, penulisan ke products.harga_beli berlaku untuk semua outlet yang memakainya sebagai HPP cadangan.');
 
@@ -295,8 +301,9 @@ class RestoreZeroHpp extends Command
 
             // HPP sengaja dinolkan lewat Master Harga Jual (jalur resmi): bukan tertimpa, jangan dipulihkan.
             $lastMaster = $masterList->first();
-            if ($lastMaster && (float) ($lastMaster->properties['new'] ?? 0) < 0.005) {
-                $result[] = ['status' => 'SKIP', 'reason' => 'HPP sengaja dinolkan lewat Master Harga Jual (' . $lastMaster->created_at?->format('d/m/Y H:i') . ')'] + $base;
+            if (! $this->option('include-intentional') && $lastMaster
+                && isset($lastMaster->properties['new']) && (float) $lastMaster->properties['new'] < 0.005) {
+                $result[] = ['status' => 'SKIP', 'reason' => 'HPP dinolkan lewat Master Harga Jual (' . $lastMaster->created_at?->format('d/m/Y H:i') . '); pakai --include-intentional bila ini juga rusak'] + $base;
 
                 continue;
             }
@@ -306,9 +313,11 @@ class RestoreZeroHpp extends Command
             // 1. log batch: hpp X -> 0
             foreach ($batchList as $a) {
                 $p = $a->properties->toArray();
-                if ($a->event === 'updated' && isset($p['old']['hpp'], $p['attributes']['hpp'])
-                    && (float) $p['old']['hpp'] >= 0.005 && (float) $p['attributes']['hpp'] < 0.005) {
-                    $found = [(float) $p['old']['hpp'], 'log batch #' . $a->subject_id . ' (hpp ' . $this->rp((float) $p['old']['hpp']) . ' -> 0)', $a->created_at];
+                $old = $p['old']['hpp'] ?? $p['old']['harga_beli'] ?? null;
+                $new = $p['attributes']['hpp'] ?? $p['attributes']['harga_beli'] ?? null;
+                if ($a->event === 'updated' && $old !== null && $new !== null
+                    && (float) $old >= 0.005 && (float) $new < 0.005) {
+                    $found = [(float) $old, 'log batch #' . $a->subject_id . ' (hpp ' . $this->rp((float) $old) . ' -> 0)', $a->created_at];
                     break;
                 }
             }
@@ -327,8 +336,9 @@ class RestoreZeroHpp extends Command
             if (! $found) {
                 foreach ($batchList as $a) {
                     $p = $a->properties->toArray();
-                    if ($a->event === 'created' && (float) ($p['attributes']['hpp'] ?? 0) >= 0.005) {
-                        $found = [(float) $p['attributes']['hpp'], 'HPP awal batch #' . $a->subject_id . ' (log created)', $a->created_at];
+                    $init = (float) ($p['attributes']['hpp'] ?? $p['attributes']['harga_beli'] ?? 0);
+                    if ($a->event === 'created' && $init >= 0.005) {
+                        $found = [$init, 'HPP awal batch #' . $a->subject_id . ' (log created)', $a->created_at];
                         break;
                     }
                 }
@@ -351,6 +361,29 @@ class RestoreZeroHpp extends Command
                 $shown = $latest->forProduct($c['outlet_id'], $c['product_id']);
                 if ($shown >= 0.005) {
                     $found = [$shown, 'HPP batch lama / harga_beli produk (terbaca sistem)', null];
+                }
+            }
+
+            // 6. harga beli > 0 terakhir di Pembelian Outlet
+            if (! $found) {
+                $purchase = DB::table('outlet_purchase_items as i')
+                    ->join('outlet_purchases as p', 'p.id', '=', 'i.outlet_purchase_id')
+                    ->whereNull('p.deleted_at')
+                    ->where('p.outlet_id', $c['outlet_id'])
+                    ->where('i.product_id', $c['product_id'])
+                    ->where('i.harga_beli', '>', 0)
+                    ->orderByDesc('p.purchase_date')->orderByDesc('i.id')
+                    ->first(['i.harga_beli', 'p.purchase_date', 'p.code']);
+                if ($purchase) {
+                    $found = [(float) $purchase->harga_beli, 'Pembelian Outlet ' . $purchase->code, $purchase->purchase_date ? \Illuminate\Support\Carbon::parse($purchase->purchase_date) : null];
+                }
+            }
+
+            // 7. cadangan terakhir: HPP > 0 produk ini di outlet mana pun / harga_beli produk
+            if (! $found) {
+                $global = $latest->forProductGlobal($c['product_id']);
+                if ($global >= 0.005) {
+                    $found = [$global, 'HPP produk di outlet lain / harga_beli produk (cadangan)', null];
                 }
             }
 
