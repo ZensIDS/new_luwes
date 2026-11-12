@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\ProductImport;
 use App\Models\ProductImportFailure;
 use App\Models\Supplier;
+use App\Support\HargaBeliGuard;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -162,12 +163,12 @@ class ProductsImport
 
         $validRows = collect($validRows);
 
-        DB::transaction(function () use ($validRows, $categoryData) {
+        DB::transaction(function () use ($validRows, $categoryData, $productImport) {
             $codes = $validRows->map(fn (array $row) => $row['data']['kode'])->unique()->values();
 
             $existingProducts = Product::withTrashed()
                 ->whereIn('code', $codes)
-                ->get(['id', 'code', 'deleted_at'])
+                ->get(['id', 'code', 'deleted_at', 'harga_beli'])
                 ->keyBy('code');
 
             $trashedProductIds = $existingProducts
@@ -184,6 +185,7 @@ class ProductsImport
             $insertPayload = [];
             $updatePayload = [];
             $supplierMap = [];
+            $ignoredPrices = [];
 
             foreach ($validRows as $rowEntry) {
                 $row = $rowEntry['data'];
@@ -205,8 +207,14 @@ class ProductsImport
                 ];
 
                 if ($existingProducts->has($row['kode'])) {
-                    $productData['id'] = $existingProducts[$row['kode']]->id;
+                    $existing = $existingProducts[$row['kode']];
+                    $productData['id'] = $existing->id;
                     $updatePayload[$row['kode']] = $productData;
+
+                    // Produk yang sudah ada: harga beli di file DIABAIKAN (K3, HargaBeliGuard).
+                    if ((float) $existing->harga_beli !== (float) $productData['harga_beli']) {
+                        $ignoredPrices[$row['kode']] = [(float) $existing->harga_beli, (float) $productData['harga_beli']];
+                    }
                 } else {
                     $productData['created_at'] = $now;
                     $insertPayload[$row['kode']] = $productData;
@@ -218,7 +226,8 @@ class ProductsImport
             }
 
             if ($insertPayload !== []) {
-                Product::insert(array_values($insertPayload));
+                // Produk BARU boleh membawa harga beli awal (sama seperti membuat produk di Edit Product).
+                HargaBeliGuard::allow('edit-product', fn () => Product::insert(array_values($insertPayload)));
             }
 
             if ($updatePayload !== []) {
@@ -235,12 +244,18 @@ class ProductsImport
                         'satuan',
                         'min_stock',
                         'lokasi',
-                        'harga_beli',
                         'desc',
                         'updated_at',
                         'deleted_at',
                     ]
                 );
+            }
+
+            if ($ignoredPrices !== []) {
+                HargaBeliGuard::logMaintenance('products-import', 'harga beli produk yang sudah ada di file import diabaikan [kode => [harga di DB, harga di file]]', [
+                    'product_import_id' => $productImport->id,
+                    'ignored' => $ignoredPrices,
+                ]);
             }
 
             $this->syncSuppliers($supplierMap);

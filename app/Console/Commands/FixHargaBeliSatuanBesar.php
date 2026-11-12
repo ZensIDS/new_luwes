@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\PembelianProduct;
 use App\Models\Product;
 use App\Models\Stock;
+use App\Support\HargaBeliGuard;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -239,15 +240,27 @@ class FixHargaBeliSatuanBesar extends Command
 
         $backup = $this->writeBackup($prefix, $rows);
 
-        DB::transaction(function () use ($rows) {
-            foreach ($rows as $r) {
-                // Lewat model supaya tercatat di activity log (update_count tidak ikut naik).
-                Product::whereKey($r['id'])->lockForUpdate()->first()?->update([
-                    'harga_beli' => $r['baru_kecil'],
-                    'harga_beli_besar' => $r['baru_besar'],
-                ]);
-            }
+        // Jalur 'maintenance' (HargaBeliGuard): koreksi data darurat, hanya berjalan dengan --apply.
+        HargaBeliGuard::allow('maintenance', function () use ($rows) {
+            DB::transaction(function () use ($rows) {
+                foreach ($rows as $r) {
+                    // Lewat model supaya tercatat di activity log (update_count tidak ikut naik).
+                    Product::whereKey($r['id'])->lockForUpdate()->first()?->update([
+                        'harga_beli' => $r['baru_kecil'],
+                        'harga_beli_besar' => $r['baru_besar'],
+                    ]);
+                }
+            });
         });
+
+        HargaBeliGuard::logMaintenance('product:fix-harga-beli', 'koreksi harga beli diterapkan', [
+            'backup' => $backup,
+            'produk' => array_map(fn ($r) => [
+                'id' => $r['id'], 'name' => $r['name'],
+                'kecil' => [$r['lama'], $r['baru_kecil']],
+                'besar' => [$r['besar_lama'], $r['baru_besar']],
+            ], $rows),
+        ]);
 
         $this->info(count($rows) . ' produk berhasil dikoreksi.');
         $this->line('Backup harga lama: storage/app/' . $backup);
@@ -333,14 +346,24 @@ class FixHargaBeliSatuanBesar extends Command
             return self::SUCCESS;
         }
 
-        DB::transaction(function () use ($items) {
-            foreach ($items as $i) {
-                Product::whereKey((int) $i['id'])->lockForUpdate()->first()?->update([
-                    'harga_beli' => (float) $i['harga_lama'],
-                    'harga_beli_besar' => ($i['besar_lama'] ?? '') === '' ? null : (float) $i['besar_lama'],
-                ]);
-            }
+        HargaBeliGuard::allow('maintenance', function () use ($items) {
+            DB::transaction(function () use ($items) {
+                foreach ($items as $i) {
+                    Product::whereKey((int) $i['id'])->lockForUpdate()->first()?->update([
+                        'harga_beli' => (float) $i['harga_lama'],
+                        'harga_beli_besar' => ($i['besar_lama'] ?? '') === '' ? null : (float) $i['besar_lama'],
+                    ]);
+                }
+            });
         });
+
+        HargaBeliGuard::logMaintenance('product:fix-harga-beli', 'harga lama dikembalikan dari backup', [
+            'backup' => $path,
+            'produk' => array_map(fn ($i) => [
+                'id' => $i['id'], 'name' => $i['name'],
+                'kecil' => (float) $i['harga_lama'], 'besar' => ($i['besar_lama'] ?? '') === '' ? null : (float) $i['besar_lama'],
+            ], $items),
+        ]);
 
         // Ubah nama file supaya produk ini boleh dikoreksi lagi di kemudian hari.
         rename($path, $path . '.restored');

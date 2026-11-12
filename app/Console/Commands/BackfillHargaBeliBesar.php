@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Support\HargaBeliGuard;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -139,14 +140,28 @@ class BackfillHargaBeliBesar extends Command
             $this->line("Backup nilai lama harga besar: storage/app/{$backup}");
         }
 
-        $filled = DB::transaction(function () use ($toFill, $inconsistent, $overwrite, $hitung) {
+        // Update massal lewat query builder tidak memicu event model: jalur 'maintenance' dipasang eksplisit
+        // dan produk yang diubah dicatat ke log (HargaBeliGuard).
+        $ids = (clone $toFill)->pluck('id')->all();
+        if ($overwrite) {
+            $ids = array_merge($ids, (clone $inconsistent)->pluck('id')->all());
+        }
+
+        $filled = HargaBeliGuard::allow('maintenance', fn () => DB::transaction(function () use ($toFill, $inconsistent, $overwrite, $hitung) {
             $filled = (clone $toFill)->update(['harga_beli_besar' => DB::raw($hitung)]);
             if ($overwrite) {
                 $filled += (clone $inconsistent)->update(['harga_beli_besar' => DB::raw($hitung)]);
             }
 
             return $filled;
-        });
+        }));
+
+        HargaBeliGuard::logMaintenance('product:backfill-harga-beli-besar', 'harga_beli_besar diisi', [
+            'prefix'     => $prefix,
+            'overwrite'  => $overwrite,
+            'jumlah'     => $filled,
+            'product_ids' => $ids,
+        ]);
 
         $this->info("{$filled} produk berhasil diisi harga satuan besarnya.");
 
