@@ -50,6 +50,7 @@ class SetStockController extends Controller
             'jenis' => ['nullable', 'in:sudah,belum,semua'],
             'tanggal_mulai' => ['nullable', 'date_format:Y-m-d'],
             'tanggal_selesai' => ['nullable', 'date_format:Y-m-d'],
+            'nama_awal' => ['nullable', 'string', 'max:100', 'regex:/^[^\x00-\x1F\x7F]*$/'],
         ]);
 
         $export = new SetStockExport($request);

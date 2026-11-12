@@ -14,14 +14,18 @@ use Spatie\Activitylog\Models\Activity;
 /**
  * Memulihkan HPP yang tertimpa jadi 0 oleh jalur non-resmi (K5).
  *
- * Sasaran: produk yang terdaftar di Master Harga Jual (per outlet) yang HPP terbarunya (LatestHpp::forProduct)
- * sekarang 0, padahal sebelumnya pernah > 0. HPP dikembalikan ke nilai > 0 terakhir sebelum jadi 0.
+ * Sasaran: SEMUA produk yang terdaftar di Master Harga Jual (per outlet), berapapun stoknya (termasuk stok 0 / habis /
+ * kedaluwarsa), yang HPP tujuan penulisannya sekarang 0. HPP tujuan = HPP batch terbaru (LatestHpp::stockFor, sama
+ * seperti jalur Master Harga Jual) bila outlet punya batch, atau products.harga_beli bila tidak punya batch.
+ * Jadi batch terbaru yang hpp-nya rusak jadi 0 ikut tersentuh walau batch lama / harga_beli masih > 0.
+ * HPP dikembalikan ke nilai > 0 terakhir sebelum jadi 0.
  *
  * Sumber nilai pengganti, urut prioritas (yang pertama ketemu dipakai, sumbernya dilaporkan):
  *   1. log batch outlet (owner_stocks): perubahan hpp "X -> 0"; X = nilai terakhir sebelum jadi 0
  *   2. riwayat Master Harga Jual (log OutletPriceHpp): HPP > 0 terakhir yang diinput
  *   3. log batch outlet: HPP awal saat batch dibuat (> 0)
  *   4. log produk: harga_beli "X -> 0"
+ *   5. HPP > 0 yang masih terbaca sistem sekarang (batch lama / harga_beli produk)
  * Produk yang tidak punya riwayat > 0 dilewati dan dilaporkan, tidak ditebak. Produk yang HPP-nya sengaja
  * dinolkan lewat Master Harga Jual (catatan terakhir di log = 0) juga dilewati.
  *
@@ -76,11 +80,11 @@ class RestoreZeroHpp extends Command
 
         $this->info($pairs->count() . ' pasangan outlet + produk terdaftar di Master Harga Jual.');
 
-        // ---- 2. Yang HPP terbarunya sekarang 0 ----
+        // ---- 2. Yang HPP tujuan penulisannya (batch terbaru / harga_beli) sekarang 0, berapapun stoknya ----
         $candidates = [];
         foreach ($pairs->groupBy(fn ($g) => $g->first()->outlet_id) as $outletId => $groups) {
             foreach ($groups->chunk(300) as $chunk) {
-                $hpp = $latest->forProducts((int) $outletId, $chunk->map(fn ($g) => $g->first()->product_id)->all());
+                $hpp = $this->targetHpp((int) $outletId, $chunk->map(fn ($g) => $g->first()->product_id)->all());
                 foreach ($chunk as $group) {
                     $first = $group->first();
                     if (($hpp[$first->product_id] ?? 0.0) >= 0.005) {
@@ -98,7 +102,7 @@ class RestoreZeroHpp extends Command
             }
         }
 
-        $this->info(count($candidates) . ' pasangan dengan HPP terbaru 0.');
+        $this->info(count($candidates) . ' pasangan dengan HPP 0 (berapapun stoknya).');
         if (! $candidates) {
             return self::SUCCESS;
         }
@@ -167,7 +171,7 @@ class RestoreZeroHpp extends Command
         DB::transaction(function () use ($restore, $latest, &$done, &$already) {
             foreach ($restore as $r) {
                 // Hitung ulang: penulisan sebelumnya (mis. products.harga_beli untuk outlet lain) bisa sudah mengisinya.
-                if ($latest->forProduct($r['outlet_id'], $r['product_id']) >= 0.005) {
+                if (($this->targetHpp($r['outlet_id'], [$r['product_id']])[$r['product_id']] ?? 0.0) >= 0.005) {
                     $already[] = ['outlet_id' => $r['outlet_id'], 'product_id' => $r['product_id']];
 
                     continue;
@@ -342,6 +346,14 @@ class RestoreZeroHpp extends Command
                 }
             }
 
+            // 5. HPP > 0 yang masih terbaca sistem (batch lama / harga_beli produk)
+            if (! $found) {
+                $shown = $latest->forProduct($c['outlet_id'], $c['product_id']);
+                if ($shown >= 0.005) {
+                    $found = [$shown, 'HPP batch lama / harga_beli produk (terbaca sistem)', null];
+                }
+            }
+
             if (! $found) {
                 $result[] = ['status' => 'SKIP', 'reason' => 'tidak ada riwayat HPP > 0 (selalu 0 atau tidak tercatat), isi manual lewat Master Harga Jual'] + $base;
 
@@ -356,6 +368,41 @@ class RestoreZeroHpp extends Command
                 'at' => $found[2]?->format('d/m/Y H:i') ?? '-',
                 'target' => $stock ? 'batch ' . ($stock->batch_number ?: '#' . $stock->id) : 'products.harga_beli',
             ] + $base;
+        }
+
+        return $result;
+    }
+
+    /**
+     * HPP pada tujuan penulisan, per produk, TANPA melihat qty: batch terbaru yang tersedia (qty > 0, belum
+     * kedaluwarsa), bila tidak ada batch terbaru apa pun (mis. stok 0), bila outlet tanpa batch = products.harga_beli.
+     * Mengikuti LatestHpp::stockFor, tetapi tidak mengabaikan batch ber-HPP 0.
+     *
+     * @param  int[]  $productIds
+     * @return array<int, float>
+     */
+    private function targetHpp(int $outletId, array $productIds): array
+    {
+        $batches = OwnerStock::where('owner_id', $outletId)
+            ->whereIn('product_id', $productIds)
+            ->notDeficit()
+            ->orderByDesc('created_at')->orderByDesc('id')
+            ->get(['id', 'product_id', 'hpp', 'qty', 'expired_at'])
+            ->groupBy('product_id');
+        $hargaBeli = Product::whereIn('id', $productIds)->pluck('harga_beli', 'id');
+        $today = today()->toDateString();
+
+        $result = [];
+        foreach ($productIds as $id) {
+            $list = $batches->get($id);
+            if ($list && $list->isNotEmpty()) {
+                $stock = $list->first(fn ($b) => (float) $b->qty > 0
+                        && (! $b->expired_at || substr((string) $b->expired_at, 0, 10) >= $today))
+                    ?? $list->first();
+                $result[$id] = (float) $stock->hpp;
+            } else {
+                $result[$id] = (float) ($hargaBeli[$id] ?? 0);
+            }
         }
 
         return $result;

@@ -34,6 +34,7 @@ class SetStockExport extends BaseLaporanTokoExport
 
     private ?int $outletId = null;
     private string $jenis = 'semua';
+    private string $namaAwal = '';
     private ?Carbon $start = null;
     private ?Carbon $end = null;
     private bool $resolved = false;
@@ -52,6 +53,8 @@ class SetStockExport extends BaseLaporanTokoExport
 
         $jenis = (string) $this->request->input('jenis', 'semua');
         $this->jenis = in_array($jenis, ['sudah', 'belum', 'semua'], true) ? $jenis : 'semua';
+
+        $this->namaAwal = trim((string) $this->request->input('nama_awal', ''));
 
         $today = now(self::TZ)->toDateString();
         $start = Carbon::parse($this->request->input('tanggal_mulai') ?: $today, self::TZ)->startOfDay();
@@ -84,6 +87,7 @@ class SetStockExport extends BaseLaporanTokoExport
         $priced = Product::query()
             ->leftJoin('categories as c', 'c.id', '=', 'products.category_id')
             ->whereHas('outletPrices', fn ($price) => $price->where('outlet_id', $this->outletId)->currentlyActive())
+            ->when($this->namaAwal !== '', fn ($query) => $query->where('products.name', 'like', addcslashes($this->namaAwal, '\\%_').'%'))
             ->orderBy('products.name')
             ->toBase()
             ->get(['products.id', 'products.code', 'products.name', 'c.name as category_name'])
@@ -141,6 +145,9 @@ class SetStockExport extends BaseLaporanTokoExport
         $base = ReportMeta::fromRequest($this->request, 'LAPORAN SET STOCK', 'Set-Stock-'.$label, [], null, $range);
 
         $info = ['Outlet' => $outletName, 'Jenis' => $this->jenisLabel()];
+        if ($this->namaAwal !== '') {
+            $info['Nama diawali'] = $this->namaAwal;
+        }
         if ($this->jenis !== 'belum') {
             $info['Sudah di-set'] = number_format($data['sudah']->count(), 0, ',', '.').' barang';
         }
