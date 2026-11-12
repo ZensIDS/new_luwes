@@ -35,6 +35,7 @@ use App\Models\Supplier;
 use App\Models\Transaction;
 use App\Models\User;
 use Carbon\Carbon;
+use App\Support\HargaBeliGuard;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Seeder;
@@ -76,9 +77,16 @@ class OutletReportSeeder extends Seeder
 
     public function run(): void
     {
+        if (! HargaBeliGuard::seederAllowed()) {
+            $this->command?->error('Seeder demo ditolak di production (set HARGA_BELI_ALLOW_DEMO_SEEDER=true bila memang disengaja).');
+
+            return;
+        }
+
         $this->loadMasterData();
 
-        DB::transaction(function (): void {
+        // Data demo menulis harga beli / HPP langsung: jalur 'seeder' (HargaBeliGuard).
+        HargaBeliGuard::allow('seeder', fn () => DB::transaction(function (): void {
             $this->cleanupGeneratedData();
             $this->seedCashierUserForOutletThree();
             $this->seedStocks();
@@ -92,7 +100,7 @@ class OutletReportSeeder extends Seeder
             $this->seedSales($promotions);
             $this->seedReturnsAndReplacements();
             $this->refreshCashierSessionTotals();
-        });
+        }));
 
         $this->command?->info('Outlet report fixtures seeded: 10 PO, 10 sales, 10 rafaksi, and 10 returns/replacements.');
     }

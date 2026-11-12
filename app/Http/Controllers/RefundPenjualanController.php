@@ -382,7 +382,9 @@ class RefundPenjualanController extends Controller
                             'expired_at' => $stock?->expired_at, 'batch_number' => $stock?->batch_number,
                             'source_type' => RefundPenjualan::class, 'source_id' => $refund->id,
                             'notes' => 'Barang kembali dari retur penjualan',
-                        ], RefundPenjualan::class, $refund->id, $request->user()
+                        ], RefundPenjualan::class, $refund->id, $request->user(),
+                        // HPP retur = HPP batch asal, bukan input harga baru (HargaBeliGuard).
+                        'turunan'
                     );
                 }
 

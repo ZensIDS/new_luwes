@@ -221,14 +221,15 @@ class OutletStockService
 
             if (! $row) {
                 try {
-                    $row = OwnerStock::create([
+                    // HPP batch MINUS turunan dari HPP terbaru, bukan input harga baru (HargaBeliGuard).
+                    $row = HargaBeliGuard::allow('turunan', fn () => OwnerStock::create([
                         'owner_id' => $outletId,
                         'product_id' => $productId,
                         'qty' => 0,
                         'batch_number' => OwnerStock::DEFICIT_BATCH,
                         'hpp' => $hpp,
                         'created_by' => $user?->getAuthIdentifier(),
-                    ]);
+                    ]));
                 } catch (QueryException $e) {
                     // Request lain membuat baris yang sama bersamaan: pakai baris itu.
                     $row = $find();
@@ -244,7 +245,7 @@ class OutletStockService
 
             // Episode minus baru (saldo sudah nol): perbarui HPP perkiraan ke HPP terbaru.
             if ((int) $row->qty >= 0 && (float) $row->hpp !== $hpp) {
-                $row->update(['hpp' => $hpp]);
+                HargaBeliGuard::allow('turunan', fn () => $row->update(['hpp' => $hpp]));
             }
 
             return $row;
@@ -374,7 +375,8 @@ class OutletStockService
                 }
 
                 $batchNumber = $this->generateSetStockBatchNumber($outletId, $productId);
-                $primary = OwnerStock::create([
+                // HPP batch Set Stock turunan dari HPP terbaru, bukan input harga baru (HargaBeliGuard).
+                $primary = HargaBeliGuard::allow('turunan', fn () => OwnerStock::create([
                     'owner_id' => $outletId,
                     'product_id' => $productId,
                     'qty' => 0,
@@ -384,7 +386,7 @@ class OutletStockService
                     'source_type' => 'set_stock',
                     'source_id' => $draftId,
                     'created_by' => $user?->getAuthIdentifier(),
-                ]);
+                ]));
                 $batches = collect([$primary]);
             } else {
                 $primary = $this->pickPrimaryBatch($batches);

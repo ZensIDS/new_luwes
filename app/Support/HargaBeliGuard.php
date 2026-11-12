@@ -75,6 +75,12 @@ class HargaBeliGuard
         return self::$stack === [] ? null : end(self::$stack);
     }
 
+    /** Seeder demo menulis harga beli / HPP: di production hanya jalan bila diizinkan lewat config. */
+    public static function seederAllowed(): bool
+    {
+        return ! app()->environment('production') || (bool) config('harga_beli.allow_demo_seeder', false);
+    }
+
     public static function mode(): string
     {
         return config('harga_beli.mode', 'log') === 'enforce' ? 'enforce' : 'log';
@@ -126,6 +132,24 @@ class HargaBeliGuard
         }
 
         self::violation($context, []);
+    }
+
+    /**
+     * Catat perubahan harga beli / HPP yang dilakukan command maintenance (jalur 'maintenance').
+     * Daftar panjang (> 500 elemen) dipotong: yang tersimpan jumlah total + 500 pertama.
+     */
+    public static function logMaintenance(string $command, string $message, array $context = []): void
+    {
+        foreach ($context as $key => $value) {
+            if (is_array($value) && count($value) > 500) {
+                $context[$key] = ['total' => count($value), 'first_500' => array_slice($value, 0, 500)];
+            }
+        }
+
+        Log::channel(config('harga_beli.log_channel'))->info(
+            "[HargaBeliGuard] maintenance {$command}: {$message}",
+            ['command' => $command, 'user_id' => auth()->id()] + $context
+        );
     }
 
     protected static function violation(string $target, array $changes): void

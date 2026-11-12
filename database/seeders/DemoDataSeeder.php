@@ -42,6 +42,7 @@ use App\Models\User;
 use App\Models\Voucher;
 use App\Models\VoucherRedemption;
 use Carbon\Carbon;
+use App\Support\HargaBeliGuard;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Seeder;
@@ -78,12 +79,21 @@ class DemoDataSeeder extends Seeder
 
     public function run(): void
     {
-        $this->seedSettings();
-        $this->seedMasterData();
-        $this->seedWarehouseData();
-        $this->seedOutletOperations();
-        $this->seedSalesAndCustomerData();
-        $this->call(OutletReportSeeder::class);
+        if (! HargaBeliGuard::seederAllowed()) {
+            $this->command?->error('Seeder demo ditolak di production (set HARGA_BELI_ALLOW_DEMO_SEEDER=true bila memang disengaja).');
+
+            return;
+        }
+
+        // Data demo menulis harga beli / HPP langsung: jalur 'seeder' (HargaBeliGuard).
+        HargaBeliGuard::allow('seeder', function (): void {
+            $this->seedSettings();
+            $this->seedMasterData();
+            $this->seedWarehouseData();
+            $this->seedOutletOperations();
+            $this->seedSalesAndCustomerData();
+            $this->call(OutletReportSeeder::class);
+        });
     }
 
     private function seedSettings(): void

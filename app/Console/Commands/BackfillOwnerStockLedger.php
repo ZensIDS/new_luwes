@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Support\HargaBeliGuard;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -26,6 +27,8 @@ class BackfillOwnerStockLedger extends Command
         $apply = (bool) $this->option('apply');
         $this->warn($apply ? 'MODE APPLY: data akan diubah.' : 'MODE SIMULASI: tidak ada data yang diubah (tambahkan --apply untuk menulis).');
 
+        $hppLog = []; // dicatat ke log setelah commit (HargaBeliGuard)
+
         DB::beginTransaction();
 
         try {
@@ -40,7 +43,9 @@ class BackfillOwnerStockLedger extends Command
                 $count = (clone $legacy)->count();
                 $this->line("HPP dari kolom lama owner_stocks.harga_beli : {$count} baris");
                 if ($apply && $count > 0) {
-                    $legacy->update(['hpp' => DB::raw('harga_beli')]);
+                    $ids = (clone $legacy)->pluck('id')->all();
+                    HargaBeliGuard::allow('maintenance', fn () => $legacy->update(['hpp' => DB::raw('harga_beli')]));
+                    $hppLog['dari_owner_stocks.harga_beli'] = $ids;
                 }
             }
 
@@ -52,7 +57,9 @@ class BackfillOwnerStockLedger extends Command
             $count = (clone $fromStock)->count();
             $this->line("HPP dari stocks.harga_beli (via stock_id)     : {$count} baris");
             if ($apply && $count > 0) {
-                $fromStock->update(['os.hpp' => DB::raw('s.harga_beli')]);
+                $ids = (clone $fromStock)->pluck('os.id')->all();
+                HargaBeliGuard::allow('maintenance', fn () => $fromStock->update(['os.hpp' => DB::raw('s.harga_beli')]));
+                $hppLog['dari_stocks.harga_beli'] = $ids;
             }
 
             // ---- 2. Saldo awal movement ----
@@ -97,6 +104,9 @@ class BackfillOwnerStockLedger extends Command
 
             if ($apply) {
                 DB::commit();
+                if ($hppLog !== []) {
+                    HargaBeliGuard::logMaintenance('stock:backfill-owner-ledger', 'owner_stocks.hpp diisi (owner_stock_id)', $hppLog);
+                }
                 $this->info("Selesai. Movement saldo awal dibuat: {$dibuat}.");
             } else {
                 DB::rollBack();

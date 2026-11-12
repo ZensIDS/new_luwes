@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Product;
+use App\Support\HargaBeliGuard;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -194,11 +195,20 @@ class RepairHargaBeli extends Command
             return self::FAILURE;
         }
 
-        DB::transaction(function () use ($actions) {
-            foreach ($actions as $fn) {
-                $fn();
-            }
+        // Jalur 'maintenance' (HargaBeliGuard): perbaikan data darurat, hanya berjalan dengan --apply.
+        HargaBeliGuard::allow('maintenance', function () use ($actions) {
+            DB::transaction(function () use ($actions) {
+                foreach ($actions as $fn) {
+                    $fn();
+                }
+            });
         });
+
+        HargaBeliGuard::logMaintenance('harga-beli:repair', 'perubahan diterapkan', [
+            'csv'     => $csv,
+            'produk'  => array_values(array_filter($rows, fn ($r) => $r[0] === 'products' && $r[6] === 'RESTORE')),
+            'jumlah_nilai_dipulihkan' => $restore,
+        ]);
 
         $this->info('Selesai. Perubahan sudah diterapkan.');
         return self::SUCCESS;
