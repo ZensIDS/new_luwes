@@ -59,7 +59,7 @@ class SetStockController extends Controller
     }
 
     /** Cari produk persis berdasarkan barcode + info untuk kartu produk. */
-    public function scan(Request $request, PriceCalculator $calculator, LatestHpp $latestHpp): JsonResponse
+    public function scan(Request $request, PriceCalculator $calculator, LatestHpp $latestHpp, OutletStockService $stockService): JsonResponse
     {
         $data = $request->validate([
             'barcode' => ['required', 'string', 'max:100', 'regex:/^[^\x00-\x1F\x7F]+$/'],
@@ -112,6 +112,8 @@ class SetStockController extends Controller
                 'price_strike' => $calculator->money($price['hpp_setelah_pajak'] + $price['margin_amount']),
                 'price_net' => (float) $price['price'],
                 'stock_now' => $stockNow,
+                // true = Set Stock < 72 jam lalu: qty yang diinput akan DITAMBAH ke stok sistem.
+                'additive' => $stockService->hasRecentSetStock($outletId, $product->id, $draft?->id),
             ],
             'item' => $item ? $this->itemPayload($item) : null,
         ]);
@@ -266,6 +268,7 @@ class SetStockController extends Controller
                 $hppMap = $latestHpp->forProducts($outletId, $items->pluck('product_id'));
                 $changed = 0;
                 $unchanged = 0;
+                $added = 0;
 
                 foreach ($items as $item) {
                     try {
@@ -278,6 +281,9 @@ class SetStockController extends Controller
                             $user
                         );
                         $result ? $changed++ : $unchanged++;
+                        if (($result['mode'] ?? null) === 'add') {
+                            $added++;
+                        }
                     } catch (Throwable $e) {
                         $failures[] = ($item->product?->code ?? '#' . $item->product_id) . ' - '
                             . ($item->product?->name ?? 'produk') . ': ' . $e->getMessage();
@@ -297,7 +303,7 @@ class SetStockController extends Controller
                     'saved_at' => now(),
                 ]);
 
-                return ['total' => $items->count(), 'changed' => $changed, 'unchanged' => $unchanged];
+                return ['total' => $items->count(), 'changed' => $changed, 'unchanged' => $unchanged, 'added' => $added];
             });
         } catch (RuntimeException $e) {
             if ($e->getMessage() !== 'SET_STOCK_FAILED') {
@@ -312,7 +318,8 @@ class SetStockController extends Controller
 
         return response()->json([
             'message' => 'Set Stock tersimpan: ' . $summary['total'] . ' produk (' . $summary['changed']
-                . ' berubah, ' . $summary['unchanged'] . ' qty sudah sama).',
+                . ' berubah, ' . $summary['unchanged'] . ' qty sudah sama'
+                . ($summary['added'] ? ', ' . $summary['added'] . ' ditambahkan ke stok karena set ulang < 72 jam' : '') . ').',
             'summary' => $summary,
         ]);
     }

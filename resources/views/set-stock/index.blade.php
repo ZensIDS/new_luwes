@@ -96,7 +96,7 @@
                                 </div>
                                 <div class="ss-qty-row">
                                     <div class="qty-box">
-                                        <label for="qtyInput">Qty baru (menimpa stok)</label>
+                                        <label for="qtyInput" id="qtyLabel">Qty baru (menimpa stok)</label>
                                         <input type="number" id="qtyInput" class="form-control ss-qty" min="0" step="1" inputmode="numeric">
                                     </div>
                                     <button type="button" id="btnAdd" class="btn btn-success btn-lg"><i class="fa fa-plus"></i> Tambah ke keranjang (Enter)</button>
@@ -230,6 +230,7 @@
                 $('#pStrike').text(p.price_strike > p.price_net ? rp(p.price_strike) : '-');
                 $('#pNet').text(rp(p.price_net));
                 $('#pHppWarn').toggle(!(p.hpp > 0));
+                $('#qtyLabel').text(p.additive ? 'Qty tambahan (ditambah ke stok, set ulang < 72 jam)' : 'Qty baru (menimpa stok)');
                 if (it) {
                     $('#pDraftNote').show().text('Sudah ada di keranjang: qty ' + it.qty + ' (discan ' + it.scan_count + 'x, terakhir diubah ' + (it.updated_by || '-') + ' ' + (it.updated_at || '') + '). Qty terisi kembali, cek ulang lalu Enter.');
                     $qty.val(it.qty);

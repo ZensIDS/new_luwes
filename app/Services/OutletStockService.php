@@ -12,6 +12,9 @@ use RuntimeException;
 
 class OutletStockService
 {
+    /** Set Stock ulang dalam rentang ini = menambah stok, bukan menimpa. */
+    public const SET_STOCK_ADD_WINDOW_HOURS = 72;
+
     public function receive(
         int $outletId,
         int $productId,
@@ -318,12 +321,21 @@ class OutletStockService
         }
 
         return DB::transaction(function () use ($outletId, $productId, $targetQty, $hpp, $draftId, $user) {
+            // Set Stock ulang < 72 jam untuk produk yang sama = TAMBAH (barang masuk bertahap di lapangan),
+            // bukan menimpa. Di luar 72 jam tetap menimpa (koreksi stok seperti biasa).
+            $additive = $this->hasRecentSetStock($outletId, $productId, $draftId);
+            $inputQty = $targetQty;
+
             $batches = OwnerStock::where('owner_id', $outletId)
                 ->where('product_id', $productId)
                 ->notDeficit()
                 ->lockForUpdate()
                 ->get();
             $before = (int) $batches->sum('qty');
+
+            if ($additive) {
+                $targetQty = $before + $inputQty;
+            }
 
             // Batch MINUS (penjualan melebihi stok sistem) ikut dinolkan: qty Set Stock adalah stok
             // fisik sebenarnya, jadi hasil akhirnya persis sebesar qty yang diinput.
@@ -357,7 +369,8 @@ class OutletStockService
             }
 
             $date = today()->toDateString();
-            $notes = 'Set Stock toko (draft #' . $draftId . ')';
+            $notes = 'Set Stock toko (draft #' . $draftId . ')'
+                . ($additive ? ' - ditambahkan +' . $inputQty . ' (set ulang < ' . self::SET_STOCK_ADD_WINDOW_HOURS . ' jam)' : '');
             $changed = false;
 
             foreach ($batches as $batch) {
@@ -372,8 +385,24 @@ class OutletStockService
                 $changed = true;
             }
 
-            return $changed ? ['before' => $before, 'after' => $targetQty] : null;
+            return $changed ? ['before' => $before, 'after' => $targetQty, 'mode' => $additive ? 'add' : 'replace'] : null;
         });
+    }
+
+    /**
+     * Apakah produk ini sudah pernah disimpan lewat Set Stock di toko yang sama
+     * dalam SET_STOCK_ADD_WINDOW_HOURS jam terakhir (draft lain yang sudah selesai)?
+     */
+    public function hasRecentSetStock(int $outletId, int $productId, ?int $exceptDraftId = null): bool
+    {
+        return DB::table('set_stock_draft_items as i')
+            ->join('set_stock_drafts as d', 'd.id', '=', 'i.draft_id')
+            ->where('d.outlet_id', $outletId)
+            ->where('d.status', 'done')
+            ->where('i.product_id', $productId)
+            ->when($exceptDraftId, fn ($q) => $q->where('d.id', '!=', $exceptDraftId))
+            ->where('d.saved_at', '>=', now()->subHours(self::SET_STOCK_ADD_WINDOW_HOURS))
+            ->exists();
     }
 
     /** Set Stock ke 0 tanpa batch biasa, tetapi masih ada stok minus: cukup nolkan batch MINUS. */
