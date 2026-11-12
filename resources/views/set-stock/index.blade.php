@@ -131,6 +131,11 @@
                             <div class="radio"><label><input type="radio" name="jenis" value="belum"> Belum di-set</label></div>
                             <div class="radio"><label><input type="radio" name="jenis" value="semua" checked> Cetak semua (sudah di atas, belum di bawah)</label></div>
                         </div>
+                        <div class="form-group">
+                            <label for="exportName">Filter nama depan produk</label>
+                            <input type="text" name="nama_awal" id="exportName" class="form-control" maxlength="100" autocomplete="off" placeholder="Contoh: indomie (kosongkan untuk semua produk)">
+                            <p class="help-block" style="margin-bottom:0;">Hanya produk yang namanya diawali teks ini yang di-export.</p>
+                        </div>
                         <div class="row">
                             <div class="col-xs-6 form-group">
                                 <label for="exportFrom">Dari tanggal</label>
