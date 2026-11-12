@@ -453,7 +453,8 @@ class OutletStockService
 
     protected function generateSetStockBatchNumber(int $outletId, int $productId): string
     {
-        $base = 'SET-' . now()->format('Ymd') . '-' . $productId;
+        $tag = trim((string) config('dbsync.site_tag', ''));
+        $base = 'SET-' . now()->format('Ymd') . '-' . $productId . ($tag !== '' ? '-' . $tag : '');
         $candidate = $base;
         $suffix = 1;
 

@@ -160,6 +160,10 @@ return [
         ],
     ],
 
+    // Penanda sisi untuk nomor batch Set Stock (SET-YYYYMMDD-ID[-TAG]) supaya lokal & hosting tidak membuat nomor
+    // batch yang sama untuk produk yang sama. Default: kosong di lokal (offset 1), 'H' di hosting (offset > 1).
+    'site_tag' => env('DB_SYNC_SITE_TAG', (int) env('DB_AUTO_INCREMENT_OFFSET', 1) > 1 ? 'H' : ''),
+
     // Riwayat sinkron disimpan sekian hari.
     'keep_runs_days' => 14,
 
