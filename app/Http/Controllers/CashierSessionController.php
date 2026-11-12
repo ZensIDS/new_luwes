@@ -179,6 +179,108 @@ class CashierSessionController extends Controller
             ->with('toast_success', 'Kasir ditutup. Ringkasan cash drawer tersimpan di history kasir.');
     }
 
+    /**
+     * Selisih tutup kasir untuk role yang tidak boleh melihat angka kas.
+     * Angka "seharusnya" tidak pernah dikirim ke browser; hanya selisihnya yang dihitung di server.
+     * Sesi open: memakai hitungan berjalan. Sesi closed (form edit): memakai angka saat ditutup.
+     */
+    public function closeDifference(Request $request, CashierSession $cashierSession)
+    {
+        $this->ensureOperationAccess($cashierSession);
+        abort_unless(
+            $cashierSession->status === 'open' || $cashierSession->canBeEditedBy($request->user()),
+            403
+        );
+
+        $data = $request->validate([
+            'closing_cash' => ['required', 'numeric', 'min:0'],
+        ]);
+
+        $expected = $this->expectedFor($cashierSession);
+
+        return response()->json([
+            'difference' => (float) $data['closing_cash'] - $expected,
+        ]);
+    }
+
+    /**
+     * Edit sesi yang sudah ditutup (History Kasir). Field sama dengan form tutup kasir:
+     * uang fisik, saldo besok, catatan. Kasir maksimal 2x; setiap edit dicatat di activitylog.
+     */
+    public function update(Request $request, CashierSession $cashierSession)
+    {
+        $user = $request->user();
+        $this->ensureOperationAccess($cashierSession);
+        abort_unless($cashierSession->status === 'closed', 422, 'Hanya sesi yang sudah ditutup yang bisa diedit.');
+        abort_unless($cashierSession->canBeEditedBy($user), 403, 'Batas edit sesi kasir sudah tercapai.');
+
+        $data = $request->validate([
+            'closing_cash' => ['required', 'numeric', 'min:0'],
+            'carry_over_cash' => ['required', 'numeric', 'min:0'],
+            'closing_note' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $closingCash = (float) $data['closing_cash'];
+        $newNote = $data['closing_note'] ?? null;
+
+        DB::transaction(function () use ($cashierSession, $user, $data, $closingCash, $newNote) {
+            $session = CashierSession::query()->lockForUpdate()->findOrFail($cashierSession->id);
+            // Cek ulang setelah lock supaya dua request bersamaan tidak melewati batas 2x.
+            abort_unless($session->canBeEditedBy($user), 403, 'Batas edit sesi kasir sudah tercapai.');
+
+            $expected = $this->expectedFor($session);
+            $editNumber = (int) $session->edit_count + 1;
+
+            $old = [
+                'closing_cash' => $session->closing_cash,
+                'carry_over_cash' => $session->carry_over_cash,
+                'closing_note' => $session->closing_note,
+                'discrepancy' => $session->discrepancy,
+            ];
+            $new = [
+                'closing_cash' => $closingCash,
+                'carry_over_cash' => (float) $data['carry_over_cash'],
+                'closing_note' => $newNote,
+                'discrepancy' => $closingCash - $expected,
+            ];
+
+            // Log otomatis model dimatikan sementara; diganti satu catatan edit yang lengkap di bawah.
+            $session->disableLogging();
+            try {
+                $session->update($new + [
+                    'cash_removed' => $closingCash,
+                    'expected_cash' => $expected,
+                    'edit_count' => $editNumber,
+                ]);
+            } finally {
+                $session->enableLogging();
+            }
+
+            activity('Cashier')
+                ->performedOn($session)
+                ->causedBy($user)
+                ->withProperties([
+                    'edit_number' => $editNumber,
+                    'editor_role' => $user->role,
+                    'old' => $old,
+                    'attributes' => $new,
+                ])
+                ->log("Sesi kasir diedit (ke-{$editNumber})");
+        });
+
+        return redirect()->back()->with('toast_success', 'Sesi kasir berhasil diedit.');
+    }
+
+    /** Kas seharusnya: angka saat ditutup bila ada, selain itu hitungan berjalan. */
+    private function expectedFor(CashierSession $cashierSession): float
+    {
+        if ($cashierSession->status === 'closed' && $cashierSession->expected_cash !== null) {
+            return (float) $cashierSession->expected_cash;
+        }
+
+        return (float) $cashierSession->summary()['expected_cash'];
+    }
+
     public function history(Request $request)
     {
         $outletId = OutletAccess::id($request, false);
@@ -214,7 +316,9 @@ class CashierSessionController extends Controller
         // Rincian per metode bayar + voucher untuk semua sesi (2 query, bukan per baris).
         $breakdowns = CashierSession::breakdownFor($sessions->pluck('id')->all());
 
-        return view('cashier.history', compact('sessions', 'activities', 'breakdowns'));
+        $canSeeCash = (bool) $request->user()?->canSeeCashFigures();
+
+        return view('cashier.history', compact('sessions', 'activities', 'breakdowns', 'canSeeCash'));
     }
 
     private function ensureOperationAccess(CashierSession $cashierSession): void

@@ -5,6 +5,8 @@ import Swal from "sweetalert2";
 import Barcodes from "./Barcodes.jsx";
 import CartTable from "./CartTable";
 import Gallery from "./Gallery";
+import KresekModal from "./KresekModal";
+import CashbackModal from "./CashbackModal";
 import PaymentModal from "./PaymentModal";
 import ReprintModal from "./ReprintModal";
 import { SHOW_PAYMENT_REFERENCE, parseIdNumber } from "../utils";
@@ -13,14 +15,34 @@ import { SHOW_PAYMENT_REFERENCE, parseIdNumber } from "../utils";
 const VOUCHER_PREFIX = "VCRL";
 const isVoucherCode = (value) => String(value || "").trim().toUpperCase().startsWith(VOUCHER_PREFIX);
 
-const ProductSearchModal = ({ open, inputRef, search, onSearch, products, productsLoading, onAddProduct, onClose }) => {
+// Minimal karakter untuk mencari produk di modal Cari Produk (F2).
+const MIN_PRODUCT_SEARCH_LENGTH = 3;
+
+const ProductSearchModal = ({ open, inputRef, search, onSearch, products, productsLoading, productsHasMore, productsLoadingMore, onLoadMore, onAddProduct, onClose }) => {
+    const listRef = useRef(null);
+    const sentinelRef = useRef(null);
+
     useEffect(() => {
         if (open) window.setTimeout(() => inputRef.current?.focus(), 0);
     }, [open, inputRef]);
 
+    // Daftar hasil di-scroll di dalam modal; saat ujung bawah terlihat, halaman berikutnya dimuat otomatis
+    // (termasuk bila 10 baris pertama belum memenuhi tinggi daftar).
+    useEffect(() => {
+        if (!open || !productsHasMore || productsLoadingMore || productsLoading) return undefined;
+        const sentinel = sentinelRef.current;
+        const root = listRef.current;
+        if (!sentinel || !root || typeof IntersectionObserver === "undefined") return undefined;
+        const observer = new IntersectionObserver((entries) => {
+            if (entries.some((entry) => entry.isIntersecting)) onLoadMore();
+        }, { root, rootMargin: "120px" });
+        observer.observe(sentinel);
+        return () => observer.disconnect();
+    }, [open, productsHasMore, productsLoadingMore, productsLoading, products.length, onLoadMore]);
+
     if (!open) return null;
 
-    const hasSearchTerm = String(search || "").trim().length >= 2;
+    const hasSearchTerm = String(search || "").trim().length >= MIN_PRODUCT_SEARCH_LENGTH;
 
     return (
         <div
@@ -42,16 +64,30 @@ const ProductSearchModal = ({ open, inputRef, search, onSearch, products, produc
                         ref={inputRef}
                         type="search"
                         className="form-control input-lg"
-                        placeholder="Cari nama, kode, atau barcode produk"
+                        placeholder="Cari dari awal nama, kode, atau barcode produk"
                         value={search}
                         onChange={(event) => onSearch(event.target.value)}
                         autoComplete="off"
                     />
                     <p className="text-muted small">Tekan Tab lalu Enter untuk memilih produk, atau klik produk untuk memasukkannya ke transaksi.</p>
-                    {!hasSearchTerm && <p className="text-muted">Ketik minimal 2 karakter untuk mencari produk.</p>}
+                    {!hasSearchTerm && <p className="text-muted">Ketik minimal {MIN_PRODUCT_SEARCH_LENGTH} karakter untuk mencari produk.</p>}
                     {hasSearchTerm && productsLoading && <p className="text-muted">Memuat produk outlet...</p>}
                     {hasSearchTerm && !productsLoading && !products.length && <p className="text-muted">Produk tidak ditemukan di outlet ini.</p>}
-                    {hasSearchTerm && !productsLoading && products.length > 0 && <Gallery products={products} addProductToCart={onAddProduct} />}
+                    {hasSearchTerm && !productsLoading && products.length > 0 && (
+                        <div
+                            ref={listRef}
+                            style={{ maxHeight: "55vh", overflowY: "auto" }}
+                            onScroll={(event) => {
+                                const box = event.currentTarget;
+                                if (productsHasMore && box.scrollHeight - box.scrollTop - box.clientHeight < 80) onLoadMore();
+                            }}
+                        >
+                            <Gallery products={products} addProductToCart={onAddProduct} />
+                            <div ref={sentinelRef} style={{ height: 1 }} />
+                            {productsLoadingMore && <p className="text-muted text-center">Memuat produk lainnya...</p>}
+                            {!productsHasMore && !productsLoadingMore && <p className="text-muted small text-center">Semua hasil sudah tampil ({products.length} produk).</p>}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
@@ -64,6 +100,8 @@ const Cart = () => {
     const [cart, setCart] = useState([]);
     const [products, setProducts] = useState([]);
     const [productsLoading, setProductsLoading] = useState(false);
+    const [productsHasMore, setProductsHasMore] = useState(false);
+    const [productsLoadingMore, setProductsLoadingMore] = useState(false);
     const [customers, setCustomers] = useState([]);
     const [customerId, setCustomerId] = useState("");
     const [paymentMethods, setPaymentMethods] = useState([]);
@@ -86,6 +124,13 @@ const Cart = () => {
     const [productModalOpen, setProductModalOpen] = useState(false);
     const [paymentModalOpen, setPaymentModalOpen] = useState(false);
     const [reprintModalOpen, setReprintModalOpen] = useState(false);
+    // Kresek (F9): daftar aktif dari Master Kresek, pilihan kasir {id: qty}. Tanpa stok; harga final dihitung server.
+    const [kresekOptions, setKresekOptions] = useState([]);
+    const [kresekSelection, setKresekSelection] = useState({});
+    const [kresekModalOpen, setKresekModalOpen] = useState(false);
+    // Cashback (Alt+C): qty lembar + total nominal, mengurangi total seperti voucher. Batas dicek lagi di server.
+    const [cashback, setCashback] = useState({ qty: 0, total: 0 });
+    const [cashbackModalOpen, setCashbackModalOpen] = useState(false);
     const barcodeRef = useRef(null);
     const searchRef = useRef(null);
     const voucherRef = useRef(null);
@@ -96,6 +141,10 @@ const Cart = () => {
     const promotionTableRef = useRef(null);
     const productsRequestRef = useRef(null);
     const productSearchTimerRef = useRef(null);
+    const productsMoreRequestRef = useRef(null);
+    const productsPageRef = useRef(1);
+    const productsTermRef = useRef("");
+    const loadingMoreRef = useRef(false);
 
     const getBaseSubtotal = (items = cart) => items.reduce(
         (sum, item) => sum + Number(item.cashier_base_subtotal ?? item.cashier_subtotal ?? (Number(item.pivot.qty || 0) * Number(item.harga_jual || 0))), 0
@@ -126,12 +175,14 @@ const Cart = () => {
     };
 
     const getVoucherBreakdown = () => {
-        const lineBalances = cart.map((item) => Number(item.cashier_subtotal ?? (Number(item.pivot.qty || 0) * Number(item.harga_jual || 0))));
+        // Alokasi voucher memakai urutan masuk keranjang (cart_seq) agar sama dengan server, walau tampilan terbaru di atas.
+        const ordered = [...cart].sort((a, b) => Number(a.cart_seq ?? 0) - Number(b.cart_seq ?? 0));
+        const lineBalances = ordered.map((item) => Number(item.cashier_subtotal ?? (Number(item.pivot.qty || 0) * Number(item.harga_jual || 0))));
         return appliedVouchers.map((voucher) => {
             const scopedProductIds = Array.isArray(voucher.product_ids) && voucher.product_ids.length
                 ? voucher.product_ids.map(Number)
                 : null;
-            const eligibleIndexes = cart.map((item, index) => ({ item, index }))
+            const eligibleIndexes = ordered.map((item, index) => ({ item, index }))
                 .filter(({ item, index }) => {
                     const productAllowed = scopedProductIds
                         ? scopedProductIds.includes(Number(item.id))
@@ -155,8 +206,17 @@ const Cart = () => {
 
     const voucherBreakdown = getVoucherBreakdown();
     const voucherTotal = voucherBreakdown.reduce((sum, voucher) => sum + voucher.amount, 0);
-    // Tidak ada pembulatan total (sama dengan CashierSaleService): grand total = subtotal - voucher.
-    const grandTotal = Math.round(Math.max(0, getSubtotal() - voucherTotal));
+    // Cashback dipotong setelah promo + voucher; tidak boleh melebihi total belanja (subtotal - voucher).
+    // Bila isi keranjang berubah sehingga batas turun, nominal otomatis ikut dibatasi (sama dengan yang dikirim ke server).
+    const cashbackMax = Math.max(0, Math.round(getSubtotal() - voucherTotal));
+    const cashbackTotal = Math.min(Math.max(0, Math.round(Number(cashback.total) || 0)), cashbackMax);
+    const cashbackQty = cashbackTotal > 0 ? Math.max(1, Number(cashback.qty) || 1) : 0;
+    // Kresek ditambahkan setelah voucher (tidak ikut dasar voucher), sama dengan CashierSaleService.
+    const kresekTotal = kresekOptions.reduce((sum, item) => sum + (kresekSelection[item.id] ? Math.round(Number(item.price || 0) * kresekSelection[item.id]) : 0), 0);
+    const kresekPieces = kresekOptions.reduce((sum, item) => sum + (kresekSelection[item.id] || 0), 0);
+    const kresekSummary = kresekOptions.filter((item) => kresekSelection[item.id]).map((item) => `${item.name} x${kresekSelection[item.id]}`).join("\n");
+    // Tidak ada pembulatan total (sama dengan CashierSaleService): grand total = subtotal - voucher - cashback + kresek.
+    const grandTotal = Math.round(Math.max(0, getSubtotal() - voucherTotal - cashbackTotal)) + kresekTotal;
 
     const loadCart = (promotionCodes = appliedPromotions.map((promotion) => promotion.code)) => {
         const params = new URLSearchParams({ outlet_id: outlet.id });
@@ -165,6 +225,15 @@ const Cart = () => {
             setCart(response.data || []);
             setPaidAmount((current) => current === "" ? "" : current);
         }).catch((error) => setErrorMessage(error.response?.data?.message || "Gagal memuat keranjang."));
+    };
+
+    // Hentikan pemuatan halaman berikutnya (dipanggil tiap pencarian baru / daftar dikosongkan).
+    const resetMoreProducts = () => {
+        productsMoreRequestRef.current?.abort();
+        productsMoreRequestRef.current = null;
+        loadingMoreRef.current = false;
+        setProductsLoadingMore(false);
+        setProductsHasMore(false);
     };
 
     const loadProducts = (term = "", immediate = false) => {
@@ -177,11 +246,14 @@ const Cart = () => {
             }
 
             productsRequestRef.current?.abort();
+            resetMoreProducts();
             const controller = new AbortController();
             productsRequestRef.current = controller;
             const params = new URLSearchParams({ status_produk: "all", compact: "1" });
             const normalizedTerm = String(term || "").trim();
             if (normalizedTerm) params.set("search", normalizedTerm);
+            productsTermRef.current = normalizedTerm;
+            productsPageRef.current = 1;
 
             setProducts([]);
             setProductsLoading(true);
@@ -192,6 +264,10 @@ const Cart = () => {
                 .then((response) => {
                     if (productsRequestRef.current !== controller) return;
                     setProducts(Array.isArray(response.data?.data) ? response.data.data : []);
+                    const meta = response.data?.meta || {};
+                    const currentPage = Number(meta.current_page || 1);
+                    productsPageRef.current = currentPage;
+                    setProductsHasMore(currentPage < Number(meta.last_page || 1));
                 })
                 .catch((error) => {
                     if (axios.isCancel(error) || error.code === "ERR_CANCELED") return;
@@ -207,16 +283,19 @@ const Cart = () => {
 
         window.clearTimeout(productSearchTimerRef.current);
 
-        // Daftar produk hanya diisi bila ada pencarian (>= 2 karakter). Kosong atau 1 karakter:
-        // batalkan request yang berjalan dan kosongkan daftar, tidak ada daftar default.
-        if (String(term || "").trim().length < 2) {
+        // Daftar produk hanya diisi bila ada pencarian (>= MIN_PRODUCT_SEARCH_LENGTH karakter).
+        // Lebih pendek: batalkan request yang berjalan dan kosongkan daftar, tidak ada daftar default.
+        if (String(term || "").trim().length < MIN_PRODUCT_SEARCH_LENGTH) {
             productsRequestRef.current?.abort();
             productsRequestRef.current = null;
+            productsTermRef.current = "";
+            resetMoreProducts();
             setProducts([]);
             setProductsLoading(false);
             return;
         }
 
+        resetMoreProducts();
         setProducts([]);
         setProductsLoading(true);
         if (immediate) {
@@ -225,6 +304,48 @@ const Cart = () => {
         }
         // Debounce 450 ms: tidak mengirim request di tiap ketikan.
         productSearchTimerRef.current = window.setTimeout(fetchProducts, 450);
+    };
+
+    // Halaman berikutnya hasil pencarian yang sama (server selalu 10 baris per halaman), ditambahkan ke daftar.
+    const loadMoreProducts = () => {
+        const term = productsTermRef.current;
+        if (!outletProductsUrl || !term || !productsHasMore || productsLoading || loadingMoreRef.current) return;
+
+        const nextPage = productsPageRef.current + 1;
+        loadingMoreRef.current = true;
+        setProductsLoadingMore(true);
+        const controller = new AbortController();
+        productsMoreRequestRef.current = controller;
+        const params = new URLSearchParams({ status_produk: "all", compact: "1", search: term, page: String(nextPage) });
+
+        axios.get(`${outletProductsUrl}?${params.toString()}`, {
+            headers: { Accept: "application/json" },
+            signal: controller.signal,
+        })
+            .then((response) => {
+                if (productsMoreRequestRef.current !== controller) return;
+                const rows = Array.isArray(response.data?.data) ? response.data.data : [];
+                const meta = response.data?.meta || {};
+                const currentPage = Number(meta.current_page || nextPage);
+                productsPageRef.current = currentPage;
+                setProductsHasMore(rows.length > 0 && currentPage < Number(meta.last_page || currentPage));
+                setProducts((current) => {
+                    const seen = new Set(current.map((item) => item.id));
+                    return [...current, ...rows.filter((item) => !seen.has(item.id))];
+                });
+            })
+            .catch((error) => {
+                if (axios.isCancel(error) || error.code === "ERR_CANCELED") return;
+                setProductsHasMore(false);
+                setErrorMessage("Gagal memuat produk berikutnya.");
+            })
+            .finally(() => {
+                if (productsMoreRequestRef.current === controller) {
+                    productsMoreRequestRef.current = null;
+                    loadingMoreRef.current = false;
+                    setProductsLoadingMore(false);
+                }
+            });
     };
 
     const loadCustomers = () => {
@@ -240,6 +361,17 @@ const Cart = () => {
             .then((response) => setPaymentMethods(response.data || []));
     };
 
+    const loadKreseks = () => {
+        axios.get("/kresek/active", { headers: { Accept: "application/json" } })
+            .then((response) => {
+                const values = Array.isArray(response.data) ? response.data : [];
+                setKresekOptions(values);
+                // Buang pilihan yang kreseknya sudah tidak aktif.
+                setKresekSelection((current) => Object.fromEntries(Object.entries(current).filter(([id]) => values.some((item) => String(item.id) === String(id)))));
+            })
+            .catch(() => setKresekOptions([]));
+    };
+
     const syncPromotions = (promotions) => {
         const nextPromotions = promotions || [];
         setAppliedPromotions(nextPromotions);
@@ -250,11 +382,13 @@ const Cart = () => {
         loadCart();
         loadCustomers();
         loadPaymentMethods();
+        loadKreseks();
         const focusTimer = setTimeout(() => barcodeRef.current?.focus(), 100);
         return () => {
             clearTimeout(focusTimer);
             window.clearTimeout(productSearchTimerRef.current);
             productsRequestRef.current?.abort();
+            productsMoreRequestRef.current?.abort();
         };
     }, []);
 
@@ -436,6 +570,8 @@ const Cart = () => {
         setBarcode("");
         setSelectedCartProductId(null);
         setCompletedSale(null);
+        setKresekSelection({});
+        setCashback({ qty: 0, total: 0 });
         setErrorMessage("");
         barcodeRef.current?.focus();
     };
@@ -449,6 +585,27 @@ const Cart = () => {
         }
         setErrorMessage("");
         setPaymentModalOpen(true);
+    };
+
+    // F9 / tombol Kresek: pilih kantong plastik (centang + qty). Daftar dimuat ulang tiap dibuka supaya
+    // perubahan Master Kresek langsung terlihat.
+    const openKresekModal = () => {
+        if (submitLockRef.current || isSubmitting || completedSale) return;
+        setProductModalOpen(false);
+        loadKreseks();
+        setKresekModalOpen(true);
+    };
+
+    // Alt+C / tombol Cashback: isi qty + nominal cashback (butuh isi keranjang untuk menentukan batas nominal).
+    const openCashbackModal = () => {
+        if (submitLockRef.current || isSubmitting || completedSale) return;
+        if (!cart.length) {
+            setErrorMessage("Keranjang masih kosong.");
+            return;
+        }
+        setErrorMessage("");
+        setProductModalOpen(false);
+        setCashbackModalOpen(true);
     };
 
     // Dipanggil PaymentModal saat Enter: simpan penjualan lalu langsung buka nota untuk dicetak otomatis.
@@ -468,7 +625,10 @@ const Cart = () => {
             payment_method_name: methodName || "Tunai",
             payment_reference: SHOW_PAYMENT_REFERENCE && !isCash ? reference || null : null,
             voucher_codes: appliedVouchers.map((voucher) => voucher.code),
+            cashback_qty: cashbackQty,
+            cashback_total: cashbackTotal,
             promotion_codes: appliedPromotions.map((promotion) => promotion.code),
+            kreseks: Object.entries(kresekSelection).map(([id, qty]) => ({ id: Number(id), qty: Number(qty) })),
         }).then((response) => {
             window.localStorage.setItem("last-pos-sale", response.data.order.id);
             const sale = {
@@ -510,7 +670,7 @@ const Cart = () => {
     useEffect(() => {
         const shortcut = (event) => {
             // Saat pop up pembayaran / reprint terbuka, tombol ditangani pop up itu sendiri.
-            if (paymentModalOpen || reprintModalOpen) return;
+            if (paymentModalOpen || reprintModalOpen || kresekModalOpen || cashbackModalOpen) return;
             const typing = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName);
             if (event.key === "F3") { event.preventDefault(); barcodeRef.current?.focus(); }
             if (event.key === "F2") {
@@ -531,6 +691,9 @@ const Cart = () => {
             if (event.key === "F6") { event.preventDefault(); promotionTableRef.current?.open(); }
             if (event.key === "F7") { event.preventDefault(); paymentMethodRef.current?.focus(); }
             if (event.key === "F8") { event.preventDefault(); voucherRef.current?.focus(); }
+            if (event.key === "F9") { event.preventDefault(); openKresekModal(); }
+            // Alt+C (event.code: tetap benar di Mac walau Option+C menghasilkan simbol lain).
+            if (event.altKey && !event.ctrlKey && !event.metaKey && event.code === "KeyC") { event.preventDefault(); openCashbackModal(); }
             if (event.key === "F10") { event.preventDefault(); openPaymentModal(); }
             if (event.ctrlKey && event.key.toLowerCase() === "h") { event.preventDefault(); holdTransaction(); }
             if (event.ctrlKey && event.key.toLowerCase() === "l") { event.preventDefault(); recallTransaction(); }
@@ -540,7 +703,8 @@ const Cart = () => {
             }
             if (event.ctrlKey && ["Backspace", "Delete"].includes(event.key) && !typing && cart.length) {
                 event.preventDefault();
-                deleteCartItem(cart[cart.length - 1].id);
+                // Item terbaru sekarang di paling atas (index 0).
+                deleteCartItem(cart[0].id);
             }
             if (!typing && event.key === "+" && selectedCartProductId) {
                 const item = cart.find((value) => value.id === selectedCartProductId);
@@ -558,7 +722,7 @@ const Cart = () => {
         };
         window.addEventListener("keydown", shortcut);
         return () => window.removeEventListener("keydown", shortcut);
-    }, [cart, paidAmount, grandTotal, appliedVouchers, appliedPromotions, selectedCartProductId, paymentReference, paymentMethodId, isSubmitting, completedSale, search, paymentModalOpen, reprintModalOpen]);
+    }, [cart, paidAmount, grandTotal, appliedVouchers, appliedPromotions, selectedCartProductId, paymentReference, paymentMethodId, isSubmitting, completedSale, search, paymentModalOpen, reprintModalOpen, kresekModalOpen, kresekOptions, kresekSelection, cashbackModalOpen, cashback]);
 
     return (
         <div className="row pos-cashier-layout">
@@ -572,6 +736,9 @@ const Cart = () => {
                 }}
                 products={products}
                 productsLoading={productsLoading}
+                productsHasMore={productsHasMore}
+                productsLoadingMore={productsLoadingMore}
+                onLoadMore={loadMoreProducts}
                 onAddProduct={(value) => {
                     setProductModalOpen(false);
                     addToCart(value);
@@ -583,6 +750,30 @@ const Cart = () => {
                 outletId={outlet.id}
                 onClose={() => {
                     setReprintModalOpen(false);
+                    window.setTimeout(() => barcodeRef.current?.focus(), 0);
+                }}
+            />
+            <KresekModal
+                open={kresekModalOpen}
+                options={kresekOptions}
+                selection={kresekSelection}
+                onChange={setKresekSelection}
+                onClose={() => {
+                    setKresekModalOpen(false);
+                    window.setTimeout(() => barcodeRef.current?.focus(), 0);
+                }}
+            />
+            <CashbackModal
+                open={cashbackModalOpen}
+                maxAmount={cashbackMax}
+                value={{ qty: cashbackQty, total: cashbackTotal }}
+                onSave={(next) => {
+                    setCashback(next);
+                    setCashbackModalOpen(false);
+                    window.setTimeout(() => barcodeRef.current?.focus(), 0);
+                }}
+                onClose={() => {
+                    setCashbackModalOpen(false);
                     window.setTimeout(() => barcodeRef.current?.focus(), 0);
                 }}
             />
@@ -616,6 +807,13 @@ const Cart = () => {
                         voucherBreakdown={voucherBreakdown}
                         voucherTotal={voucherTotal}
                         grandTotal={grandTotal}
+                        kresekTotal={kresekTotal}
+                        kresekPieces={kresekPieces}
+                        kresekSummary={kresekSummary}
+                        onOpenKresek={openKresekModal}
+                        cashbackQty={cashbackQty}
+                        cashbackTotal={cashbackTotal}
+                        onOpenCashback={openCashbackModal}
                         customers={customers}
                         customerId={customerId}
                         setCustomerId={setCustomerId}

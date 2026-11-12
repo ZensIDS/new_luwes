@@ -12,6 +12,13 @@ const CartTable = ({
     voucherBreakdown,
     voucherTotal,
     grandTotal,
+    kresekTotal,
+    kresekPieces,
+    kresekSummary,
+    onOpenKresek,
+    cashbackQty,
+    cashbackTotal,
+    onOpenCashback,
     customers,
     customerId,
     setCustomerId,
@@ -90,9 +97,27 @@ const CartTable = ({
                             Voucher{voucherBreakdown.length ? ` (${voucherBreakdown.map((voucher) => voucher.code).join(", ")})` : ""}: <b>-{formatRupiah(voucherTotal)}</b>
                         </span>
                     )}
+                    {cashbackTotal > 0 && (
+                        <span className="text-danger">
+                            Cashback ({cashbackQty} lbr): <b>-{formatRupiah(cashbackTotal)}</b>
+                        </span>
+                    )}
+                    {kresekTotal > 0 && (
+                        <span title={kresekSummary}>
+                            Kresek ({kresekPieces} pcs): <b>+{formatRupiah(kresekTotal)}</b>
+                        </span>
+                    )}
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                    <span style={{ fontSize: 15, fontWeight: 700 }}>Grand Total</span>
+                    <span style={{ fontSize: 15, fontWeight: 700 }}>
+                        Grand Total
+                        <button type="button" tabIndex={-1} className="btn btn-default btn-xs" style={{ marginLeft: 10, fontWeight: 400 }} onClick={onOpenKresek} title="Pilih kantong plastik (F9)">
+                            <i className="fa fa-shopping-bag"></i> Kresek (F9)
+                        </button>
+                        <button type="button" tabIndex={-1} className="btn btn-default btn-xs" style={{ marginLeft: 6, fontWeight: 400 }} onClick={onOpenCashback} title="Input cashback (Alt+C)">
+                            <i className="fa fa-ticket"></i> Cashback (Alt+C)
+                        </button>
+                    </span>
                     <span style={{ fontSize: 26, fontWeight: 700, lineHeight: 1.2 }}>{formatRupiah(grandTotal)}</span>
                 </div>
             </div>
@@ -168,7 +193,7 @@ const CartTable = ({
                 )}
             </div>
             <p style={{ marginTop: 8, marginBottom: 0, padding: "6px 10px", background: "#f4f4f8", borderLeft: "4px solid #605ca8", fontSize: 13, fontWeight: 700, color: "#222" }}>
-                <i className="fa fa-keyboard-o"></i> F2 Cari produk &nbsp;|&nbsp; F3 Scan &nbsp;|&nbsp; F1 Customer &nbsp;|&nbsp; F4 Reprint &nbsp;|&nbsp; F5 Item &nbsp;|&nbsp; F6 Promo &nbsp;|&nbsp; F7 Pembayaran &nbsp;|&nbsp; F8 Voucher &nbsp;|&nbsp; Ctrl/Cmd+Enter Bayar (F10) &nbsp;|&nbsp; Insert / Option ubah qty (di item) &nbsp;|&nbsp; Delete hapus baris terpilih
+                <i className="fa fa-keyboard-o"></i> F2 Cari produk &nbsp;|&nbsp; F3 Scan &nbsp;|&nbsp; F1 Customer &nbsp;|&nbsp; F4 Reprint &nbsp;|&nbsp; F5 Item &nbsp;|&nbsp; F6 Promo &nbsp;|&nbsp; F7 Pembayaran &nbsp;|&nbsp; F8 Voucher &nbsp;|&nbsp; F9 Kresek &nbsp;|&nbsp; Alt+C Cashback &nbsp;|&nbsp; Ctrl/Cmd+Enter Bayar (F10) &nbsp;|&nbsp; Insert / Option ubah qty (di item) &nbsp;|&nbsp; Delete hapus baris terpilih
             </p>
             {errorMessage && <div className="alert alert-danger" style={{ marginTop: 8 }}>{errorMessage}</div>}
             <div className="row" style={{ marginTop: 10 }}>

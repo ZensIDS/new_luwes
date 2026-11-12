@@ -239,6 +239,13 @@
         </li>
         @endif
 
+        {{-- Master Kresek (superadmin, staff-outlet) --}}
+        @if (in_array($role, ['superadmin', 'staff-outlet']))
+        <li class="{{ request()->is('kresek*') ? 'active' : '' }}">
+            <a href="{{ route('kresek.index') }}"><i class="fa fa-shopping-bag"></i><span>Master Kresek</span></a>
+        </li>
+        @endif
+
         {{-- Pendapatan Lain / Other Income (tidak ditampilkan untuk admin-gudang & kasir; menu Kategori hanya superadmin & owner) --}}
         @if (! in_array($role, ['admin-gudang', 'kasir']))
         <li class="treeview {{ request()->is('other-income*') ? 'active' : '' }}">

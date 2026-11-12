@@ -25,6 +25,9 @@ class Penjualan extends Model
         'discount_total',
         'promotion_total',
         'voucher_total',
+        'cashback_qty',
+        'cashback_total',
+        'kresek_total',
         'rounding_amount',
         'grand_total',
         'paid_amount',
@@ -45,6 +48,9 @@ class Penjualan extends Model
         'discount_total' => 'float',
         'promotion_total' => 'float',
         'voucher_total' => 'float',
+        'cashback_qty' => 'integer',
+        'cashback_total' => 'float',
+        'kresek_total' => 'float',
         'rounding_amount' => 'float',
         'grand_total' => 'float',
         'paid_amount' => 'float',
@@ -106,6 +112,11 @@ class Penjualan extends Model
     public function items()
     {
         return $this->hasMany(PenjualanItem::class);
+    }
+
+    public function kreseks()
+    {
+        return $this->hasMany(PenjualanKresek::class);
     }
 
     /**
@@ -178,6 +189,15 @@ class Penjualan extends Model
     public function paymentMethod()
     {
         return $this->belongsTo(PaymentMethod::class);
+    }
+
+    /**
+     * Potongan voucher + cashback. Cashback diperlakukan persis seperti voucher di nota, detail,
+     * laporan, dan tutup kasir (tanpa tulisan \"Cashback\"), jadi tampilan memakai angka gabungan ini.
+     */
+    public function getVoucherCashbackTotalAttribute(): float
+    {
+        return (float) ($this->voucher_total ?? 0) + (float) ($this->cashback_total ?? 0);
     }
 
     public function getFinalTotalAttribute()

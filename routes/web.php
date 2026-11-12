@@ -110,11 +110,18 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::post('/cashier-sessions/{cashierSession}/change-shift', [CashierSessionController::class, 'changeShift'])->name('cashier.change-shift');
     Route::post('/cashier-sessions/{cashierSession}/drawer-entry', [CashierSessionController::class, 'entry'])->name('cashier.drawer-entry');
     Route::post('/cashier-sessions/{cashierSession}/close', [CashierSessionController::class, 'close'])->name('cashier.close');
+    Route::put('/cashier-sessions/{cashierSession}/close', [CashierSessionController::class, 'update'])->name('cashier.update-close');
+    Route::get('/cashier-sessions/{cashierSession}/close-difference', [CashierSessionController::class, 'closeDifference'])->name('cashier.close-difference');
     Route::get('/cashier-entries/{entry}/print-bon', [CashierSlipController::class, 'bon'])->name('cashier.print-bon');
     Route::get('/cashier-sessions/{cashierSession}/print-close', [CashierSlipController::class, 'close'])->name('cashier.print-close');
     Route::resource('/customer', CustomerController::class);
     Route::resource('/kas', KasController::class);
     Route::resource('/payment', PaymentMethodController::class);
+    // Master Kresek: daftar aktif untuk layar kasir (semua role), CRUD hanya superadmin & staff-outlet.
+    Route::get('/kresek/active', [\App\Http\Controllers\KresekController::class, 'active'])->name('kresek.active');
+    Route::resource('/kresek', \App\Http\Controllers\KresekController::class)
+        ->except(['show'])
+        ->middleware('role:superadmin|staff-outlet');
     Route::get('/outlet/{outlet}/products', [ProductController::class, 'outletProducts'])
         ->middleware('throttle:120,1,search')
         ->name('outlet.products');

@@ -2,7 +2,9 @@
     Rincian penjualan per metode bayar + voucher untuk satu sesi kasir.
     Dipakai di History Kasir dan modal Tutup kasir.
     Variabel: $breakdown (CashierSession::breakdownFor / summary()['breakdown']).
+    Opsional: $showCash (default true). Bila false, total tunai, total semua metode, dan angka non-tunai disembunyikan.
 --}}
+@php($showCash = $showCash ?? true)
 @php($rp = fn ($number) => 'Rp ' . number_format((float) $number, 0, ',', '.'))
 <div class="row">
     <div class="col-md-7">
@@ -24,13 +26,19 @@
                             @endif
                         </td>
                         <td class="text-right">{{ number_format($payment['count'], 0, ',', '.') }}</td>
-                        <td class="text-right">{{ $rp($payment['total']) }}</td>
+                        <td class="text-right">
+                            @if (! $showCash && $payment['is_cash'])
+                                <span class="text-muted">&mdash;</span>
+                            @else
+                                {{ $rp($payment['total']) }}
+                            @endif
+                        </td>
                     </tr>
                 @empty
                     <tr><td colspan="3" class="text-center text-muted">Belum ada penjualan.</td></tr>
                 @endforelse
             </tbody>
-            @if (count($breakdown['payments']) > 0)
+            @if ($showCash && count($breakdown['payments']) > 0)
                 <tfoot>
                     <tr>
                         <th>Total semua metode</th>
@@ -57,6 +65,8 @@
                 </tr>
             </tbody>
         </table>
-        <small class="text-muted">Penjualan non-tunai (tidak masuk uang fisik laci): <strong>{{ $rp($breakdown['non_cash_total']) }}</strong></small>
+        @if ($showCash)
+            <small class="text-muted">Penjualan non-tunai (tidak masuk uang fisik laci): <strong>{{ $rp($breakdown['non_cash_total']) }}</strong></small>
+        @endif
     </div>
 </div>

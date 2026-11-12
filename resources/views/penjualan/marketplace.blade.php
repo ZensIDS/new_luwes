@@ -67,13 +67,15 @@
                                     <td>
                                         <a class="btn btn-info" href="{{ route('penjualan.show', $value->id) }}">Show</a>
                                         <a class="btn btn-warning" href="{{ route('penjualan.print', $value->id) }}">Print</a>
-                                        <form action="{{ route('penjualan.destroy', $value->id) }}" method="post"
-                                            style="display: inline;">
-                                            @method('delete')
-                                            @csrf
-                                            <button class="border-0 btn btn-danger"
-                                                onclick="return confirm('Are you sure?')">Hapus</button>
-                                        </form>
+                                        @if (auth()->user()->role === 'superadmin')
+                                            <form action="{{ route('penjualan.destroy', $value->id) }}" method="post"
+                                                style="display: inline;">
+                                                @method('delete')
+                                                @csrf
+                                                <button class="border-0 btn btn-danger"
+                                                    onclick="return confirm('Are you sure?')">Hapus</button>
+                                            </form>
+                                        @endif
                                     </td>
                                 </tr>
                             @endforeach

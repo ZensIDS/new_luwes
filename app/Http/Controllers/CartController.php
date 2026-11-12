@@ -18,8 +18,14 @@ class CartController extends Controller
         $outletId = OutletAccess::id($request);
         $cart = $request->user()->cart()
             ->wherePivot('outlet_id', (string) $outletId)
-            ->withPivot('qty', 'serial_number', 'stock_id', 'owner_stock_id', 'outlet_id')
+            ->withPivot('id', 'qty', 'serial_number', 'stock_id', 'owner_stock_id', 'outlet_id')
             ->get();
+
+        // Urutan asli (urutan masuk keranjang) dipakai CashierSaleService saat checkout. Disimpan di
+        // cart_seq supaya hitungan voucher di layar kasir tetap sama dengan server walau tampilan diurutkan ulang.
+        foreach ($cart as $seq => $cartItem) {
+            $cartItem->cart_seq = $seq;
+        }
 
         $allocations = [];
         foreach ($cart as $cartIndex => $item) {
@@ -140,6 +146,16 @@ class CartController extends Controller
                 ->all();
         }
 
+        // Tampilan: item yang terakhir di-scan paling atas. Scan ulang produk yang sudah ada memperbarui
+        // updated_at pivot (lihat store); ubah qty tidak mengubahnya (lihat changeQty). Selisih sama detik -> id pivot.
+        $cart = $cart
+            ->sort(function ($a, $b) {
+                $byTime = strtotime((string) $b->pivot->updated_at) <=> strtotime((string) $a->pivot->updated_at);
+
+                return $byTime !== 0 ? $byTime : ((int) $b->pivot->id <=> (int) $a->pivot->id);
+            })
+            ->values();
+
         return response($cart);
     }
 
@@ -204,6 +220,8 @@ class CartController extends Controller
                 ->first();
             if ($cart) {
                 $cart->pivot->qty = $request->qty;
+                // Ubah qty tidak boleh memindahkan baris: urutan keranjang mengikuti waktu scan terakhir.
+                $cart->pivot->timestamps = false;
                 $cart->pivot->save();
             }
 
