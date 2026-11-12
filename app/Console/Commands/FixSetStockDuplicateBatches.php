@@ -20,13 +20,18 @@ use Illuminate\Support\Facades\DB;
  *   php artisan set-stock:fix-dup-batches --keep=local --apply   (batch hosting dinolkan + diganti nomor, lokal dipakai)
  *   php artisan set-stock:fix-dup-batches --keep=server --apply  (batch lokal dinolkan + diganti nomor, hosting dipakai)
  *   php artisan set-stock:fix-dup-batches --keep=both --apply    (hanya ganti nomor batch lokal; stok KEDUANYA tetap = dobel)
+ *   php artisan set-stock:fix-dup-batches --keep=auto --apply    (putuskan per pasangan, lihat di bawah)
+ *
+ * --keep=auto: qty & HPP kedua sisi SAMA = dianggap 1 inputan yang sama (batch hosting dinolkan, lokal dipakai).
+ *              qty / HPP BEDA = dianggap 2 inputan berbeda (nomor batch lokal diganti, stok KEDUANYA dipertahankan
+ *              = menumpuk/menambah, sesuai aturan Set Stock < 72 jam). Simulasi menampilkan kolom "Putusan auto".
  *
  * Backup kedua database dulu. Setelah selesai, jalankan sinkron lagi.
  */
 class FixSetStockDuplicateBatches extends Command
 {
     protected $signature = 'set-stock:fix-dup-batches
-        {--keep= : local | server | both (wajib bersama --apply)}
+        {--keep= : local | server | both | auto (wajib bersama --apply)}
         {--apply : Tulis perubahan (default: hanya simulasi)}
         {--force : Lewati konfirmasi}';
 
@@ -36,8 +41,8 @@ class FixSetStockDuplicateBatches extends Command
     {
         $apply = (bool) $this->option('apply');
         $keep = (string) $this->option('keep');
-        if ($apply && ! in_array($keep, ['local', 'server', 'both'], true)) {
-            $this->error('Pilih --keep=local, --keep=server atau --keep=both.');
+        if ($apply && ! in_array($keep, ['local', 'server', 'both', 'auto'], true)) {
+            $this->error('Pilih --keep=local, --keep=server, --keep=both atau --keep=auto.');
 
             return self::FAILURE;
         }
@@ -65,8 +70,11 @@ class FixSetStockDuplicateBatches extends Command
 
         $this->warn(count($conflicts) . ' batch bentrok (nomor batch sama, id berbeda di lokal & hosting):');
         $this->table(
-            ['Toko', 'Produk', 'Batch', 'Lokal id', 'Lokal qty', 'Hosting id', 'Hosting qty'],
-            array_map(fn ($c) => [$c[0]->owner_id, $c[0]->product_id, $c[0]->batch_number, $c[0]->id, (float) $c[0]->qty, $c[1]->id, (float) $c[1]->qty], array_slice($conflicts, 0, 40))
+            ['Toko', 'Produk', 'Batch', 'Lokal id', 'Lokal qty', 'Hosting id', 'Hosting qty', 'Putusan auto'],
+            array_map(fn ($c) => [
+                $c[0]->owner_id, $c[0]->product_id, $c[0]->batch_number, $c[0]->id, (float) $c[0]->qty, $c[1]->id, (float) $c[1]->qty,
+                $this->isSameInput($c[0], $c[1]) ? 'sama: 1 inputan (nolkan hosting)' : 'beda: 2 inputan (pertahankan keduanya)',
+            ], array_slice($conflicts, 0, 40))
         );
         if (count($conflicts) > 40) {
             $this->line('... ' . (count($conflicts) - 40) . ' baris lainnya.');
@@ -84,16 +92,18 @@ class FixSetStockDuplicateBatches extends Command
         $n = 0;
         foreach ($conflicts as [$l, $s]) {
             $newName = $l->batch_number . '-DUP';
+            // auto: qty+HPP sama = inputan yang sama (dobel karena sinkron), beda = inputan berbeda (tumpuk).
+            $mode = $keep === 'auto' ? ($this->isSameInput($l, $s) ? 'local' : 'both') : $keep;
 
-            if ($keep === 'server' || $keep === 'both') {
+            if ($mode === 'server' || $mode === 'both') {
                 // Lokal: ganti nomor batch; untuk 'server' stoknya juga dinolkan (tercatat di Kartu Stok).
-                DB::transaction(function () use ($l, $newName, $keep, $stockService) {
+                DB::transaction(function () use ($l, $newName, $mode, $stockService) {
                     $row = OwnerStock::whereKey($l->id)->lockForUpdate()->first();
                     if (! $row) {
                         return;
                     }
                     $row->update(['batch_number' => $newName . '-L', 'sku' => $newName . '-L']);
-                    if ($keep === 'server') {
+                    if ($mode === 'server') {
                         $stockService->adjust($row, 0.0, today()->toDateString(), 'Set Stock', null, 'Set Stock dobel (lokal & hosting): batch lokal dinolkan, dipakai batch hosting');
                     }
                 });
@@ -131,5 +141,12 @@ class FixSetStockDuplicateBatches extends Command
         $this->info($n . ' batch bentrok diselesaikan. Jalankan sinkron lagi.');
 
         return self::SUCCESS;
+    }
+
+    /** Qty dan HPP sama di kedua sisi: kemungkinan besar 1 inputan yang sama yang terbuat dobel. */
+    private function isSameInput(object $local, object $server): bool
+    {
+        return abs((float) $local->qty - (float) $server->qty) < 0.0001
+            && abs((float) $local->hpp - (float) $server->hpp) < 0.01;
     }
 }
