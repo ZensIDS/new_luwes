@@ -664,7 +664,9 @@ class OutletPurchaseController extends Controller
                             ],
                             OutletPurchase::class,
                             $purchase->id,
-                            auth()->user()
+                            auth()->user(),
+                            // Jalur resmi B: HPP batch outlet terbentuk saat penerimaan Outlet Purchase.
+                            'outlet-purchase'
                         );
                         $ownerStockId = $ownerStock->id;
                     }

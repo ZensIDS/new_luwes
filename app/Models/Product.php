@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use App\Services\PriceFolderIndex;
+use App\Support\HargaBeliGuard;
 use Spatie\Activitylog\LogOptions;
 use Spatie\Activitylog\Traits\LogsActivity;
 
@@ -58,25 +59,35 @@ class Product extends Model
     ];
 
     /**
-     * Jaga harga_beli_besar tetap sinkron dengan harga_beli (satuan kecil) lewat jalur MANA PUN yang menyimpan
-     * lewat model (form Product, penerimaan pembelian / HPP rata-rata, dll).
+     * Jaga harga_beli_besar tetap sinkron dengan harga_beli (satuan kecil).
+     * Sinkron HANYA berjalan saat harga_beli / konversi_qty / harga_beli_besar berubah (atau produk baru),
+     * jadi simpan model untuk keperluan lain (updateStockValue, update_count, dll) tidak lagi menyentuh harga beli.
      * Bila pasangan kecil/besar sudah konsisten (besar / konversi = kecil) tidak diubah; bila basi / kosong, besar = kecil x konversi.
+     *
+     * Setelah sinkron, HargaBeliGuard memeriksa apakah harga beli berubah di luar jalur resmi
+     * (Edit Product, Outlet Purchases, Master Harga Jual).
      */
     protected static function booted(): void
     {
         static::saving(function (Product $product) {
-            $konversi = (float) $product->konversi_qty;
-            if ($konversi < 1 || $product->harga_beli === null) {
-                return;
+            $perluSinkron = ! $product->exists
+                || $product->isDirty(['harga_beli', 'konversi_qty', 'harga_beli_besar']);
+
+            if ($perluSinkron) {
+                $konversi = (float) $product->konversi_qty;
+
+                if ($konversi >= 1 && $product->harga_beli !== null) {
+                    $kecil = (float) $product->harga_beli;
+                    $besar = $product->harga_beli_besar;
+                    $konsisten = $besar !== null && abs(round(((float) $besar) / $konversi, 2) - $kecil) < 0.01;
+
+                    if (! $konsisten) {
+                        $product->harga_beli_besar = round($kecil * $konversi, 2);
+                    }
+                }
             }
 
-            $kecil = (float) $product->harga_beli;
-            $besar = $product->harga_beli_besar;
-            $konsisten = $besar !== null && abs(round(((float) $besar) / $konversi, 2) - $kecil) < 0.01;
-
-            if (! $konsisten) {
-                $product->harga_beli_besar = round($kecil * $konversi, 2);
-            }
+            HargaBeliGuard::checkModel($product);
         });
 
         // Folder Master Harga Jual dikelompokkan per kata pertama nama produk: bersihkan cache folder

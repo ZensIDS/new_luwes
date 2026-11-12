@@ -15,6 +15,7 @@ use App\Services\LatestHpp;
 use App\Services\OtherIncomeService;
 use App\Services\PriceCalculator;
 use App\Services\PriceFolderIndex;
+use App\Support\HargaBeliGuard;
 use App\Support\OutletAccess;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -615,7 +616,8 @@ class OutletPriceController extends Controller
 
         try {
             $product = DB::transaction(function () use ($request, $data) {
-                $product = Product::create($data);
+                // Jalur resmi C: Master Harga Jual boleh mengisi harga beli produk baru (HargaBeliGuard).
+                $product = HargaBeliGuard::allow('master-harga', fn () => Product::create($data));
 
                 if ($request->filled('supplier_ids')) {
                     $product->suppliers()->sync($request->supplier_ids);
@@ -709,7 +711,8 @@ class OutletPriceController extends Controller
 
                 // harga_beli (kecil) & harga_beli_besar sudah dihitung konsisten di productData();
                 // model Product juga menjaga keduanya tetap sinkron saat disimpan.
-                $locked->update($data);
+                // Jalur resmi C: Master Harga Jual boleh mengubah harga beli lewat panel Edit Barang (HargaBeliGuard).
+                HargaBeliGuard::allow('master-harga', fn () => $locked->update($data));
 
                 $service = app(OtherIncomeService::class);
                 if ($isFirstUpdate && $newStatus === 'listing' && ! $service->hasListing($locked)) {
@@ -930,16 +933,21 @@ class OutletPriceController extends Controller
         $oldHpp = $latest->forProduct($outletId, $productId);
         $stock = $latest->stockFor($outletId, $productId);
 
-        if ($stock) {
-            $stock->update(['hpp' => $hpp]);
-        } else {
+        // Jalur resmi C: HPP terbaru dari Master Harga Jual (HargaBeliGuard).
+        HargaBeliGuard::allow('master-harga', function () use ($stock, $hpp, $hppBesar, $konversi, $productId) {
+            if ($stock) {
+                $stock->update(['hpp' => $hpp]);
+
+                return;
+            }
+
             $productUpdate = ['harga_beli' => $hpp];
             if ($konversi >= 1) {
                 // update() query builder tidak memicu sinkronisasi di model Product, jadi harga besar diisi di sini.
                 $productUpdate['harga_beli_besar'] = $hppBesar ?? round($hpp * $konversi, 2);
             }
             Product::whereKey($productId)->update($productUpdate);
-        }
+        });
 
         if (abs($oldHpp - $hpp) < 0.005) {
             return;

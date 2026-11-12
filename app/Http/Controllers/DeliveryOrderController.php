@@ -8,6 +8,7 @@ use App\Models\Outlet;
 use App\Models\OwnerStock;
 use App\Models\PickingList;
 use App\Models\StockMovement;
+use App\Services\LatestHpp;
 use App\Services\OutletStockService;
 use App\Support\SearchHelper;
 use Illuminate\Http\Request;
@@ -394,23 +395,32 @@ class DeliveryOrderController extends Controller
                 // Catat penerimaan ke ledger stok toko (OwnerStock + movement 'in' + HPP + batch + sumber DO).
                 // Sebelumnya OwnerStock::updateOrCreate: tidak mencatat movement masuk & harga_beli tidak tersimpan.
                 $batchNumber = $stock->batch_number ?: ($stock->sku ?: 'DO-' . $deliveryOrder->id . '-' . $item->id);
+
+                // K2-a: batch outlet dari DO memakai HPP yang sedang berlaku (HPP terbaru outlet / products.harga_beli),
+                // BUKAN harga PO gudang (delivery_order_items.harga_beli tetap tersimpan hanya sebagai catatan).
+                // Dengan begitu menerima DO tidak mengubah HPP terbaru, dan harga jual tidak ikut berubah.
+                $hppBerlaku = app(LatestHpp::class)->forProduct((int) $deliveryOrder->owner_id, (int) $item->product_id);
+
                 $stockService->receive(
                     $deliveryOrder->owner_id,
                     $item->product_id,
                     $qtySent,
-                    (float) $item->harga_beli,
+                    $hppBerlaku,
                     [
                         'stock_id' => $stock->id,
                         'sku' => $stock->sku,
                         'expired_at' => $item->expired_at,
                         'batch_number' => $batchNumber,
+                        'keep_batch_hpp' => true,
                         'source_type' => DeliveryOrder::class,
                         'source_id' => $deliveryOrder->id,
                         'notes' => "Delivery to {$deliveryOrder->owner->name} - SKU: {$stock->sku}",
                     ],
                     DeliveryOrder::class,
                     $deliveryOrder->id,
-                    auth()->user()
+                    auth()->user(),
+                    // Nilai HPP turunan dari HPP berlaku, bukan input harga baru (HargaBeliGuard).
+                    'turunan'
                 );
 
                 // Log movement tetap berjalan
