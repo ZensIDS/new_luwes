@@ -320,7 +320,8 @@ class OutletStockService
     }
 
     /**
-     * Set Stock: qty yang diinput MENIMPA stok produk di outlet (K5).
+     * Set Stock: qty yang diinput MENIMPA stok produk di outlet (K5), KECUALI bila produk yang sama sudah
+     * di-Set Stock < SET_STOCK_ADD_WINDOW_HOURS (72) jam lalu: maka qty DITAMBAH ke stok saat ini.
      *
      * - Belum ada batch sama sekali: dibuat batch baru (nomor batch otomatis) dengan HPP yang diberikan.
      * - Sudah ada batch: seluruh qty ditaruh di batch yang jadi "HPP terbaru" (sama dengan LatestHpp),
@@ -427,6 +428,34 @@ class OutletStockService
             ->when($exceptDraftId, fn ($q) => $q->where('d.id', '!=', $exceptDraftId))
             ->where('d.saved_at', '>=', now()->subHours(self::SET_STOCK_ADD_WINDOW_HOURS))
             ->exists();
+    }
+
+    /**
+     * Versi massal hasRecentSetStock: dari daftar produk, yang mana sudah di-Set Stock dalam
+     * SET_STOCK_ADD_WINDOW_HOURS jam terakhir (draft lain yang sudah selesai). Dipakai tampilan keranjang.
+     *
+     * @param  array<int,int>  $productIds
+     * @return array<int,bool> [product_id => true]
+     */
+    public function recentSetStockProductIds(int $outletId, array $productIds, ?int $exceptDraftId = null): array
+    {
+        $found = [];
+        foreach (array_chunk(array_values(array_unique(array_map('intval', $productIds))), 1000) as $chunk) {
+            $ids = DB::table('set_stock_draft_items as i')
+                ->join('set_stock_drafts as d', 'd.id', '=', 'i.draft_id')
+                ->where('d.outlet_id', $outletId)
+                ->where('d.status', 'done')
+                ->whereIn('i.product_id', $chunk)
+                ->when($exceptDraftId, fn ($q) => $q->where('d.id', '!=', $exceptDraftId))
+                ->where('d.saved_at', '>=', now()->subHours(self::SET_STOCK_ADD_WINDOW_HOURS))
+                ->distinct()
+                ->pluck('i.product_id');
+            foreach ($ids as $id) {
+                $found[(int) $id] = true;
+            }
+        }
+
+        return $found;
     }
 
     /** Set Stock ke 0 tanpa batch biasa, tetapi masih ada stok minus: cukup nolkan batch MINUS. */

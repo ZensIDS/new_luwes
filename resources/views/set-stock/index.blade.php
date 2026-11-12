@@ -103,6 +103,7 @@
                                     <button type="button" id="btnCancel" class="btn btn-default btn-lg">Batal (Esc)</button>
                                 </div>
                                 <div class="ss-note" id="pDraftNote" style="display:none;"></div>
+                                <div class="ss-note" id="pPreview" style="display:none;"></div>
                                 <div class="ss-note" id="pHppWarn" style="display:none;">HPP produk ini 0. Cek harga beli produk sebelum menyimpan.</div>
                             </div>
 
@@ -223,7 +224,20 @@
 
             function focusScan() { $scan.val('').focus(); }
 
-            function closeCard() { current = null; $card.hide(); focusScan(); }
+            function closeCard() { current = null; $card.hide(); $('#pPreview').hide(); focusScan(); }
+
+            // Pratinjau hasil akhir stok: set ulang < 72 jam = stok sekarang + qty, selain itu = qty menimpa stok.
+            function updatePreview() {
+                if (!current) { $('#pPreview').hide(); return; }
+                const p = current.product, raw = $.trim($qty.val());
+                if (raw === '' || !/^\d+$/.test(raw)) { $('#pPreview').hide(); return; }
+                const q = parseInt(raw, 10);
+                const msg = p.additive
+                    ? 'Stok sistem ' + nf.format(p.stock_now) + ' + ' + nf.format(q) + ' = ' + nf.format(p.stock_now + q) + ' (ditambah, bukan menimpa)'
+                    : 'Stok akan menjadi ' + nf.format(q) + ' (menimpa stok sistem ' + nf.format(p.stock_now) + ')';
+                $('#pPreview').show().text(msg);
+            }
+            $qty.on('input', updatePreview);
 
             function showCard(data) {
                 current = data;
@@ -236,6 +250,7 @@
                 $('#pNet').text(rp(p.price_net));
                 $('#pHppWarn').toggle(!(p.hpp > 0));
                 $('#qtyLabel').text(p.additive ? 'Qty tambahan (ditambah ke stok, set ulang < 72 jam)' : 'Qty baru (menimpa stok)');
+                updatePreview();
                 if (it) {
                     $('#pDraftNote').show().text('Sudah ada di keranjang: qty ' + it.qty + ' (discan ' + it.scan_count + 'x, terakhir diubah ' + (it.updated_by || '-') + ' ' + (it.updated_at || '') + '). Qty terisi kembali, cek ulang lalu Enter.');
                     $qty.val(it.qty);
@@ -243,6 +258,7 @@
                     $('#pDraftNote').hide();
                     $qty.val('');
                 }
+                updatePreview();
                 $card.show();
                 $qty.trigger('focus').trigger('select');
             }
@@ -305,7 +321,7 @@
                 }
                 $('#basketBody').html(rows.map(function (i) {
                     return '<tr data-id="' + i.id + '" data-version="' + i.version + '" data-product="' + i.product_id + '">' +
-                        '<td class="nm"><div title="' + esc(i.name) + '">' + esc(i.name) + '</div><small>' + esc(i.code) + ' &middot; ' + esc(i.updated_by || '-') + ' ' + esc(i.updated_at || '') + (i.scan_count > 1 ? ' &middot; ' + i.scan_count + 'x scan' : '') + '</small></td>' +
+                        '<td class="nm"><div title="' + esc(i.name) + '">' + esc(i.name) + (i.additive ? ' <span class="label label-warning" title="Set ulang < 72 jam: qty ditambah ke stok">+ tambah</span>' : '') + '</div><small>' + esc(i.code) + ' &middot; ' + esc(i.updated_by || '-') + ' ' + esc(i.updated_at || '') + (i.scan_count > 1 ? ' &middot; ' + i.scan_count + 'x scan' : '') + '<br>' + (i.additive ? 'Stok ' + nf.format(i.stock_now) + ' + ' + nf.format(i.qty) + ' = <b>' + nf.format(i.stock_now + i.qty) + '</b>' : 'Stok ' + nf.format(i.stock_now) + ' &rarr; <b>' + nf.format(i.qty) + '</b>') + '</small></td>' +
                         '<td style="text-align:right"><input type="number" min="0" step="1" class="form-control input-sm q" value="' + i.qty + '" data-orig="' + i.qty + '"></td>' +
                         '<td style="text-align:right"><button type="button" class="btn btn-danger btn-xs btn-del"><i class="fa fa-trash"></i></button></td></tr>';
                 }).join(''));
@@ -349,7 +365,11 @@
             // ---- simpan ----
             $('#btnSave').on('click', function () {
                 if (saving || !basket.length) return;
-                if (!confirm('Simpan ' + basket.length + ' produk? Qty akan MENIMPA stok toko ini dan tidak bisa dibatalkan dari halaman ini.')) return;
+                const addN = basket.filter(function (i) { return i.additive; }).length;
+                const note = addN
+                    ? addN + ' produk (set ulang < 72 jam) akan DITAMBAH ke stok; ' + (basket.length - addN) + ' produk lainnya MENIMPA stok.'
+                    : 'Qty akan MENIMPA stok toko ini.';
+                if (!confirm('Simpan ' + basket.length + ' produk? ' + note + ' Tidak bisa dibatalkan dari halaman ini.')) return;
                 saving = true;
                 const $btn = $(this).prop('disabled', true).html('<i class="fa fa-spinner fa-spin"></i> Menyimpan...');
                 $('#saveFailures').hide().empty();

@@ -122,7 +122,7 @@ class SetStockController extends Controller
     }
 
     /** Isi keranjang (draft aktif toko ini). Dipakai juga untuk memulihkan draft saat halaman dibuka lagi. */
-    public function draft(Request $request): JsonResponse
+    public function draft(Request $request, OutletStockService $stockService): JsonResponse
     {
         $outletId = OutletAccess::id($request);
         $draft = SetStockDraft::where('active_outlet_id', $outletId)->orderBy('id')->first();
@@ -151,6 +151,27 @@ class SetStockController extends Controller
                     'updated_by' => $row->updated_by_name,
                     'updated_at' => $row->updated_at ? \Illuminate\Support\Carbon::parse($row->updated_at)->timezone('Asia/Jakarta')->format('d/m H:i') : null,
                 ]);
+        }
+
+        if ($items->isNotEmpty()) {
+            $productIds = $items->pluck('product_id')->all();
+            $additiveMap = $stockService->recentSetStockProductIds($outletId, $productIds, $draft->id);
+            $stockMap = [];
+            foreach (array_chunk($productIds, 1000) as $chunk) {
+                $stockMap += OwnerStock::where('owner_id', $outletId)
+                    ->whereIn('product_id', $chunk)
+                    ->groupBy('product_id')
+                    ->selectRaw('product_id, SUM(qty) as total')
+                    ->pluck('total', 'product_id')
+                    ->all();
+            }
+
+            // additive = qty di keranjang akan DITAMBAH ke stok saat ini (set ulang < 72 jam); stock_now sama
+            // dengan di kartu scan (termasuk saldo minus), dipakai untuk pratinjau "stok jadi".
+            $items = $items->map(fn ($row) => $row + [
+                'additive' => isset($additiveMap[$row['product_id']]),
+                'stock_now' => (int) ($stockMap[$row['product_id']] ?? 0),
+            ]);
         }
 
         return response()->json([
