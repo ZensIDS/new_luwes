@@ -67,6 +67,12 @@
                         Keranjang dipakai bersama oleh semua pengguna toko ini dan otomatis tersimpan.
                     </div>
 
+                    <div style="margin-bottom:14px;">
+                        <button type="button" class="btn btn-success btn-sm" id="btnExport" data-toggle="modal" data-target="#exportModal">
+                            <i class="fa fa-file-excel-o"></i> Export Excel
+                        </button>
+                    </div>
+
                     <div class="ss-wrap">
                         <div class="ss-main">
                             <div class="input-group">
@@ -109,6 +115,46 @@
     </section>
 
     @if ($selectedOutlet)
+        {{-- Modal export Excel (GET, file langsung diunduh; halaman tidak berpindah). --}}
+        <div class="modal fade" id="exportModal" tabindex="-1" role="dialog">
+            <div class="modal-dialog" role="document">
+                <form method="GET" action="{{ route('set-stock.export') }}" class="modal-content">
+                    <input type="hidden" name="outlet_id" value="{{ $selectedOutlet->id }}">
+                    <div class="modal-header">
+                        <button type="button" class="close" data-dismiss="modal">&times;</button>
+                        <h4 class="modal-title"><i class="fa fa-file-excel-o"></i> Export Excel Set Stock <small>{{ $selectedOutlet->name }}</small></h4>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Jenis</label>
+                            <div class="radio"><label><input type="radio" name="jenis" value="sudah"> Sudah di-set</label></div>
+                            <div class="radio"><label><input type="radio" name="jenis" value="belum"> Belum di-set</label></div>
+                            <div class="radio"><label><input type="radio" name="jenis" value="semua" checked> Cetak semua (sudah di atas, belum di bawah)</label></div>
+                        </div>
+                        <div class="row">
+                            <div class="col-xs-6 form-group">
+                                <label for="exportFrom">Dari tanggal</label>
+                                <input type="date" name="tanggal_mulai" id="exportFrom" class="form-control" value="{{ now('Asia/Jakarta')->toDateString() }}" required>
+                            </div>
+                            <div class="col-xs-6 form-group">
+                                <label for="exportTo">Sampai tanggal</label>
+                                <input type="date" name="tanggal_selesai" id="exportTo" class="form-control" value="{{ now('Asia/Jakarta')->toDateString() }}" required>
+                            </div>
+                        </div>
+                        <p class="help-block" style="margin-bottom:0;">
+                            Rentang tanggal memakai waktu item Set Stock (WIB). "Belum di-set" = produk yang belum masuk Set Stock pada rentang tanggal itu.
+                            Item yang masih di keranjang dihitung sudah dan diberi status "Di keranjang (belum disimpan)".
+                            Hanya produk yang harga jualnya sudah diatur.
+                        </p>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-default" data-dismiss="modal">Batal</button>
+                        <button type="submit" class="btn btn-success"><i class="fa fa-download"></i> Unduh Excel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <div class="ss-backdrop" id="drawerBackdrop"></div>
         <aside class="ss-drawer" id="drawer">
             <header>

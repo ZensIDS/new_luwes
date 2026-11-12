@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Exports\SetStockExport;
 use App\Models\Outlet;
 use App\Models\OwnerStock;
 use App\Models\Product;
@@ -15,6 +16,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Maatwebsite\Excel\Facades\Excel;
 use RuntimeException;
 use Throwable;
 
@@ -36,6 +38,24 @@ class SetStockController extends Controller
             'outletId' => $outletId,
             'selectedOutlet' => $outletId ? Outlet::find($outletId) : null,
         ]);
+    }
+
+    /**
+     * Export Excel Set Stock: jenis sudah / belum / semua + rentang tanggal (default hari ini).
+     * Outlet mengikuti aturan OutletAccess (staff-outlet terkunci ke outletnya).
+     */
+    public function export(Request $request)
+    {
+        $request->validate([
+            'jenis' => ['nullable', 'in:sudah,belum,semua'],
+            'tanggal_mulai' => ['nullable', 'date_format:Y-m-d'],
+            'tanggal_selesai' => ['nullable', 'date_format:Y-m-d'],
+        ]);
+
+        $export = new SetStockExport($request);
+
+        // fileName() memvalidasi outlet lebih dulu (wajib dipilih).
+        return Excel::download($export, $export->fileName());
     }
 
     /** Cari produk persis berdasarkan barcode + info untuk kartu produk. */

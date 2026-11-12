@@ -14,6 +14,18 @@
             <form id="voucher-label-print-form" method="GET" action="{{ route('cashier.print.vouchers') }}"
                 target="_blank" style="display:inline-block; margin-left:8px;">
                 <input type="hidden" name="print" value="1">
+                <select name="mode" class="form-control input-sm" style="display:inline-block; width:auto;"
+                    title="Mode cetak label">
+                    <option value="thermal" selected>Thermal (hitam putih)</option>
+                    <option value="warna">Warna</option>
+                </select>
+                <select name="paper" class="form-control input-sm" style="display:inline-block; width:auto;"
+                    title="Ukuran kertas label">
+                    <option value="80" selected>80 mm</option>
+                    <option value="68">68 mm</option>
+                    <option value="58">58 mm</option>
+                    <option value="100">A4 (label 68 mm)</option>
+                </select>
                 <button type="submit" id="print-selected-vouchers" class="btn btn-primary" disabled>
                     <i class="fa fa-print"></i> Cetak voucher terpilih
                     (<span id="selected-vouchers-count">0</span>)

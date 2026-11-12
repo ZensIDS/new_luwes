@@ -81,7 +81,8 @@ class CampaignController extends Controller
     }
 
     /**
-     * Select2 AJAX untuk "Pilih beberapa produk".
+     * Daftar produk (paging server) untuk modal "Pilih Produk" di form campaign.
+     * Pencarian boleh kosong (menampilkan semua produk A-Z per halaman).
      * Hanya 20 produk per halaman (ambil 1 baris ekstra untuk tahu masih ada halaman berikutnya,
      * tanpa COUNT(*)), sehingga tetap ringan walau produk ribuan.
      */
@@ -93,7 +94,8 @@ class CampaignController extends Controller
         $page = max((int) $request->query('page', 1), 1);
         $perPage = 20;
 
-        $query = Product::query();
+        // Hanya produk yang harga jualnya sudah diatur (ada aturan harga aktif di Master Harga Jual).
+        $query = $this->priceSetProducts();
 
         if ($search !== '') {
             $like = addcslashes($search, '\\%_');
@@ -117,6 +119,8 @@ class CampaignController extends Controller
                 'name' => $product->name,
             ])->values(),
             'pagination' => ['more' => $rows->count() > $perPage],
+            'page' => $page,
+            'per_page' => $perPage,
         ]);
     }
 
@@ -130,10 +134,16 @@ class CampaignController extends Controller
         $code = trim((string) $request->query('code', ''));
         $product = $code === ''
             ? null
-            : Product::where('code', $code)->first(['id', 'code', 'name']);
+            : $this->priceSetProducts()->where('code', $code)->first(['id', 'code', 'name']);
 
         if (! $product) {
-            return response()->json(['message' => 'Barcode produk tidak ditemukan.'], 404);
+            $exists = $code !== '' && Product::where('code', $code)->exists();
+
+            return response()->json([
+                'message' => $exists
+                    ? 'Harga jual produk ini belum diatur di Master Harga Jual.'
+                    : 'Barcode produk tidak ditemukan.',
+            ], 404);
         }
 
         return response()->json([
@@ -142,6 +152,14 @@ class CampaignController extends Controller
             'code' => $product->code,
             'name' => $product->name,
         ]);
+    }
+
+    /**
+     * Produk yang harga jualnya sudah diatur: punya aturan harga aktif (Master Harga Jual) di minimal satu outlet.
+     */
+    private function priceSetProducts()
+    {
+        return Product::query()->whereHas('outletPrices', fn ($price) => $price->currentlyActive());
     }
 
     /**

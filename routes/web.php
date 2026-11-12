@@ -175,6 +175,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
         Route::get('/', [\App\Http\Controllers\SetStockController::class, 'index'])->name('index');
         Route::get('/scan', [\App\Http\Controllers\SetStockController::class, 'scan'])->middleware('throttle:240,1,setstockscan')->name('scan');
         Route::get('/draft', [\App\Http\Controllers\SetStockController::class, 'draft'])->name('draft');
+        Route::get('/export', [\App\Http\Controllers\SetStockController::class, 'export'])->middleware('throttle:20,1,setstockexport')->name('export');
         Route::post('/item', [\App\Http\Controllers\SetStockController::class, 'storeItem'])->name('item.store');
         Route::delete('/item/{item}', [\App\Http\Controllers\SetStockController::class, 'destroyItem'])->name('item.destroy');
         Route::post('/save', [\App\Http\Controllers\SetStockController::class, 'save'])->middleware('throttle:10,1,setstocksave')->name('save');
@@ -277,6 +278,8 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/laporan/outlet/rafaksi', [LaporanController::class, 'exportOutletRafaksi'])->name('laporan.outlet.rafaksi')->middleware('throttle:10,1');
     Route::get('/laporan/outlet/retur', [LaporanController::class, 'exportOutletRetur'])->name('laporan.outlet.retur')->middleware('throttle:10,1');
     Route::get('/laporan/outlet/all-stock', [LaporanController::class, 'exportOutletAllStock'])->name('laporan.outlet.all-stock')->middleware('throttle:10,1');
+    Route::get('/laporan/outlet/product-list', [LaporanController::class, 'exportOutletProductList'])->name('laporan.outlet.product-list')->middleware('throttle:10,1');
+    Route::get('/laporan/outlet/product-folders', [LaporanController::class, 'outletProductFolders'])->name('laporan.outlet.product-folders');
     Route::get('/laporan/pembelian/{id?}', [LaporanController::class, 'exportPembelian'])->name('laporan.pembelian');
     Route::get('/laporan/pickinglist/{id?}', [LaporanController::class, 'exportPickingList'])->name('laporan.pickinglist');
     Route::get('/laporan/request-order/{id?}', [LaporanController::class, 'exportRequestOrder'])->name('laporan.request-order');

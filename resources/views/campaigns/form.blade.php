@@ -166,13 +166,18 @@
                 <p class="help-block" id="product-help"></p>
                 <div class="row">
                     <div class="col-md-8 form-group">
-                        <label for="product-picker">Pilih beberapa produk</label>
-                        <select id="product-picker" class="form-control" multiple data-placeholder="Ketik nama/kode produk untuk mencari">
+                        <label>Produk yang dipilih</label>
+                        <div>
+                            <button type="button" class="btn btn-primary" id="open-product-modal"><i class="fa fa-search"></i> Pilih Produk</button>
+                            <span class="text-muted" id="picked-count" style="margin-left: 10px;"></span>
+                        </div>
+                        {{-- Penyimpan pilihan produk (tidak dikirim; yang dikirim adalah input products[id] di tabel bawah). --}}
+                        <select id="product-picker" multiple style="display: none;">
                             @foreach ($selectedProductOptions as $product)
                                 <option value="{{ $product['id'] }}" selected>{{ $product['code'] }} — {{ $product['name'] }}</option>
                             @endforeach
                         </select>
-                        <small class="help-block">Ketik minimal 2 huruf. Produk dicari langsung di server, jadi tetap ringan walau produknya ribuan.</small>
+                        <small class="help-block">Buka daftar produk untuk mencari dan mencentang beberapa produk sekaligus (hanya produk yang harga jualnya sudah diatur; dimuat per halaman dari server, jadi tetap ringan walau produknya ribuan), atau scan barcode di samping.</small>
                     </div>
                     <div class="col-md-4 form-group">
                         <label for="product-scan">Scan barcode produk</label>
@@ -186,7 +191,7 @@
                             <tr>
                                 <th>Kode</th>
                                 <th>Produk</th>
-                                <th width="180" class="required-qty-column">Qty untuk 1 promo</th>
+                                <th width="180" class="required-qty-column">Isi per bundle</th>
                                 <th width="70">&nbsp;</th>
                             </tr>
                         </thead>
@@ -221,6 +226,51 @@
             <button type="submit" class="btn btn-primary"><i class="fa fa-save"></i> <span id="save-label">{{ $isEdit ? 'Simpan perubahan' : 'Simpan promo' }}</span></button>
         </div>
     </form>
+
+    {{-- Modal pilih produk: di luar <form> supaya tombol Enter di kolom cari tidak mengirim form. --}}
+    <div class="modal fade" id="product-modal" tabindex="-1" role="dialog" data-backdrop="static">
+        <div class="modal-dialog modal-lg" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal">&times;</button>
+                    <h4 class="modal-title"><i class="fa fa-shopping-basket"></i> Pilih Produk</h4>
+                </div>
+                <div class="modal-body">
+                    <div class="input-group" style="margin-bottom: 10px;">
+                        <input type="search" id="product-modal-search" class="form-control" placeholder="Cari nama atau kode produk (kosong = semua produk berharga jual)" autocomplete="off">
+                        <span class="input-group-addon"><i class="fa fa-search"></i></span>
+                    </div>
+                    <p class="help-block" style="margin-top: 0;">Produk yang sudah ditambahkan langsung tercentang. Pilihan tetap tersimpan saat pindah halaman atau mengganti pencarian; hilangkan centang untuk membuang produk.</p>
+                    <div class="table-responsive" style="max-height: 55vh; overflow-y: auto;">
+                        <table class="table table-bordered table-striped table-hover" style="margin-bottom: 0;">
+                            <thead>
+                                <tr>
+                                    <th width="36"><input type="checkbox" id="product-modal-check-page" title="Centang semua di halaman ini"></th>
+                                    <th width="170">Kode</th>
+                                    <th>Produk</th>
+                                </tr>
+                            </thead>
+                            <tbody id="product-modal-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer" style="text-align: left;">
+                    <div class="row">
+                        <div class="col-sm-5" style="padding-top: 6px;">
+                            <button type="button" class="btn btn-default btn-sm" id="product-modal-prev"><i class="fa fa-chevron-left"></i> Sebelumnya</button>
+                            <span id="product-modal-page" style="margin: 0 8px;">Hal. 1</span>
+                            <button type="button" class="btn btn-default btn-sm" id="product-modal-next">Berikutnya <i class="fa fa-chevron-right"></i></button>
+                        </div>
+                        <div class="col-sm-7 text-right">
+                            <strong id="product-modal-count" style="margin-right: 10px;">0 dipilih</strong>
+                            <button type="button" class="btn btn-default" data-dismiss="modal">Batal</button>
+                            <button type="button" class="btn btn-primary" id="product-modal-apply"><i class="fa fa-plus"></i> Tambahkan</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 </section>
 @endsection
 
@@ -239,33 +289,6 @@ $(function () {
     let codeWasEdited = {{ old('code_auto', $isEdit ? 0 : 1) ? 'false' : 'true' }};
 
     $('.select2').select2({ width: '100%', allowClear: true });
-    $('#product-picker').select2({
-        width: '100%',
-        allowClear: true,
-        minimumInputLength: 2,
-        placeholder: 'Ketik nama/kode produk untuk mencari',
-        ajax: {
-            url: searchUrl,
-            dataType: 'json',
-            delay: 300,
-            cache: true,
-            data: function (params) {
-                return { q: params.term, page: params.page || 1 };
-            },
-            processResults: function (data) {
-                return { results: data.results, pagination: data.pagination };
-            }
-        },
-        language: {
-            inputTooShort: function () { return 'Ketik minimal 2 huruf untuk mencari produk...'; },
-            searching: function () { return 'Mencari...'; },
-            noResults: function () { return 'Produk tidak ditemukan'; },
-            loadingMore: function () { return 'Memuat produk lainnya...'; }
-        }
-    }).on('select2:select', function (event) {
-        const data = event.params.data;
-        productCache[String(data.id)] = { id: data.id, code: data.code, name: data.name };
-    });
     // Versi daterangepicker bawaan AdminLTE (v1.x) membaca opsi `format` di level atas,
     // bukan `locale.format`. Tanpa itu nilai awal "2026-10-13 10:00" dibaca sebagai MM/DD/YYYY
     // sehingga tahun menjadi 0000 saat edit. Kirim keduanya + startDate/endDate dari nilai input.
@@ -328,12 +351,6 @@ $(function () {
 
     function renderSelectedProducts() {
         rememberProductQuantities();
-        // Ambil data produk terpilih langsung dari Select2 (aman terhadap urutan event select/change).
-        ($('#product-picker').select2('data') || []).forEach(function (item) {
-            if (item && item.code !== undefined) {
-                productCache[String(item.id)] = { id: item.id, code: item.code, name: item.name };
-            }
-        });
         const ids = ($('#product-picker').val() || []).map(String);
         const rows = ids.map(function (id) {
             const product = productCache[id];
@@ -347,6 +364,9 @@ $(function () {
             </tr>`;
         }).join('');
         $('#selected-products-table tbody').html(rows);
+        // Baris dibuat ulang tiap render: kolom "Isi per bundle" hanya tampil untuk Bundle.
+        $('.required-qty-column').toggle($('#campaign-type').val() === 'bundle');
+        updatePickedCount();
 
         if (ids.length === 0) {
             $('#selected-products-table').hide();
@@ -375,7 +395,8 @@ $(function () {
         $('.promotion-only').toggle(isPromotion).find('input').prop('disabled', !isPromotion);
         $('.bundle-only').toggle(isBundle).find('input, button').prop('disabled', !isBundle);
         $('#discount-prefix').text($('#discount-type').val() === 'percentage' ? '%' : 'Rp');
-        $('.required-qty-column').toggle(!isVoucher);
+        // "Isi per bundle" hanya dipakai Bundle. Flash Sale / Rafaksi / Voucher tidak membaca nilai ini.
+        $('.required-qty-column').toggle(isBundle);
         $('#campaign-help').text(isVoucher
             ? 'Kode dimasukkan manual di kasir. Bisa berlaku untuk beberapa produk.'
             : (isBundle ? 'Pelanggan membeli produk pilihan dan mendapat potongan atau bonus.' : 'Potongan otomatis saat produk pilihan dibeli.'));
@@ -394,7 +415,9 @@ $(function () {
         }
         $('#product-help').text(isVoucher
             ? 'Kosongkan pilihan agar voucher berlaku untuk semua produk. Pilih beberapa produk jika ingin membatasi voucher.'
-            : 'Pilih produk yang menjadi syarat promo. Qty adalah unit untuk 1 promo atau isi 1 bundle.');
+            : (isBundle
+                ? 'Pilih produk isi bundle. "Isi per bundle" adalah jumlah unit tiap produk dalam 1 paket (contoh: Sabun 2 + Shampoo 1).'
+                : 'Pilih produk yang mendapat potongan rafaksi.'));
         $('#save-label').text({{ $isEdit ? 'true' : 'false' }} ? 'Simpan perubahan' : (isVoucher ? 'Simpan voucher' : 'Simpan promo'));
         updateCode();
         window.initCurrencyInputs?.();
@@ -441,8 +464,8 @@ $(function () {
             }
             $('#product-picker').val(selected).trigger('change');
             input.value = '';
-        }).fail(function () {
-            alert('Barcode produk tidak ditemukan.');
+        }).fail(function (xhr) {
+            alert((xhr.responseJSON && xhr.responseJSON.message) || 'Barcode produk tidak ditemukan.');
         });
     });
     $('#add-bonus').on('click', function () {
@@ -455,6 +478,125 @@ $(function () {
     });
     $(document).on('click', '.remove-bonus', function () {
         $(this).closest('.bonus-row').remove();
+    });
+
+    // ===== Modal "Pilih Produk" (paging + cari dari server, pilihan bertahan antar halaman / pencarian) =====
+    const modalSelected = {};   // id -> {id, code, name}
+    let modalPage = 1;
+    let modalTerm = '';
+    let modalRequest = null;
+    let modalTimer = null;
+
+    function pickedIds() {
+        return ($('#product-picker').val() || []).map(String);
+    }
+
+    function updatePickedCount() {
+        const count = pickedIds().length;
+        $('#picked-count').text(count ? count + ' produk dipilih' : 'Belum ada produk dipilih');
+    }
+
+    function setPickedProducts(ids) {
+        ids.forEach(function (id) {
+            if (!$('#product-picker option[value="' + id + '"]').length && productCache[id]) {
+                $('#product-picker').append(new Option(productCache[id].code + ' — ' + productCache[id].name, id, true, true));
+            }
+        });
+        $('#product-picker').val(ids).trigger('change');
+    }
+
+    function updateModalCount() {
+        $('#product-modal-count').text(Object.keys(modalSelected).length + ' dipilih');
+        const $checks = $('#product-modal-body .modal-product-check');
+        const checked = $checks.filter(':checked').length;
+        $('#product-modal-check-page')
+            .prop('checked', $checks.length > 0 && checked === $checks.length)
+            .prop('indeterminate', checked > 0 && checked < $checks.length);
+    }
+
+    function loadModalProducts() {
+        if (modalRequest) modalRequest.abort();
+        $('#product-modal-body').html('<tr><td colspan="3" class="text-center text-muted">Memuat produk...</td></tr>');
+        $('#product-modal-prev, #product-modal-next').prop('disabled', true);
+        modalRequest = $.getJSON(searchUrl, { q: modalTerm, page: modalPage }).done(function (data) {
+            const rows = (data.results || []).map(function (item) {
+                const id = String(item.id);
+                productCache[id] = { id: item.id, code: item.code, name: item.name };
+                return `<tr class="modal-product-row" style="cursor: pointer;">
+                    <td><input type="checkbox" class="modal-product-check" value="${id}" ${modalSelected[id] ? 'checked' : ''}></td>
+                    <td>${escapeHtml(item.code)}</td>
+                    <td>${escapeHtml(item.name)}</td>
+                </tr>`;
+            }).join('');
+            $('#product-modal-body').html(rows || '<tr><td colspan="3" class="text-center text-muted">Produk tidak ditemukan</td></tr>');
+            $('#product-modal-page').text('Hal. ' + modalPage);
+            $('#product-modal-prev').prop('disabled', modalPage <= 1);
+            $('#product-modal-next').prop('disabled', !(data.pagination && data.pagination.more));
+            updateModalCount();
+        }).fail(function (xhr) {
+            if (xhr.statusText === 'abort') return;
+            $('#product-modal-body').html('<tr><td colspan="3" class="text-center text-danger">Gagal memuat produk. Coba lagi.</td></tr>');
+        });
+    }
+
+    $('#open-product-modal').on('click', function () {
+        Object.keys(modalSelected).forEach(function (key) { delete modalSelected[key]; });
+        pickedIds().forEach(function (id) {
+            modalSelected[id] = productCache[id] || { id: id, code: '', name: '' };
+        });
+        modalPage = 1;
+        modalTerm = '';
+        $('#product-modal-search').val('');
+        $('#product-modal').modal('show');
+        loadModalProducts();
+    });
+    $('#product-modal').on('shown.bs.modal', function () {
+        $('#product-modal-search').trigger('focus');
+    });
+    $('#product-modal-search').on('keydown', function (event) {
+        if (event.key === 'Enter') event.preventDefault();
+    }).on('input', function () {
+        const term = $(this).val().trim();
+        clearTimeout(modalTimer);
+        modalTimer = setTimeout(function () {
+            if (term === modalTerm) return;
+            modalTerm = term;
+            modalPage = 1;
+            loadModalProducts();
+        }, 300);
+    });
+    $('#product-modal-prev').on('click', function () {
+        if (modalPage > 1) { modalPage--; loadModalProducts(); }
+    });
+    $('#product-modal-next').on('click', function () {
+        modalPage++;
+        loadModalProducts();
+    });
+    $(document).on('change', '.modal-product-check', function () {
+        const id = String(this.value);
+        if (this.checked) {
+            modalSelected[id] = productCache[id] || { id: id, code: '', name: '' };
+        } else {
+            delete modalSelected[id];
+        }
+        updateModalCount();
+    });
+    $(document).on('click', '.modal-product-row', function (event) {
+        if ($(event.target).is('input')) return;
+        $(this).find('.modal-product-check').trigger('click');
+    });
+    $('#product-modal-check-page').on('change', function () {
+        const checked = this.checked;
+        $('#product-modal-body .modal-product-check').each(function () {
+            if (this.checked !== checked) $(this).trigger('click');
+        });
+    });
+    $('#product-modal-apply').on('click', function () {
+        // Urutan: produk yang sudah ada tetap di posisi semula, produk baru di bawahnya.
+        const keep = pickedIds().filter(function (id) { return modalSelected[id]; });
+        const added = Object.keys(modalSelected).filter(function (id) { return keep.indexOf(id) === -1; });
+        setPickedProducts(keep.concat(added));
+        $('#product-modal').modal('hide');
     });
 
     updateTypeFields();

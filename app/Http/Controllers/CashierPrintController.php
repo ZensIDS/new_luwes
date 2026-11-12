@@ -115,6 +115,15 @@ class CashierPrintController extends Controller
             $product->setAttribute('print_qty', max(1, min(100, (int) $this->quantityFor($product->id, $request))));
         });
 
+        // Urutan cetak label: produk berpromo (harga coret + persen diskon) dulu,
+        // lalu yang tidak berpromo. Di dalam tiap grup tetap A-Z nama produk.
+        $products = $products->sort(function (Product $a, Product $b) {
+            $promoA = $a->getAttribute('print_has_discount') ? 0 : 1;
+            $promoB = $b->getAttribute('print_has_discount') ? 0 : 1;
+
+            return $promoA <=> $promoB ?: strcasecmp((string) $a->name, (string) $b->name);
+        })->values();
+
         return view('cashier.print-products', [
             'products' => $products,
             'printItems' => $printing ? $products : collect(),
