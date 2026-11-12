@@ -10,65 +10,65 @@ use Illuminate\Support\Facades\DB;
 use Throwable;
 
 /**
- * Koreksi data Set Stock LAMA yang sudah terlanjur MENIMPA padahal seharusnya MENAMBAH
+ * Koreksi data Set Stock yang MENIMPA padahal seharusnya MENAMBAH
  * (produk yang sama di-set stock lagi < 72 jam dari Set Stock sebelumnya).
  *
- * Cara kerja:
- *  1. Untuk tiap toko + produk, urutkan draft Set Stock yang sudah selesai (saved_at) SEBELUM --before.
- *  2. Rantai = draft berurutan yang jaraknya <= --hours dari draft sebelumnya. Draft pertama dalam rantai
- *     memang menimpa (benar). Draft ke-2 dst seharusnya menambah.
- *  3. Stok sebelum draft ke-k (yang dulu "hilang" tertimpa) = qty input draft - perubahan bersih stok biasa
- *     pada draft itu (dari Kartu Stok; batch MINUS tidak dihitung).
- *  4. Total yang hilang per produk = jumlah dari (3) untuk draft ke-2 dst. Nilai ini DITAMBAHKAN ke stok
- *     saat ini (bukan di-set ulang), jadi penjualan yang terjadi sesudahnya tidak ikut terhapus.
- *     Dicatat sebagai StockAdjustment + Kartu Stok dengan catatan "Koreksi Set Stock 72 jam".
+ * Data campuran (sebagian sistem lama, sebagian sistem baru) dikenali OTOMATIS per draft:
+ *  - Draft yang sudah diproses sistem baru punya catatan Kartu Stok "... - ditambahkan +N (set ulang < 72 jam)"
+ *    -> dianggap BENAR, dilewati.
+ *  - Draft ke-2 dst dalam satu rantai (jarak <= --hours dari draft sebelumnya) TANPA catatan itu
+ *    -> dulu menimpa, stok sebelumnya "hilang": perlu dikoreksi.
+ *  - Draft yang sudah pernah dikoreksi command ini (penanda "Koreksi Set Stock 72 jam" di Kartu Stok) dilewati.
  *
- * Aman dijalankan ulang: rantai yang sudah dikoreksi (penanda draft terakhir di catatan Kartu Stok) dilewati.
+ * Stok yang hilang per draft = qty input draft - perubahan bersih batch biasa pada draft itu (dari Kartu Stok;
+ * batch MINUS tidak dihitung). Totalnya DITAMBAHKAN ke stok saat ini (bukan di-set ulang), jadi penjualan atau
+ * Set Stock sistem baru yang terjadi sesudahnya tidak ikut terhapus.
  *
- * Default = simulasi. Pakai --apply untuk menulis. Backup database dulu sebelum --apply.
- * --before WAJIB diisi: waktu fitur "tambah < 72 jam" mulai live. Draft sesudahnya sudah menambah dengan benar.
+ * Default = simulasi. Pakai --apply untuk menulis. Backup database dulu sebelum --apply. Aman dijalankan ulang.
  *
  * Contoh:
- *   php artisan set-stock:fix-additive --before="2026-11-13 12:00:00"            (simulasi)
- *   php artisan set-stock:fix-additive --before="2026-11-13 12:00:00" --apply
- *   php artisan set-stock:fix-additive --before="2026-11-13 12:00:00" --outlet=2 --apply
+ *   php artisan set-stock:fix-additive                         (simulasi, semua toko, otomatis)
+ *   php artisan set-stock:fix-additive --detail                (tampilkan status tiap draft dalam rantai)
+ *   php artisan set-stock:fix-additive --outlet=2 --apply
+ *   php artisan set-stock:fix-additive --before="2026-11-13 12:00:00"   (opsional: batasi hanya draft sebelum waktu ini)
  */
 class FixSetStockAdditive extends Command
 {
     protected $signature = 'set-stock:fix-additive
-        {--before= : WAJIB. Waktu fitur baru live (format Y-m-d H:i:s, zona waktu aplikasi). Hanya draft sebelum waktu ini diperiksa}
+        {--before= : Opsional. Hanya periksa draft yang disimpan sebelum waktu ini (Y-m-d H:i:s). Default: semua draft}
         {--hours=72 : Rentang jam yang dianggap set ulang (default 72)}
         {--outlet=* : Batasi ke outlet tertentu (ID outlet, boleh diulang). Default: semua outlet}
+        {--detail : Tampilkan status tiap draft (benar / perlu koreksi / sudah dikoreksi)}
         {--apply : Tulis koreksi ke database (default: hanya simulasi)}
         {--force : Lewati pertanyaan konfirmasi saat --apply}';
 
-    protected $description = 'Koreksi Set Stock lama yang menimpa padahal seharusnya menambah (set ulang < 72 jam)';
+    protected $description = 'Koreksi Set Stock yang menimpa padahal seharusnya menambah (set ulang < 72 jam); mendukung data campuran sistem lama dan baru';
+
+    private const MARKER = 'Koreksi Set Stock 72 jam';
 
     public function handle(OutletStockService $stockService): int
     {
-        if (! $this->option('before')) {
-            $this->error('Opsi --before wajib, contoh: --before="2026-11-13 12:00:00" (waktu fitur baru live).');
+        $before = null;
+        if ($this->option('before')) {
+            try {
+                $before = Carbon::parse($this->option('before'));
+            } catch (Throwable $e) {
+                $this->error('Format --before tidak valid. Pakai Y-m-d H:i:s.');
 
-            return self::FAILURE;
-        }
-
-        try {
-            $before = Carbon::parse($this->option('before'));
-        } catch (Throwable $e) {
-            $this->error('Format --before tidak valid. Pakai Y-m-d H:i:s.');
-
-            return self::FAILURE;
+                return self::FAILURE;
+            }
         }
 
         $hours = max(1, (int) $this->option('hours'));
         $apply = (bool) $this->option('apply');
+        $detail = (bool) $this->option('detail');
         $outletIds = array_filter(array_map('intval', (array) $this->option('outlet')));
 
         $rows = DB::table('set_stock_draft_items as i')
             ->join('set_stock_drafts as d', 'd.id', '=', 'i.draft_id')
             ->where('d.status', 'done')
             ->whereNotNull('d.saved_at')
-            ->where('d.saved_at', '<', $before)
+            ->when($before, fn ($q) => $q->where('d.saved_at', '<', $before))
             ->when($outletIds, fn ($q) => $q->whereIn('d.outlet_id', $outletIds))
             ->orderBy('d.outlet_id')
             ->orderBy('i.product_id')
@@ -76,22 +76,37 @@ class FixSetStockAdditive extends Command
             ->orderBy('d.id')
             ->get(['d.id as draft_id', 'd.outlet_id', 'd.saved_at', 'i.product_id', 'i.qty']);
 
-        // Kelompokkan per toko + produk, lalu pecah menjadi rantai.
+        // Kelompokkan per toko + produk, lalu pecah menjadi rantai (jarak antar draft <= --hours).
         $plans = [];
+        $detailRows = [];
+        $stats = ['benar' => 0, 'dikoreksi' => 0, 'perlu' => 0, 'nol' => 0];
+
         foreach ($rows->groupBy(fn ($r) => $r->outlet_id . ':' . $r->product_id) as $group) {
             $chain = [];
             $prev = null;
             foreach ($group as $row) {
                 $at = Carbon::parse($row->saved_at);
                 if ($prev && $prev->diffInSeconds($at) > $hours * 3600) {
-                    $this->collectPlan($plans, $chain);
+                    $this->collectPlan($plans, $detailRows, $stats, $chain);
                     $chain = [];
                 }
                 $chain[] = $row;
                 $prev = $at;
             }
-            $this->collectPlan($plans, $chain);
+            $this->collectPlan($plans, $detailRows, $stats, $chain);
         }
+
+        if ($detail && $detailRows) {
+            $this->table(
+                ['Toko', 'ID Prod', 'Kode', 'Draft', 'Disimpan', 'Qty input', 'Status', 'Kurang'],
+                $detailRows
+            );
+        }
+
+        $this->line(sprintf(
+            'Draft set ulang < %d jam: %d sudah benar (sistem baru), %d sudah pernah dikoreksi, %d perlu koreksi, %d tidak ada selisih.',
+            $hours, $stats['benar'], $stats['dikoreksi'], $stats['perlu'], $stats['nol']
+        ));
 
         if (! $plans) {
             $this->info('Tidak ada Set Stock yang perlu dikoreksi.');
@@ -101,12 +116,12 @@ class FixSetStockAdditive extends Command
 
         $display = array_map(fn ($p) => [
             $p['outlet_id'], $p['product_id'], $p['code'], mb_substr((string) $p['name'], 0, 28),
-            count($p['chain']), implode(',', array_map(fn ($r) => '#' . $r->draft_id, $p['chain'])),
+            implode(',', array_map(fn ($id) => '#' . $id, $p['fix_drafts'])),
             $p['missing'], $p['current'], $p['current'] + $p['missing'],
         ], $plans);
 
         $this->table(
-            ['Toko', 'ID Prod', 'Kode', 'Nama', 'Set', 'Draft', 'Tambah', 'Stok skrg', 'Stok baru'],
+            ['Toko', 'ID Prod', 'Kode', 'Nama', 'Draft dikoreksi', 'Tambah', 'Stok skrg', 'Stok baru'],
             $display
         );
         $this->info(count($plans) . ' produk perlu dikoreksi, total tambahan ' . array_sum(array_column($plans, 'missing')) . ' unit.');
@@ -142,15 +157,14 @@ class FixSetStockAdditive extends Command
 
                     $primary = $this->pickPrimary($batches);
                     $target = (float) $primary->qty + $plan['missing'];
-                    $marker = $this->marker($plan);
 
                     $stockService->adjust(
                         $primary,
                         $target,
                         today()->toDateString(),
-                        'Koreksi Set Stock 72 jam',
+                        self::MARKER,
                         null,
-                        $marker . ' +' . $plan['missing'] . ' (set ulang < 72 jam seharusnya menambah)'
+                        $this->marker($plan['fix_drafts']) . ' +' . $plan['missing'] . ' (set ulang < 72 jam seharusnya menambah)'
                     );
                     $done++;
                 });
@@ -167,34 +181,24 @@ class FixSetStockAdditive extends Command
         return $skipped ? self::FAILURE : self::SUCCESS;
     }
 
-    /** Hitung kekurangan stok untuk satu rantai (>= 2 draft) dan simpan ke $plans bila belum dikoreksi. */
-    private function collectPlan(array &$plans, array $chain): void
+    /**
+     * Nilai satu rantai (>= 2 draft). Draft pertama memang menimpa (benar). Draft ke-2 dst diklasifikasi:
+     * sistem baru (benar) / sudah dikoreksi / perlu koreksi. Rantai dengan kekurangan masuk $plans.
+     */
+    private function collectPlan(array &$plans, array &$detailRows, array &$stats, array $chain): void
     {
         if (count($chain) < 2) {
             return;
         }
 
         $first = $chain[0];
-        $last = end($chain);
         $outletId = (int) $first->outlet_id;
         $productId = (int) $first->product_id;
 
-        $plan = [
-            'outlet_id' => $outletId,
-            'product_id' => $productId,
-            'chain' => $chain,
-            'last_draft' => (int) $last->draft_id,
-        ];
+        $info = DB::table('products')->where('id', $productId)->first(['code', 'name']);
+        $code = $info->code ?? ('#' . $productId);
 
-        // Sudah pernah dikoreksi? (penanda draft terakhir rantai ada di Kartu Stok)
-        $already = DB::table('stock_movements')
-            ->where('owner_id', $outletId)
-            ->where('product_id', $productId)
-            ->where('notes', 'like', $this->marker($plan) . '%')
-            ->exists();
-        if ($already) {
-            return;
-        }
+        [$correctedIds, $legacyMax] = $this->alreadyCorrected($outletId, $productId);
 
         $deficitIds = OwnerStock::withTrashed()->deficit()
             ->where('owner_id', $outletId)
@@ -203,40 +207,111 @@ class FixSetStockAdditive extends Command
             ->all();
 
         $missing = 0;
+        $fixDrafts = [];
+
         foreach (array_slice($chain, 1) as $row) {
-            $base = 'Set Stock toko (draft #' . $row->draft_id . ')';
-            $net = (float) DB::table('stock_movements')
+            $draftId = (int) $row->draft_id;
+            $base = 'Set Stock toko (draft #' . $draftId . ')';
+            $status = null;
+            $lack = 0;
+
+            if (DB::table('stock_movements')
                 ->where('owner_id', $outletId)
                 ->where('product_id', $productId)
                 ->where('type', 'adjustment')
-                ->where(fn ($q) => $q->where('notes', $base)->orWhere('notes', 'like', $base . ' -%'))
-                ->when($deficitIds, fn ($q) => $q->whereNotIn('owner_stock_id', $deficitIds))
-                ->selectRaw('COALESCE(SUM(qty_in - qty_out), 0) as net')
-                ->value('net');
+                ->where('notes', 'like', $base . ' - ditambahkan +%')
+                ->exists()) {
+                // Sistem baru sudah menambahkan saat draft ini disimpan.
+                $status = 'BENAR (sistem baru)';
+                $stats['benar']++;
+            } elseif (isset($correctedIds[$draftId]) || $draftId <= $legacyMax) {
+                $status = 'sudah dikoreksi';
+                $stats['dikoreksi']++;
+            } else {
+                $net = (float) DB::table('stock_movements')
+                    ->where('owner_id', $outletId)
+                    ->where('product_id', $productId)
+                    ->where('type', 'adjustment')
+                    ->where(fn ($q) => $q->where('notes', $base)->orWhere('notes', 'like', $base . ' -%'))
+                    ->when($deficitIds, fn ($q) => $q->whereNotIn('owner_stock_id', $deficitIds))
+                    ->selectRaw('COALESCE(SUM(qty_in - qty_out), 0) as net')
+                    ->value('net');
 
-            // Stok sebelum draft ini = qty input - perubahan bersih batch biasa. Tidak boleh negatif.
-            $missing += max(0, (int) round((int) $row->qty - $net));
+                // Stok sebelum draft ini = qty input - perubahan bersih batch biasa. Tidak boleh negatif.
+                $lack = max(0, (int) round((int) $row->qty - $net));
+
+                if ($lack > 0) {
+                    $status = 'PERLU KOREKSI';
+                    $stats['perlu']++;
+                    $missing += $lack;
+                    $fixDrafts[] = $draftId;
+                } else {
+                    $status = 'tidak ada selisih';
+                    $stats['nol']++;
+                }
+            }
+
+            $detailRows[] = [
+                $outletId, $productId, $code, '#' . $draftId,
+                Carbon::parse($row->saved_at)->format('d/m H:i'), (int) $row->qty, $status, $lack ?: '-',
+            ];
         }
 
         if ($missing <= 0) {
             return;
         }
 
-        $info = DB::table('products')->where('id', $productId)->first(['code', 'name']);
-        $plan['code'] = $info->code ?? ('#' . $productId);
-        $plan['name'] = $info->name ?? '';
-        $plan['missing'] = $missing;
-        $plan['current'] = (int) OwnerStock::where('owner_id', $outletId)
-            ->where('product_id', $productId)
-            ->notDeficit()
-            ->sum('qty');
-
-        $plans[] = $plan;
+        $plans[] = [
+            'outlet_id' => $outletId,
+            'product_id' => $productId,
+            'code' => $code,
+            'name' => $info->name ?? '',
+            'fix_drafts' => $fixDrafts,
+            'missing' => $missing,
+            'current' => (int) OwnerStock::where('owner_id', $outletId)
+                ->where('product_id', $productId)
+                ->notDeficit()
+                ->sum('qty'),
+        ];
     }
 
-    private function marker(array $plan): string
+    /**
+     * Draft yang sudah pernah dikoreksi, dibaca dari Kartu Stok.
+     * Format baru: "Koreksi Set Stock 72 jam (draft #12,#15)". Format lama: "(sampai draft #15)" = semua draft <= 15.
+     *
+     * @return array{0:array<int,bool>,1:int}
+     */
+    private function alreadyCorrected(int $outletId, int $productId): array
     {
-        return 'Koreksi Set Stock 72 jam (sampai draft #' . $plan['last_draft'] . ')';
+        $notes = DB::table('stock_movements')
+            ->where('owner_id', $outletId)
+            ->where('product_id', $productId)
+            ->where('notes', 'like', self::MARKER . '%')
+            ->pluck('notes');
+
+        $ids = [];
+        $legacyMax = 0;
+        foreach ($notes as $note) {
+            if (preg_match('/\(sampai draft #(\d+)\)/', $note, $m)) {
+                $legacyMax = max($legacyMax, (int) $m[1]);
+
+                continue;
+            }
+            if (preg_match('/\(draft ([#\d,]+)\)/', $note, $m)) {
+                foreach (explode(',', str_replace('#', '', $m[1])) as $id) {
+                    if ((int) $id > 0) {
+                        $ids[(int) $id] = true;
+                    }
+                }
+            }
+        }
+
+        return [$ids, $legacyMax];
+    }
+
+    private function marker(array $draftIds): string
+    {
+        return self::MARKER . ' (draft ' . implode(',', array_map(fn ($id) => '#' . $id, $draftIds)) . ')';
     }
 
     /** Sama seperti OutletStockService::pickPrimaryBatch: batch tersedia terbaru, kalau tidak ada batch terbaru apa pun. */
