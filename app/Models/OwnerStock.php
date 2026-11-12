@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\HargaBeliGuard;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Spatie\Activitylog\LogOptions;
@@ -37,6 +38,15 @@ class OwnerStock extends Model
         'expired_at' => 'date',
         'hpp' => 'float',
     ];
+
+    /**
+     * HPP batch hanya boleh berubah lewat jalur resmi (Outlet Purchase, Master Harga Jual)
+     * atau ditandai turunan/maintenance. Lihat HargaBeliGuard.
+     */
+    protected static function booted(): void
+    {
+        static::saving(fn (OwnerStock $stock) => HargaBeliGuard::checkModel($stock));
+    }
 
     public function isDeficit(): bool
     {

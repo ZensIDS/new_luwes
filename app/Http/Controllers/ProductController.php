@@ -14,6 +14,7 @@ use App\Models\Product;
 use App\Models\Stock;
 use App\Models\Supplier;
 use App\Services\OtherIncomeService;
+use App\Support\HargaBeliGuard;
 use App\Support\OutletAccess;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -326,7 +327,8 @@ class ProductController extends Controller
             // Satu transaksi: bila status = Listing, income Listing dicatat di transaksi yang sama.
             // Gagal mencatat income (mis. nominal Listing belum diatur) = produk batal dibuat (B1).
             DB::transaction(function () use ($request, $data) {
-                $product = Product::create($data);
+                // Jalur resmi A: Edit Product boleh mengisi harga beli (HargaBeliGuard).
+                $product = HargaBeliGuard::allow('edit-product', fn () => Product::create($data));
 
                 // Sync suppliers (multiple select)
                 if ($request->has('supplier_ids')) {
@@ -410,7 +412,8 @@ class ProductController extends Controller
                 $isFirstUpdate = (int) $locked->update_count === 0;
                 $newStatus = $data['status_produk'] ?? $locked->status_produk;
 
-                $locked->update($data);
+                // Jalur resmi A: Edit Product boleh mengubah harga beli (HargaBeliGuard).
+                HargaBeliGuard::allow('edit-product', fn () => $locked->update($data));
 
                 // Pemicu hanya bila: update PERTAMA + status baru Listing + belum punya Listing income.
                 // Update kedua dst tidak pernah memicu, berapa kali pun status dibolak-balik (B5).

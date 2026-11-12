@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Models\OwnerStock;
 use App\Models\StockAdjustment;
 use App\Models\StockMovement;
+use App\Support\HargaBeliGuard;
+use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -23,13 +25,14 @@ class OutletStockService
         array $attributes,
         string $referenceType,
         int $referenceId,
-        ?Authenticatable $user = null
+        ?Authenticatable $user = null,
+        ?string $hppSource = null
     ): OwnerStock {
         if ($qty < 1) {
             throw new RuntimeException('Qty penerimaan outlet harus lebih besar dari nol.');
         }
 
-        return DB::transaction(function () use ($outletId, $productId, $qty, $hpp, $attributes, $referenceType, $referenceId, $user) {
+        return DB::transaction(function () use ($outletId, $productId, $qty, $hpp, $attributes, $referenceType, $referenceId, $user, $hppSource) {
             $batchNumber = $attributes['batch_number'] ?? null;
             // withTrashed(): unique index ikut menghitung baris yang sudah di-soft-delete
             $ownerStock = OwnerStock::withTrashed()
@@ -43,8 +46,14 @@ class OutletStockService
                 $ownerStock->restore();
             }
 
+            // keep_batch_hpp (Delivery Order, K2-a): batch yang sudah berisi stok mempertahankan HPP-nya,
+            // tidak ditimpa dan tidak memicu "HPP berbeda". Batch baru / kosong memakai $hpp dari pemanggil.
+            if ($ownerStock && ! empty($attributes['keep_batch_hpp']) && (int) $ownerStock->qty > 0) {
+                $hpp = (float) $ownerStock->hpp;
+            }
+
             if (! $ownerStock) {
-                $ownerStock = OwnerStock::create([
+                $ownerStock = $this->writeHpp($hppSource, fn () => OwnerStock::create([
                     'owner_id' => $outletId,
                     'product_id' => $productId,
                     'stock_id' => $attributes['stock_id'] ?? null,
@@ -56,7 +65,7 @@ class OutletStockService
                     'source_type' => $attributes['source_type'] ?? $referenceType,
                     'source_id' => $attributes['source_id'] ?? $referenceId,
                     'created_by' => $user?->getAuthIdentifier(),
-                ]);
+                ]));
             }
 
             if ((int) $ownerStock->qty > 0 && (float) $ownerStock->hpp !== $hpp) {
@@ -64,7 +73,7 @@ class OutletStockService
             }
 
             $ownerStock->increment('qty', $qty);
-            $ownerStock->update([
+            $this->writeHpp($hppSource, fn () => $ownerStock->update([
                 'stock_id' => $attributes['stock_id'] ?? $ownerStock->stock_id,
                 'sku' => $attributes['sku'] ?? $ownerStock->sku,
                 'expired_at' => $attributes['expired_at'] ?? $ownerStock->expired_at,
@@ -72,7 +81,7 @@ class OutletStockService
                 'hpp' => $hpp,
                 'source_type' => $attributes['source_type'] ?? $referenceType,
                 'source_id' => $attributes['source_id'] ?? $referenceId,
-            ]);
+            ]));
 
             StockMovement::create([
                 'product_id' => $productId,
@@ -96,6 +105,19 @@ class OutletStockService
 
             return $ownerStock->fresh();
         });
+    }
+
+    /**
+     * Jalankan penulisan hpp batch atas nama jalur yang sah (HargaBeliGuard).
+     * $source null = pemanggil belum menandai jalurnya: tetap dicatat/ditolak oleh guard.
+     *
+     * @template T
+     * @param  Closure():T  $callback
+     * @return T
+     */
+    private function writeHpp(?string $source, Closure $callback)
+    {
+        return $source === null ? $callback() : HargaBeliGuard::allow($source, $callback);
     }
 
     public function issue(
