@@ -41,6 +41,16 @@ class OutletPriceController extends Controller
      */
     private const LAST_VIEW_SESSION = 'outlet_prices.last_view';
 
+    /** Kolom diskon di outlet_prices: Disc Reg, Disc 1-4, Disc Toko (dasar filter "dengan / tanpa diskon"). */
+    private const DISCOUNT_COLUMNS = [
+        'disc_brand_value',
+        'disc_tambahan_value',
+        'disc_tambahan_2_value',
+        'disc_tambahan_3_value',
+        'disc_tambahan_4_value',
+        'disc_toko_value',
+    ];
+
     /**
      * Penyesuaian Harga Outlet (nominal, Rp) yang otomatis terisi di form saat outlet tertentu dipilih.
      * Format: [outlet_id => nominal].
@@ -96,6 +106,11 @@ class OutletPriceController extends Controller
                 }
             }
 
+            // Filter diskon yang tadi aktif ikut kembali (berlaku untuk folder, semua, terakhir, dan pencarian).
+            if (in_array($view['promo'] ?? '', ['diskon', 'tanpa'], true)) {
+                $params['promo'] = $view['promo'];
+            }
+
             // Halaman (pagination) terakhir yang dibuka; tidak dipakai setelah hapus karena halamannya bisa hilang.
             if ($withPage && (int) ($view['page'] ?? 1) > 1) {
                 $params['page'] = (int) $view['page'];
@@ -118,6 +133,8 @@ class OutletPriceController extends Controller
     private function returnParamsAfterCreate(?int $outletId): array
     {
         $params = $this->indexParams($outletId, false);
+        // Aturan baru bisa saja tidak cocok dengan filter diskon yang aktif, jadi filter dilepas.
+        unset($params['promo']);
 
         return (isset($params['folder']) || isset($params['search']))
             ? $params
@@ -153,6 +170,9 @@ class OutletPriceController extends Controller
         $showAll = $search === '' && $activeFolder === null && $request->boolean('all');
         // Folder khusus "Terakhir Ditambahkan": semua barang, urut dari aturan harga yang paling baru dibuat.
         $showLatest = $search === '' && $activeFolder === null && ! $showAll && $request->boolean('latest');
+        // Filter diskon: '' = semua, 'diskon' = punya diskon, 'tanpa' = tanpa diskon (nilai lain dianggap semua).
+        $promo = (string) $request->query('promo', '');
+        $promo = in_array($promo, ['diskon', 'tanpa'], true) ? $promo : '';
         $mode = ! $outletId ? 'none' : (($search !== '' || $activeFolder !== null || $showAll || $showLatest) ? 'products' : 'folders');
 
         if ($outletId) {
@@ -160,6 +180,7 @@ class OutletPriceController extends Controller
                 'folder' => $activeFolder ?? '',
                 'all' => $showAll,
                 'latest' => $showLatest,
+                'promo' => $mode === 'products' ? $promo : '',
                 'page' => $mode === 'products' ? max(1, (int) $request->query('page', 1)) : 1,
             ]]);
         }
@@ -169,7 +190,7 @@ class OutletPriceController extends Controller
         $totalAll = $folderIndex->totalOf($folders);
 
         $prices = $mode === 'products'
-            ? $this->pricePage($outletId, $search, $activeFolder, $showLatest)
+            ? $this->pricePage($outletId, $search, $activeFolder, $showLatest, $promo)
             : new LengthAwarePaginator([], 0, 25);
 
         if ($outletId) {
@@ -219,6 +240,7 @@ class OutletPriceController extends Controller
             'showAll' => $showAll,
             'showLatest' => $showLatest,
             'searchTerm' => $search,
+            'promoFilter' => $promo,
             'categories' => $mode === 'products' ? Category::orderBy('name')->get(['id', 'name']) : collect(),
         ]);
     }
@@ -295,7 +317,7 @@ class OutletPriceController extends Controller
      * 25 id di halaman ini. Search berbasis AWALAN (LIKE 'kata%') lewat subquery IN.
      * Urutan: lihat komentar di orderBy di bawah (folder & pencarian = terakhir diperbarui, Semua Barang = A-Z).
      */
-    private function pricePage(int $outletId, string $search, ?string $folder = null, bool $latest = false): LengthAwarePaginator
+    private function pricePage(int $outletId, string $search, ?string $folder = null, bool $latest = false, string $promo = ''): LengthAwarePaginator
     {
         $prefix = $search !== '' ? addcslashes($search, '\\%_') . '%' : null;
 
@@ -307,6 +329,19 @@ class OutletPriceController extends Controller
                 ->where(fn ($productQuery) => $productQuery
                     ->where('name', 'like', $prefix)
                     ->orWhere('code', 'like', $prefix))))
+            // Filter diskon langsung dari kolom outlet_prices (tanpa hitung per baris).
+            ->when($promo === 'diskon', function ($query) {
+                $query->where(function ($q) {
+                    foreach (self::DISCOUNT_COLUMNS as $column) {
+                        $q->orWhereRaw("COALESCE(outlet_prices.{$column}, 0) > 0");
+                    }
+                });
+            })
+            ->when($promo === 'tanpa', function ($query) {
+                foreach (self::DISCOUNT_COLUMNS as $column) {
+                    $query->whereRaw("COALESCE(outlet_prices.{$column}, 0) <= 0");
+                }
+            })
             ->leftJoin('products', 'products.id', '=', 'outlet_prices.product_id')
             // Di dalam folder: kunci folder dihitung dari nama produk (sama dengan hitungan card folder).
             ->when($folder !== null, fn ($query) => app(PriceFolderIndex::class)->constrain($query, $folder))
@@ -324,7 +359,7 @@ class OutletPriceController extends Controller
             )
             ->paginate(25)
             ->withQueryString()
-            ->appends(['outlet_id' => $outletId, 'search' => $search]);
+            ->appends(array_filter(['outlet_id' => $outletId, 'search' => $search, 'promo' => $promo], fn ($v) => $v !== '' && $v !== null));
 
         $ids = $page->getCollection()->pluck('id');
         $order = $ids->flip();
