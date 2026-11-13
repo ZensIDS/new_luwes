@@ -24,6 +24,11 @@ use Throwable;
  * batch MINUS tidak dihitung). Totalnya DITAMBAHKAN ke stok saat ini (bukan di-set ulang), jadi penjualan atau
  * Set Stock sistem baru yang terjadi sesudahnya tidak ikut terhapus.
  *
+ * PENJUALAN YANG TERLANJUR TERJADI: setelah Set Stock lama menimpa, stok toko bisa sudah dikurangi penjualan, bahkan
+ * sampai stok minus (batch MINUS). Command ini menambahkan stok yang hilang ke batch utama, lalu OTOMATIS
+ * menutup batch MINUS (bila ada) dengan stok tambahan itu, sama seperti pelunasan stok minus saat barang masuk.
+ * Hasil akhir = stok seharusnya (stok awal + qty set ulang - penjualan sesudahnya).
+ *
  * Default = simulasi. Pakai --apply untuk menulis. Backup database dulu sebelum --apply. Aman dijalankan ulang.
  *
  * Contoh:
@@ -117,11 +122,12 @@ class FixSetStockAdditive extends Command
         $display = array_map(fn ($p) => [
             $p['outlet_id'], $p['product_id'], $p['code'], mb_substr((string) $p['name'], 0, 28),
             implode(',', array_map(fn ($id) => '#' . $id, $p['fix_drafts'])),
-            $p['missing'], $p['current'], $p['current'] + $p['missing'],
+            $p['missing'], $p['current'], $p['deficit'] ?: '-',
+            $p['current'] + $p['missing'] - $p['settle'], max(0, $p['deficit'] - $p['settle']) ?: '-',
         ], $plans);
 
         $this->table(
-            ['Toko', 'ID Prod', 'Kode', 'Nama', 'Draft dikoreksi', 'Tambah', 'Stok skrg', 'Stok baru'],
+            ['Toko', 'ID Prod', 'Kode', 'Nama', 'Draft dikoreksi', 'Tambah', 'Stok skrg', 'Minus skrg', 'Stok baru', 'Minus baru'],
             $display
         );
         $this->info(count($plans) . ' produk perlu dikoreksi, total tambahan ' . array_sum(array_column($plans, 'missing')) . ' unit.');
@@ -166,6 +172,37 @@ class FixSetStockAdditive extends Command
                         null,
                         $this->marker($plan['fix_drafts']) . ' +' . $plan['missing'] . ' (set ulang < 72 jam seharusnya menambah)'
                     );
+
+                    // Penjualan sesudah Set Stock yang menimpa bisa melebihi stok sistem -> ada batch MINUS.
+                    // Stok yang baru dikembalikan dipakai menutup minus itu (dihitung ulang saat apply, bukan dari simulasi).
+                    $deficit = OwnerStock::deficit()
+                        ->where('owner_id', $plan['outlet_id'])
+                        ->where('product_id', $plan['product_id'])
+                        ->where('qty', '<', 0)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if ($deficit) {
+                        $settle = (int) min($plan['missing'], abs((int) $deficit->qty), (int) $target);
+                        if ($settle >= 1) {
+                            $stockService->adjust(
+                                $primary->fresh(),
+                                $target - $settle,
+                                today()->toDateString(),
+                                'Pelunasan stok minus (koreksi Set Stock 72 jam)',
+                                null,
+                                'Pelunasan stok minus: ' . $settle . ' dipakai menutup penjualan yang terlanjur terjadi sebelum koreksi Set Stock'
+                            );
+                            $stockService->adjust(
+                                $deficit,
+                                (float) $deficit->qty + $settle,
+                                today()->toDateString(),
+                                'Pelunasan stok minus (koreksi Set Stock 72 jam)',
+                                null,
+                                'Pelunasan stok minus: ' . $settle . ' ditutup dari stok hasil koreksi Set Stock 72 jam'
+                            );
+                        }
+                    }
                     $done++;
                 });
             } catch (Throwable $e) {
@@ -261,6 +298,15 @@ class FixSetStockAdditive extends Command
             return;
         }
 
+        $current = (int) OwnerStock::where('owner_id', $outletId)
+            ->where('product_id', $productId)
+            ->notDeficit()
+            ->sum('qty');
+        $deficitQty = abs(min(0, (int) OwnerStock::deficit()
+            ->where('owner_id', $outletId)
+            ->where('product_id', $productId)
+            ->sum('qty')));
+
         $plans[] = [
             'outlet_id' => $outletId,
             'product_id' => $productId,
@@ -268,10 +314,9 @@ class FixSetStockAdditive extends Command
             'name' => $info->name ?? '',
             'fix_drafts' => $fixDrafts,
             'missing' => $missing,
-            'current' => (int) OwnerStock::where('owner_id', $outletId)
-                ->where('product_id', $productId)
-                ->notDeficit()
-                ->sum('qty'),
+            'current' => $current,
+            'deficit' => $deficitQty,
+            'settle' => min($missing, $deficitQty),
         ];
     }
 
