@@ -326,11 +326,13 @@ class OutletStockService
      * - Belum ada batch sama sekali: dibuat batch baru (nomor batch otomatis) dengan HPP yang diberikan.
      * - Sudah ada batch: seluruh qty ditaruh di batch yang jadi "HPP terbaru" (sama dengan LatestHpp),
      *   batch lain milik produk itu di outlet yang sama dijadikan 0. HPP batch lama tidak diubah.
-     * - Batch MINUS ikut dijadikan 0, sehingga stok akhir = qty yang diinput.
+     * - Stok MINUS (penjualan yang terlanjur terjadi saat stok sistem kurang) TIDAK dihapus: qty Set Stock dipakai
+     *   menutup minus itu lebih dulu. Contoh: stok -2, Set Stock 10 -> stok akhir 8 (bukan 10). Bila qty lebih kecil
+     *   dari minusnya, minus yang tersisa tetap tercatat.
      * Setiap perubahan dicatat sebagai StockAdjustment + StockMovement. Dipanggil di dalam
      * transaksi pemanggil, jadi bisa digabung menjadi satu transaksi besar (semua atau tidak sama sekali).
      *
-     * @return array{before:int,after:int}|null null bila qty sudah sama (tidak ada perubahan)
+     * @return array{before:int,after:int,mode:string,settled:int}|null null bila qty sudah sama (tidak ada perubahan)
      */
     public function setInitialStock(
         int $outletId,
@@ -361,8 +363,8 @@ class OutletStockService
                 $targetQty = $before + $inputQty;
             }
 
-            // Batch MINUS (penjualan melebihi stok sistem) ikut dinolkan: qty Set Stock adalah stok
-            // fisik sebenarnya, jadi hasil akhirnya persis sebesar qty yang diinput.
+            // Batch MINUS (penjualan melebihi stok sistem) dikunci di sini; qty Set Stock akan menutupnya
+            // lebih dulu (lihat $settle di bawah), bukan menghapusnya.
             $deficit = OwnerStock::deficit()
                 ->where('owner_id', $outletId)
                 ->where('product_id', $productId)
@@ -371,8 +373,9 @@ class OutletStockService
                 ->first();
 
             if ($batches->isEmpty()) {
+                // Tidak ada barang yang masuk: stok minus (bila ada) dibiarkan apa adanya.
                 if ($targetQty < 1) {
-                    return $deficit ? $this->clearDeficit($deficit, $before, $targetQty, $draftId, $user) : null;
+                    return null;
                 }
 
                 $batchNumber = $this->generateSetStockBatchNumber($outletId, $productId);
@@ -394,23 +397,39 @@ class OutletStockService
             }
 
             $date = today()->toDateString();
+
+            // Penjualan yang sudah terjadi (stok minus) ditutup lebih dulu oleh qty Set Stock,
+            // sisanya menjadi stok. Contoh: minus 2 + Set Stock 10 = stok 8.
+            $settle = $deficit ? (int) min($targetQty, abs((int) $deficit->qty)) : 0;
+            $finalQty = $targetQty - $settle;
+
             $notes = 'Set Stock toko (draft #' . $draftId . ')'
-                . ($additive ? ' - ditambahkan +' . $inputQty . ' (set ulang < ' . self::SET_STOCK_ADD_WINDOW_HOURS . ' jam)' : '');
+                . ($additive ? ' - ditambahkan +' . $inputQty . ' (set ulang < ' . self::SET_STOCK_ADD_WINDOW_HOURS . ' jam)' : '')
+                . ($settle > 0 ? ' - ' . $settle . ' dipakai menutup stok minus' : '');
             $changed = false;
 
             foreach ($batches as $batch) {
-                $target = $batch->is($primary) ? $targetQty : 0;
+                $target = $batch->is($primary) ? $finalQty : 0;
                 if ($this->adjust($batch, (float) $target, $date, 'Set Stock', $user, $notes)) {
                     $changed = true;
                 }
             }
 
-            if ($deficit) {
-                $this->adjust($deficit, 0.0, $date, 'Set Stock', $user, $notes . ' - stok minus dinolkan');
+            if ($settle >= 1) {
+                $this->adjust(
+                    $deficit,
+                    (float) $deficit->qty + $settle,
+                    $date,
+                    'Set Stock',
+                    $user,
+                    'Set Stock toko (draft #' . $draftId . ') - stok minus ditutup ' . $settle . ' dari Set Stock'
+                );
                 $changed = true;
             }
 
-            return $changed ? ['before' => $before, 'after' => $targetQty, 'mode' => $additive ? 'add' : 'replace'] : null;
+            return $changed
+                ? ['before' => $before, 'after' => $finalQty, 'mode' => $additive ? 'add' : 'replace', 'settled' => $settle]
+                : null;
         });
     }
 
@@ -456,14 +475,6 @@ class OutletStockService
         }
 
         return $found;
-    }
-
-    /** Set Stock ke 0 tanpa batch biasa, tetapi masih ada stok minus: cukup nolkan batch MINUS. */
-    protected function clearDeficit(OwnerStock $deficit, int $before, int $targetQty, int $draftId, ?Authenticatable $user): array
-    {
-        $this->adjust($deficit, 0.0, today()->toDateString(), 'Set Stock', $user, 'Set Stock toko (draft #' . $draftId . ') - stok minus dinolkan');
-
-        return ['before' => $before, 'after' => $targetQty];
     }
 
     /** Batch tujuan Set Stock: batch tersedia terbaru, kalau tidak ada batch terbaru apa pun (sama dengan LatestHpp). */
