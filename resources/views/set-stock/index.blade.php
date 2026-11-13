@@ -63,7 +63,7 @@
                 @else
                     <div class="alert alert-warning" style="margin-bottom:14px;">
                         <i class="fa fa-exclamation-triangle"></i>
-                        Qty yang disimpan <b>menimpa</b> stok toko <b>{{ $selectedOutlet->name }}</b> (stok sebelumnya ditampilkan di kartu produk).
+                        Qty yang disimpan <b>menimpa</b> stok toko <b>{{ $selectedOutlet->name }}</b> (stok sebelumnya ditampilkan di kartu produk). Bila stok sedang <b>minus</b> (sudah ada penjualan), qty ini menutup minus lebih dulu: misal minus 2 + Set Stock 10 = stok 8.
                         Keranjang dipakai bersama oleh semua pengguna toko ini dan otomatis tersimpan.
                     </div>
 
@@ -232,9 +232,15 @@
                 const p = current.product, raw = $.trim($qty.val());
                 if (raw === '' || !/^\d+$/.test(raw)) { $('#pPreview').hide(); return; }
                 const q = parseInt(raw, 10);
-                const msg = p.additive
-                    ? 'Stok sistem ' + nf.format(p.stock_now) + ' + ' + nf.format(q) + ' = ' + nf.format(p.stock_now + q) + ' (ditambah, bukan menimpa)'
-                    : 'Stok akan menjadi ' + nf.format(q) + ' (menimpa stok sistem ' + nf.format(p.stock_now) + ')';
+                const d = p.deficit || 0; // saldo minus (<= 0), ditutup lebih dulu oleh qty Set Stock
+                let msg;
+                if (p.additive) {
+                    msg = 'Stok sistem ' + nf.format(p.stock_now) + ' + ' + nf.format(q) + ' = ' + nf.format(p.stock_now + q) + ' (ditambah, bukan menimpa)';
+                } else if (d < 0) {
+                    msg = 'Stok minus ' + nf.format(d) + ' ditutup dulu: ' + nf.format(q) + ' ' + nf.format(d) + ' = ' + nf.format(q + d) + ' (minus tidak dihapus)';
+                } else {
+                    msg = 'Stok akan menjadi ' + nf.format(q) + ' (menimpa stok sistem ' + nf.format(p.stock_now) + ')';
+                }
                 $('#pPreview').show().text(msg);
             }
             $qty.on('input', updatePreview);
@@ -321,7 +327,7 @@
                 }
                 $('#basketBody').html(rows.map(function (i) {
                     return '<tr data-id="' + i.id + '" data-version="' + i.version + '" data-product="' + i.product_id + '">' +
-                        '<td class="nm"><div title="' + esc(i.name) + '">' + esc(i.name) + (i.additive ? ' <span class="label label-warning" title="Set ulang < 72 jam: qty ditambah ke stok">+ tambah</span>' : '') + '</div><small>' + esc(i.code) + ' &middot; ' + esc(i.updated_by || '-') + ' ' + esc(i.updated_at || '') + (i.scan_count > 1 ? ' &middot; ' + i.scan_count + 'x scan' : '') + '<br>' + (i.additive ? 'Stok ' + nf.format(i.stock_now) + ' + ' + nf.format(i.qty) + ' = <b>' + nf.format(i.stock_now + i.qty) + '</b>' : 'Stok ' + nf.format(i.stock_now) + ' &rarr; <b>' + nf.format(i.qty) + '</b>') + '</small></td>' +
+                        '<td class="nm"><div title="' + esc(i.name) + '">' + esc(i.name) + (i.additive ? ' <span class="label label-warning" title="Set ulang < 72 jam: qty ditambah ke stok">+ tambah</span>' : '') + '</div><small>' + esc(i.code) + ' &middot; ' + esc(i.updated_by || '-') + ' ' + esc(i.updated_at || '') + (i.scan_count > 1 ? ' &middot; ' + i.scan_count + 'x scan' : '') + '<br>' + (i.additive ? 'Stok ' + nf.format(i.stock_now) + ' + ' + nf.format(i.qty) + ' = <b>' + nf.format(i.stock_now + i.qty) + '</b>' : 'Stok ' + nf.format(i.stock_now) + ' &rarr; <b>' + nf.format(i.qty + (i.deficit || 0)) + '</b>' + (i.deficit < 0 ? ' (minus ' + nf.format(i.deficit) + ' ditutup)' : '')) + '</small></td>' +
                         '<td style="text-align:right"><input type="number" min="0" step="1" class="form-control input-sm q" value="' + i.qty + '" data-orig="' + i.qty + '"></td>' +
                         '<td style="text-align:right"><button type="button" class="btn btn-danger btn-xs btn-del"><i class="fa fa-trash"></i></button></td></tr>';
                 }).join(''));
