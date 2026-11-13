@@ -35,7 +35,8 @@ class PembelianProduct extends Model
 
     public function product()
     {
-        return $this->belongsTo(Product::class);
+        // withTrashed: PO lama tetap bisa dibuka walau produknya sudah dihapus (soft delete).
+        return $this->belongsTo(Product::class)->withTrashed();
     }
 
     public function getActivitylogOptions(): LogOptions

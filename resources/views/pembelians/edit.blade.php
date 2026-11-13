@@ -87,13 +87,15 @@
                                         <tr data-item-id="{{ $stock->id }}">
                                             <td>
                                                 <select class="form-control select2 product" data-placeholder="Pilih Product"
-                                                    required style="width:100%" data-current-product="{{ $stock->product_id }}">
+                                                    required style="width:100%" data-current-product="{{ $stock->product_id }}"
+                                                    data-current-label="{{ $stock->product ? trim(($stock->product->code ?? '') . ' ' . $stock->product->name) . ($stock->product->trashed() ? ' (produk sudah dihapus)' : '') : 'Produk #' . $stock->product_id . ' (tidak ditemukan)' }}"
+                                                    data-current-serialized="{{ $stock->product?->is_serialized ? 1 : 0 }}">
                                                 </select>
                                             </td>
                                             <td>
                                                 <input type="number" class="form-control qty" required
-                                                    value="{{ $stock->product->is_serialized ? ($stock->serial_numbers ? count($stock->serial_numbers) : 1) : $stock->qty }}"
-                                                    min="1" {{ $stock->product->is_serialized ? 'readonly' : '' }}>
+                                                    value="{{ $stock->product?->is_serialized ? ($stock->serial_numbers ? count($stock->serial_numbers) : 1) : $stock->qty }}"
+                                                    min="1" {{ $stock->product?->is_serialized ? 'readonly' : '' }}>
                                             </td>
                                             <td class="konversi-ratio text-center text-muted">-</td>
                                             <td style="display:none">
@@ -566,6 +568,15 @@
 
                 // Set nilai yang sesuai
                 if (currentProductId && products.some(p => p.id == currentProductId)) {
+                    $select.val(currentProductId);
+                } else if (currentProductId && $select.data('current-label')) {
+                    // Produk tidak ada di daftar supplier (mis. sudah dihapus): tetap tampilkan agar baris PO tidak kosong.
+                    $select.append($('<option>', {
+                        value: currentProductId,
+                        text: $select.data('current-label'),
+                        'data-serialized': $select.data('current-serialized') ? 1 : 0,
+                        'data-harga': 0,
+                    }));
                     $select.val(currentProductId);
                 }
 
