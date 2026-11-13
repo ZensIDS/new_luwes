@@ -35,6 +35,13 @@ $(function () {
         modal.find('.rpt-error').hide();
     });
 
+    // ---- Preset satu tanggal (Hari ini / Kemarin) ----
+    $(document).on('click', '.js-preset-day', function () {
+        var d = new Date();
+        d.setDate(d.getDate() + parseInt($(this).data('offset'), 10));
+        $(this).closest('.modal').find('.js-day').val(fmt(d));
+    });
+
     // ---- Unduh Excel ----
     $(document).on('click', '.js-export', function (event) {
         event.preventDefault();

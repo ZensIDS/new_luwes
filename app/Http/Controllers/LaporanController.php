@@ -33,6 +33,7 @@ use App\Exports\StockExport;
 use App\Exports\StockOpnameExport;
 use App\Exports\OutletAllStockExport;
 use App\Exports\OutletMinimalStockExport;
+use App\Exports\KassaHarianExport;
 use App\Exports\OutletPenjualanExport;
 use App\Exports\OutletRafaksiExport;
 use App\Exports\OutletReturExport;
@@ -221,6 +222,18 @@ class LaporanController extends Controller
     public function exportOutletPenjualan(Request $request)
     {
         return Excel::download(new OutletPenjualanExport($request), ReportMeta::fileNameFor($request, 'Penjualan-Toko'));
+    }
+
+    /** Laporan Penjualan Kassa harian: satu baris per sesi kasir pada satu tanggal. */
+    public function exportOutletKassa(Request $request)
+    {
+        $request->validate([
+            'tanggal' => ['nullable', 'date_format:Y-m-d'],
+        ]);
+
+        $export = new KassaHarianExport($request);
+
+        return Excel::download($export, $export->fileName());
     }
 
     public function exportOutletRafaksi(Request $request)

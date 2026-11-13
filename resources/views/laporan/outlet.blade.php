@@ -9,6 +9,9 @@
             ['id'=>'outlet_penjualan', 'title'=>'Penjualan Outlet', 'icon'=>'fa-shopping-cart', 'color'=>'green', 'xls'=>'laporan.outlet.penjualan',
              'date'=>true, 'outlet'=>true, 'cashier'=>true, 'rafaksi'=>false,
              'desc'=>'Penjualan per kasir lengkap dengan rekap metode pembayaran, bon, dan setoran akhir.'],
+            ['id'=>'outlet_kassa', 'title'=>'Penjualan Kassa Harian', 'icon'=>'fa-calculator', 'color'=>'blue', 'xls'=>'laporan.outlet.kassa',
+             'date'=>false, 'single_date'=>true, 'outlet'=>true, 'cashier'=>false, 'rafaksi'=>false,
+             'desc'=>'Per kassa pada satu tanggal: nama kasir, saldo awal, penjualan tunai dan per metode bayar, bon, setoran, dan setoran total.'],
             ['id'=>'outlet_rafaksi', 'title'=>'Rafaksi Outlet', 'icon'=>'fa-tags', 'color'=>'amber', 'xls'=>'laporan.outlet.rafaksi',
              'date'=>true, 'outlet'=>true, 'cashier'=>false, 'rafaksi'=>true,
              'desc'=>'Penjualan produk pada periode rafaksi beserta diskon per unit dan total diskon.'],
@@ -33,6 +36,14 @@
              'desc'=>'Retur barang dari toko ke gudang.'],
         ],
     ];
+
+    // Laporan Kassa memuat angka kas: hanya superadmin / owner / staff-outlet (sama dengan route-nya).
+    if (! in_array(auth()->user()?->role, ['superadmin', 'owner', 'staff-outlet'], true)) {
+        $groups['Penjualan'] = array_values(array_filter(
+            $groups['Penjualan'],
+            fn ($r) => $r['id'] !== 'outlet_kassa'
+        ));
+    }
 @endphp
 
 <section class="content-header">

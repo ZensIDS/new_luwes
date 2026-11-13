@@ -38,6 +38,18 @@
                     </div>
                 @endif
 
+                @if (!empty($r['single_date']))
+                    <div class="rpt-presets">
+                        <button type="button" class="btn btn-default btn-xs js-preset-day" data-offset="0">Hari ini</button>
+                        <button type="button" class="btn btn-default btn-xs js-preset-day" data-offset="-1">Kemarin</button>
+                    </div>
+                    <div class="form-group">
+                        <label>Tanggal</label>
+                        <input type="date" class="form-control js-day" data-param="tanggal"
+                            value="{{ now()->format('Y-m-d') }}">
+                    </div>
+                @endif
+
                 @if (!empty($r['outlet']))
                     <div class="form-group">
                         <label>Outlet</label>
@@ -77,7 +89,7 @@
                     </div>
                 @endif
 
-                @if (empty($r['date']) && empty($r['outlet']) && empty($r['cashier']) && empty($r['rafaksi']))
+                @if (empty($r['date']) && empty($r['single_date']) && empty($r['outlet']) && empty($r['cashier']) && empty($r['rafaksi']))
                     <p class="text-muted" style="margin:0;">Laporan ini tidak memerlukan filter.</p>
                 @endif
 

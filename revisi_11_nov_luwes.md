@@ -1,6 +1,6 @@
 # TODOLIST: Revisi Campaign, Cetak Voucher/Label, Set Stock, Laporan Kassa, Filter Master Harga
 
-Status: **PENGERJAAN** - Tahap A selesai, Tahap B selesai, Tahap C selesai, Tahap D selesai (menunggu cek manual). Berikutnya: Tahap E.
+Status: **PENGERJAAN** - Tahap A-D selesai, Tahap E selesai (menunggu cek manual). Berikutnya: Tahap F.
 
 Cara kerja:
 - Dikerjakan bertahap, satu tahap sekali jalan.
@@ -16,7 +16,7 @@ Cara kerja:
 | B     | Cetak voucher: samakan dengan label harga (A4 68mm, mode)    | Sedang, 1-2 file   | [x]    |
 | C     | Campaign: modal pilih produk + "Isi per bundle" (Bundle saja)| Sedang, 2-3 file   | [x]    |
 | D     | Export Excel Set Stock (sudah / belum di-set)                | Sedang, ~4 file    | [x]    |
-| E     | Laporan penjualan kassa harian                               | Terbesar, 5-6 file | [ ]    |
+| E     | Laporan penjualan kassa harian                               | Terbesar, 5-6 file | [x]    |
 | F     | Master Harga Jual: filter produk dengan / tanpa diskon       | Kecil, 2 file      | [ ]    |
 
 Urutan: A -> B -> C -> D -> E -> F (yang kecil dulu, yang terbesar terakhir; F bisa dimajukan bila diminta).
@@ -88,7 +88,7 @@ Temuan: data di set_stock_draft_items (barcode, qty, user, waktu), tidak dihapus
 
 ---
 
-## TAHAP E - Laporan penjualan kassa harian  [ ]
+## TAHAP E - Laporan penjualan kassa harian  [x]
 File: Export baru, LaporanController, routes/web.php, laporan/outlet.blade.php, laporan/partials/_modal.blade.php (+ _script), OutletLaporanService / CashierSession bila perlu.
 
 Keputusan:
@@ -99,11 +99,18 @@ Keputusan:
 
 Temuan: data sudah ada di cashier_sessions, penjualans, cashier_drawer_entries, dan CashierSession::breakdownFor() (dipakai Tutup Kasir). Penjualan yang sudah dihapus otomatis tidak terhitung.
 
-- [ ] E1. Kartu baru "Penjualan Kassa" di Laporan Outlet; modal laporan mode "satu tanggal" + outlet.
-- [ ] E2. Satu baris per sesi kasir: Kassa (+ list shift), jam buka/tutup, Saldo Awal, jumlah transaksi, Total Penjualan, Tunai, metode bayar lain (kolom dinamis), Voucher (lembar + nominal, termasuk cashback), Bon, Kas Masuk, Setoran Tutup Kasir, Total Setoran, Uang Disisakan, Uang Seharusnya, Uang Fisik, Selisih.
-- [ ] E3. Tanda "BELUM TUTUP" untuk sesi yang belum ditutup.
-- [ ] E4. Baris total di bawah; styling mengikuti export Laporan Toko lain.
-- [ ] E5. Pastikan penjualan terhapus tidak terhitung.
+Keputusan implementasi (bisa diubah bila tidak sesuai):
+- Sesi dipilih berdasarkan tanggal buka (opened_at). Sesi yang dibuka hari sebelumnya dan masih terbuka tidak ikut tampil di tanggal ini.
+- Angka penjualan memakai CashierSession::breakdownFor() (sama dengan Tutup Kasir / History Kasir), jadi retur penjualan tidak dikurangkan di laporan ini.
+- Sesi BELUM TUTUP: Uang Seharusnya dihitung berjalan (tunai + kas masuk - bon); Setoran Tutup Kasir, Uang Disisakan, Uang Fisik, Selisih diisi "-".
+- Kolom Kassa = nama pembuka sesi (shift pertama); Akun Kassa = akun login; kolom Shift = semua shift beserta jamnya.
+- Route dibatasi role superadmin | owner | staff-outlet (memuat angka kas); kartu disembunyikan untuk role lain.
+
+- [x] E1. Kartu baru "Penjualan Kassa" di Laporan Outlet; modal laporan mode "satu tanggal" + outlet.
+- [x] E2. Satu baris per sesi kassa, kolom: Nama Kassa (akun), Nama Kasir (looping semua shift), Saldo Awal, Penjualan Tunai, Penjualan per metode bayar (kolom dinamis), Bon, Setoran (setoran tutup kasir), Setoran Total (Bon + Setoran). Tanpa kolom lain (revisi dari rancangan awal).
+- [x] E3. Tanda "BELUM TUTUP" untuk sesi yang belum ditutup.
+- [x] E4. Baris total di bawah; styling mengikuti export Laporan Toko lain.
+- [x] E5. Pastikan penjualan terhapus tidak terhitung.
 - [ ] E6. Cek manual oleh user: satu hari dengan beberapa sesi + satu sesi belum tutup.
 
 ---
@@ -141,3 +148,5 @@ Pertanyaan untuk F (bila tidak dijawab, dipakai usulan di kurung):
 - Tahap C selesai: resources/views/campaigns/form.blade.php + CampaignController.php (searchProducts menambah page/per_page). Select2 produk diganti tombol "Pilih Produk" + modal (cari, centang, paging server 20/halaman, pilihan bertahan, "N dipilih", tombol Tambahkan). Scan barcode, hapus produk, dan mode edit (qty lama tetap) memakai logika yang sama. Kolom "Isi per bundle" hanya tampil untuk Bundle (header dan baris), Flash Sale/Voucher disembunyikan. Menunggu cek manual (C6).
 - Penyesuaian Tahap C: daftar produk di modal Pilih Produk dan scan barcode dibatasi ke produk yang harga jualnya sudah diatur (CampaignController::priceSetProducts, whereHas outletPrices currentlyActive). Scan produk tanpa harga jual menampilkan pesan khusus.
 - Tahap D selesai: app/Exports/SetStockExport.php (baru, kerangka BaseLaporanTokoExport + SheetWriter), SetStockController::export, route set-stock.export (GET, throttle 20/menit, di grup role superadmin|staff-outlet), tombol + modal Export Excel di set-stock/index.blade.php. Kolom: Barcode, Nama Barang, Kategori, Qty, Status (warna per status), baris TOTAL. Sudah = item draft pada rentang tanggal WIB (terbaru per produk); Belum = produk berharga jual aktif di outlet yang tidak ada di daftar sudah; qty belum = "-". Menunggu cek manual (D6).
+- Tahap E selesai: app/Exports/KassaHarianExport.php (baru, kerangka BaseLaporanTokoExport + SheetWriter), LaporanController::exportOutletKassa, route laporan.outlet.kassa (GET, throttle 10/menit), kartu "Penjualan Kassa Harian" di laporan/outlet.blade.php, modal mode satu tanggal (_modal) + preset Hari ini / Kemarin (_script). Satu baris per sesi: Outlet, Kassa, Akun Kassa, Shift, Jam Buka/Tutup, Status, Saldo Awal, Jumlah Transaksi, Total Penjualan, Tunai, metode bayar lain (kolom dinamis), Voucher (lembar + Rp, termasuk cashback), Bon, Kas Masuk, Setoran Tutup Kasir, Total Setoran (bon + setoran tutup), Uang Disisakan, Uang Seharusnya, Uang Fisik, Selisih (hijau = pas, merah = selisih). Sesi belum tutup berlatar kuning dengan status BELUM TUTUP. Baris TOTAL di bawah. Menunggu cek manual (E6).
+- Revisi Tahap E: kolom laporan dipangkas sesuai permintaan (tanpa jam, status, voucher, kas masuk, uang disisakan/seharusnya/fisik, selisih). Nama Kassa = akun kassa, Nama Kasir = daftar shift. Sesi belum tutup: baris kuning, "(BELUM TUTUP)" di nama kassa, setoran "-". Bila semua outlet dipilih, dikelompokkan per outlet. File: KassaHarianExport.php, outlet.blade.php (deskripsi kartu).
