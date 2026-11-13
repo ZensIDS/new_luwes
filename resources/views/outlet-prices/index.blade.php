@@ -115,6 +115,9 @@
                     </select>
                     <input class="form-control input-sm" name="search" value="{{ request('search') }}"
                         placeholder="Awalan nama/kode produk">
+                    @if ($mode === 'products' && ($promoFilter ?? '') !== '')
+                        <input type="hidden" name="promo" value="{{ $promoFilter }}">
+                    @endif
                     <button class="btn btn-primary btn-sm">Filter</button>
                 </form>
             </div>
@@ -179,6 +182,35 @@
                             @endif
                             &middot; {{ number_format($prices->total(), 0, ',', '.') }} produk
                         </span>
+                        <form method="GET" action="{{ route('outlet-prices.index') }}" class="form-inline" style="display:inline-block;margin-left:12px">
+                            <input type="hidden" name="outlet_id" value="{{ $selectedOutletId }}">
+                            @if ($searchTerm !== '')
+                                <input type="hidden" name="search" value="{{ $searchTerm }}">
+                            @elseif ($activeFolder !== null)
+                                <input type="hidden" name="folder" value="{{ $activeFolder }}">
+                            @elseif ($showLatest)
+                                <input type="hidden" name="latest" value="1">
+                            @else
+                                <input type="hidden" name="all" value="1">
+                            @endif
+                            <label class="control-label" for="promo-filter" style="font-weight:normal">Diskon:</label>
+                            <select id="promo-filter" name="promo" class="form-control input-sm" onchange="this.form.submit()"
+                                @if (($promoFilter ?? '') !== '') style="border-color:#e0577a" @endif>
+                                <option value="" {{ ($promoFilter ?? '') === '' ? 'selected' : '' }}>Semua</option>
+                                <option value="diskon" {{ ($promoFilter ?? '') === 'diskon' ? 'selected' : '' }}>Dengan diskon</option>
+                                <option value="tanpa" {{ ($promoFilter ?? '') === 'tanpa' ? 'selected' : '' }}>Tanpa diskon</option>
+                            </select>
+                            @if (($promoFilter ?? '') !== '')
+                                <a class="btn btn-default btn-sm" title="Hapus filter diskon"
+                                    href="{{ route('outlet-prices.index', array_filter([
+                                        'outlet_id' => $selectedOutletId,
+                                        'search' => $searchTerm,
+                                        'folder' => $searchTerm === '' ? $activeFolder : null,
+                                        'latest' => ($searchTerm === '' && $activeFolder === null && $showLatest) ? 1 : null,
+                                        'all' => ($searchTerm === '' && $activeFolder === null && ! $showLatest) ? 1 : null,
+                                    ])) }}">Reset</a>
+                            @endif
+                        </form>
                     </div>
                 @endif
                 <table id="{{ $selectedOutletId ? 'example1' : 'outlet-prices-empty-table' }}" class="table table-bordered table-striped">
