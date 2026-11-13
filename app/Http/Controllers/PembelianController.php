@@ -1403,7 +1403,7 @@ class PembelianController extends Controller
     {
         if ($pembelian->is_published) {
             // Muat produk sekali (bukan Product::find per item).
-            $productsById = Product::whereIn('id', collect($request)->pluck('product_id')->filter()->unique()->all())
+            $productsById = Product::withTrashed()->whereIn('id', collect($request)->pluck('product_id')->filter()->unique()->all())
                 ->get()
                 ->keyBy('id');
 
@@ -1468,7 +1468,7 @@ class PembelianController extends Controller
             }
         } else {
             if (isset($request->product)) {
-                $productsById = Product::whereIn('id', collect($request->product)->pluck('product_id')->filter()->unique()->all())
+                $productsById = Product::withTrashed()->whereIn('id', collect($request->product)->pluck('product_id')->filter()->unique()->all())
                     ->get()
                     ->keyBy('id');
 
