@@ -812,18 +812,12 @@ class RequestOrderController extends Controller
 
                 // CATATAN: Kode pengubah status $requestOrder->update(['status' => 'processing']) SUDAH DIHAPUS TOTAL.
                 // Status RO Anda di database dijamin akan TETAP BENAR-BENAR 'pending'.
-            } elseif ($pickingList->items()->count() === 0) {
-                // Self-healing: header picking list sudah ada tapi items-nya kosong
-                // (nyangkut dari crash/deploy sebelumnya) -> lengkapi sekarang
-                $validItems = $requestOrder->items()->where('qty_requested', '>', 0)->get();
-
-                if ($validItems->isNotEmpty()) {
-                    $this->generatePickingListItems($pickingList, $validItems);
-
-                    \Log::info('Picking list items berhasil di-generate ulang (self-heal)', [
-                        'picking_list_id' => $pickingList->id,
-                    ]);
-                }
+            } elseif (in_array($pickingList->status, ['draft', 'in_progress'], true)) {
+                // Picking list dibuat SEKALI saat halaman proses pertama dibuka, lalu jadi snapshot.
+                // Kalau RO diedit sesudahnya (produk ditambah/dihapus), picking list harus mengikuti,
+                // kalau tidak halaman proses hanya menampilkan item lama.
+                // Juga menangani header picking list yang nyangkut tanpa item (self-healing).
+                $this->reconcilePickingListWithPendingRequestOrder($pickingList, $requestOrder);
             }
 
             DB::commit();
@@ -843,6 +837,57 @@ class RequestOrderController extends Controller
         $pickingList->load(['items.product', 'items.stock']);
 
         return view('request-orders.process', compact('requestOrder', 'pickingList'));
+    }
+
+    /**
+     * Samakan daftar PRODUK di picking list dengan item RO yang masih pending.
+     *
+     * - Produk baru di RO (qty > 0) yang belum ada di picking list  -> ditambahkan.
+     * - Produk di picking list yang sudah tidak ada / qty-nya 0 di RO -> dihapus
+     *   (stok baru dipotong di completeAndShip, jadi aman secara stok).
+     * - Produk yang sudah ada di keduanya TIDAK disentuh: "Qty Diminta" di halaman proses bisa
+     *   diubah manual (updateQtyToPick) dan hasil scan/pick tetap dipertahankan.
+     */
+    protected function reconcilePickingListWithPendingRequestOrder(PickingList $pickingList, RequestOrder $requestOrder): void
+    {
+        $validItems = $requestOrder->items()
+            ->with('product')
+            ->where('qty_requested', '>', 0)
+            ->get()
+            ->groupBy('product_id');
+
+        $pickingItems = $pickingList->items()->get()->groupBy('product_id');
+
+        $toAdd = $validItems->diffKeys($pickingItems);
+        $toRemove = $pickingItems->diffKeys($validItems);
+
+        foreach ($toAdd as $productId => $items) {
+            $first = $items->first();
+
+            PickingListItem::create([
+                'picking_list_id' => $pickingList->id,
+                'product_id'      => $productId,
+                'stock_id'        => null,
+                'qty_to_pick'     => $items->sum('qty_requested'),
+                'qty_picked'      => 0,
+                'location'        => $first->product->lokasi ?? '-',
+                'sku'             => null,
+                'is_picked'       => 0,
+            ]);
+        }
+
+        if ($toRemove->isNotEmpty()) {
+            $pickingList->items()->whereIn('product_id', $toRemove->keys()->all())->delete();
+        }
+
+        if ($toAdd->isNotEmpty() || $toRemove->isNotEmpty()) {
+            \Log::info('Picking list disamakan dengan item RO terbaru', [
+                'picking_list_id'  => $pickingList->id,
+                'request_order_id' => $requestOrder->id,
+                'added'            => $toAdd->keys()->all(),
+                'removed'          => $toRemove->keys()->all(),
+            ]);
+        }
     }
 
     /**
