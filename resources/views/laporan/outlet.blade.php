@@ -20,6 +20,9 @@
              'desc'=>'Transaksi retur, barang yang diretur, dan barang penggantinya.'],
         ],
         'Stok' => [
+            ['id'=>'outlet_stok_harian', 'title'=>'Stok Toko Harian', 'icon'=>'fa-clipboard', 'color'=>'blue', 'xls'=>'laporan.outlet.stok-harian',
+             'date'=>false, 'single_date'=>true, 'outlet'=>true, 'brand'=>true, 'cashier'=>false, 'rafaksi'=>false,
+             'desc'=>'Cek stok tiap pagi per barang: stok awal, stok masuk, stok keluar, dan sisa pada satu tanggal. Bisa difilter per brand (nama depan barang).'],
             ['id'=>'outlet_all_stock', 'title'=>'All Stock Outlet', 'icon'=>'fa-cubes', 'color'=>'teal', 'xls'=>'laporan.outlet.all-stock',
              'date'=>false, 'outlet'=>true, 'cashier'=>false, 'rafaksi'=>false,
              'desc'=>'Stok per barcode produk, termasuk HPP, HPP + pajak, dan rekap persediaan.'],

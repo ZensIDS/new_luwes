@@ -134,8 +134,8 @@
                         </div>
                         <div class="form-group">
                             <label for="exportName">Filter nama depan produk</label>
-                            <input type="text" name="nama_awal" id="exportName" class="form-control" maxlength="100" autocomplete="off" placeholder="Contoh: indomie (kosongkan untuk semua produk)">
-                            <p class="help-block" style="margin-bottom:0;">Hanya produk yang namanya diawali teks ini yang di-export.</p>
+                            <select name="nama_awal" id="exportName" class="form-control" style="width:100%;" data-placeholder="Ketik 2 huruf nama depan, mis. IN (kosongkan untuk semua produk)"><option value=""></option></select>
+                            <p class="help-block" style="margin-bottom:0;">Ketik minimal 2 huruf lalu pilih dari daftar (atau pakai teks yang diketik). Hanya produk yang namanya diawali teks ini yang di-export.</p>
                         </div>
                         <div class="row">
                             <div class="col-xs-6 form-group">
@@ -398,6 +398,38 @@
                         $btn.html('<i class="fa fa-save"></i> Simpan Set Stock');
                         renderBasket();
                     });
+            });
+
+            // Filter nama depan produk (export): Select2 + saran brand dari folder Master Harga Jual
+            $('#exportModal').on('shown.bs.modal', function () {
+                const $name = $('#exportName');
+                if ($name.data('select2')) { return; }
+                $name.select2({
+                    dropdownParent: $('#exportModal'),
+                    width: '100%',
+                    allowClear: true,
+                    tags: true,
+                    placeholder: $name.data('placeholder') || '',
+                    minimumInputLength: 2,
+                    createTag: function (params) {
+                        const term = $.trim(params.term || '').toUpperCase();
+                        return term.length >= 2 ? { id: term, text: term } : null;
+                    },
+                    language: {
+                        inputTooShort: function () { return 'Ketik minimal 2 huruf nama depan produk'; },
+                        searching: function () { return 'Mencari...'; }
+                    },
+                    ajax: {
+                        url: @json(route('laporan.outlet.stok-harian.brands')),
+                        dataType: 'json',
+                        delay: 250,
+                        cache: true,
+                        data: function (params) { return { q: $.trim(params.term || ''), outlet_id: outletId }; },
+                        processResults: function (items) {
+                            return { results: $.map(items, function (brand) { return { id: brand, text: brand }; }) };
+                        }
+                    }
+                });
             });
 
             // pulihkan keranjang saat halaman dibuka

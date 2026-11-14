@@ -63,13 +63,13 @@
                     </div>
                 @endif
 
-                @if (!empty($r['folder']))
+                @if (!empty($r['brand']))
                     <div class="form-group">
-                        <label>Cakupan (nama awal barang)</label>
-                        <select class="form-control js-folder" data-param="folder" data-url="{{ route('laporan.outlet.product-folders') }}" disabled>
-                            <option value="">Semua barang</option>
-                        </select>
-                        <p class="help-block" style="margin:6px 0 0;font-size:12px;">Pilih outlet dulu. Folder = kata pertama nama barang, sama seperti folder di Master Harga Jual.</p>
+                        <label>Brand (nama depan barang)</label>
+                        <select class="form-control js-brand" data-param="brand" style="width:100%;"
+                            data-url="{{ route('laporan.outlet.stok-harian.brands') }}"
+                            data-placeholder="Ketik 2 huruf nama depan, mis. IN"><option value=""></option></select>
+                        <span class="help-block" style="margin-bottom:0;">Ketik minimal 2 huruf, lalu pilih brand dari daftar. Kosongkan untuk semua brand.</span>
                     </div>
                 @endif
 

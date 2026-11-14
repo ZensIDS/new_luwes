@@ -42,6 +42,47 @@ $(function () {
         $(this).closest('.modal').find('.js-day').val(fmt(d));
     });
 
+    // ---- Brand (nama depan barang): Select2 + AJAX, muncul saat ketik >= 2 huruf ----
+    $(document).on('shown.bs.modal', '.rpt-modal', function () {
+        var modal = $(this);
+        modal.find('.js-brand').each(function () {
+            var el = $(this);
+            if (el.data('select2')) { return; }
+            el.select2({
+                dropdownParent: modal,
+                width: '100%',
+                allowClear: true,
+                placeholder: el.data('placeholder') || '',
+                minimumInputLength: 2,
+                language: {
+                    inputTooShort: function () { return 'Ketik minimal 2 huruf nama depan barang'; },
+                    noResults: function () { return 'Brand tidak ditemukan'; },
+                    searching: function () { return 'Mencari...'; }
+                },
+                ajax: {
+                    url: el.data('url'),
+                    dataType: 'json',
+                    delay: 250,
+                    cache: true,
+                    data: function (params) {
+                        return {
+                            q: $.trim(params.term || ''),
+                            outlet_id: modal.find('[data-param="outlet_id"]').val() || ''
+                        };
+                    },
+                    processResults: function (items) {
+                        return { results: $.map(items, function (brand) { return { id: brand, text: brand }; }) };
+                    }
+                }
+            });
+        });
+    });
+
+    // Ganti outlet -> kosongkan brand (saran brand tergantung outlet)
+    $(document).on('change', '.rpt-modal [data-param="outlet_id"]', function () {
+        $(this).closest('.modal').find('.js-brand').val(null).trigger('change');
+    });
+
     // ---- Unduh Excel ----
     $(document).on('click', '.js-export', function (event) {
         event.preventDefault();
