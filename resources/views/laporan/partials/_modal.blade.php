@@ -62,6 +62,16 @@
                     </div>
                 @endif
 
+                @if (!empty($r['brand']))
+                    <div class="form-group">
+                        <label>Brand (nama depan barang)</label>
+                        <select class="form-control js-brand" data-param="brand" style="width:100%;"
+                            data-url="{{ route('laporan.outlet.stok-harian.brands') }}"
+                            data-placeholder="Ketik 2 huruf nama depan, mis. IN"><option value=""></option></select>
+                        <span class="help-block" style="margin-bottom:0;">Ketik minimal 2 huruf, lalu pilih brand dari daftar. Kosongkan untuk semua brand.</span>
+                    </div>
+                @endif
+
                 @if (!empty($r['cashier']))
                     <div class="form-group">
                         <label>Akun kasir</label>

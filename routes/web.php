@@ -284,6 +284,8 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/laporan/outlet/rafaksi', [LaporanController::class, 'exportOutletRafaksi'])->name('laporan.outlet.rafaksi')->middleware('throttle:10,1');
     Route::get('/laporan/outlet/retur', [LaporanController::class, 'exportOutletRetur'])->name('laporan.outlet.retur')->middleware('throttle:10,1');
     Route::get('/laporan/outlet/all-stock', [LaporanController::class, 'exportOutletAllStock'])->name('laporan.outlet.all-stock')->middleware('throttle:10,1');
+    Route::get('/laporan/outlet/stok-harian', \App\Http\Controllers\LaporanStokHarianController::class)->name('laporan.outlet.stok-harian')->middleware('throttle:10,1');
+    Route::get('/laporan/outlet/stok-harian/brands', [\App\Http\Controllers\LaporanStokHarianController::class, 'brands'])->name('laporan.outlet.stok-harian.brands')->middleware('throttle:120,1,search');
     Route::get('/laporan/outlet/product-list', [LaporanController::class, 'exportOutletProductList'])->name('laporan.outlet.product-list')->middleware('throttle:10,1');
     Route::get('/laporan/outlet/product-folders', [LaporanController::class, 'outletProductFolders'])->name('laporan.outlet.product-folders');
     Route::get('/laporan/pembelian/{id?}', [LaporanController::class, 'exportPembelian'])->name('laporan.pembelian');
