@@ -485,7 +485,8 @@ class ProductController extends Controller
 
         $ignoreId = (int) $request->query('ignore_id');
 
-        $product = Product::withTrashed()
+        // Produk yang sudah dihapus (soft delete) tidak dihitung: barcode-nya boleh dipakai lagi.
+        $product = Product::query()
             ->where('code', $code)
             ->when($ignoreId > 0, fn ($query) => $query->where('id', '!=', $ignoreId))
             ->first(['id', 'code', 'name', 'deleted_at']);

@@ -44,7 +44,8 @@ class ProductRequest extends FormRequest
             'pic' => 'nullable',
             'code' => [
                 'required',
-                Rule::unique('products', 'code')->ignore($productId),
+                // Produk yang sudah dihapus (soft delete) tidak dihitung: barcode-nya boleh dipakai lagi.
+                Rule::unique('products', 'code')->ignore($productId)->whereNull('deleted_at'),
             ],
             'name' => 'required',
             'category_id' => 'required',
