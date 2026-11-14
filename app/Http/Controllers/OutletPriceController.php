@@ -812,7 +812,7 @@ class OutletPriceController extends Controller
         }
 
         $rules = [
-            'code' => ['required', 'string', 'max:255', \Illuminate\Validation\Rule::unique('products', 'code')->ignore($product->id)],
+            'code' => ['required', 'string', 'max:255', \Illuminate\Validation\Rule::unique('products', 'code')->ignore($product->id)->whereNull('deleted_at')],
             'name' => ['required', 'string', 'max:255'],
             'category_id' => ['required', 'integer', 'exists:categories,id'],
         ];
