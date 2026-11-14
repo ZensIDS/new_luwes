@@ -261,6 +261,34 @@ class RequestOrderController extends Controller
             return response()->json(['status' => 'error', 'message' => 'Produk sudah ada di list.'], 422);
         }
 
+        // Cegah RO dobel: produk yang sama sudah diminta outlet yang sama di RO lain yang belum selesai.
+        // Hanya dicek saat baris baru / produknya diganti (bukan tiap qty diubah), dan bisa dilewati
+        // dengan konfirmasi user (force=1) bila memang sengaja minta lagi.
+        if (! $request->boolean('force') && $requestOrder->owner_id) {
+            $existingItem = ! empty($data['id'])
+                ? $requestOrder->items()->whereKey($data['id'])->first()
+                : null;
+
+            if (! $existingItem || (int) $existingItem->product_id !== (int) $data['product_id']) {
+                $sameOutlet = $this->openRequestRows($requestOrder)
+                    ->where('product_id', (int) $data['product_id'])
+                    ->where('owner_id', (int) $requestOrder->owner_id)
+                    ->values();
+
+                if ($sameOutlet->isNotEmpty()) {
+                    $list = $sameOutlet
+                        ->map(fn ($r) => "{$r['code']} (qty {$r['qty']}, {$r['status']})")
+                        ->implode(', ');
+
+                    return response()->json([
+                        'status'  => 'error',
+                        'code'    => 'duplicate_open_request',
+                        'message' => "Produk ini sudah diminta outlet yang sama di RO yang belum selesai: {$list}.",
+                    ], 422);
+                }
+            }
+        }
+
         $item = RequestOrderItem::updateOrCreate(
             ['id' => $data['id'] ?? null, 'request_order_id' => $requestOrder->id],
             [
@@ -337,6 +365,53 @@ class RequestOrderController extends Controller
             ->with('toast_success', 'Request berhasil dibuat.');
     }
 
+    /**
+     * Item dari RO LAIN yang masih aktif (pending/approved/partial/processing, belum dikirim).
+     * RO draf yang belum dipilih outletnya diabaikan. Item 'rejected' (sisa tak teralokasi) tidak dihitung.
+     * Dipakai untuk memperingatkan permintaan dobel untuk produk yang sama.
+     *
+     * @return \Illuminate\Support\Collection<int, array>
+     */
+    protected function openRequestRows(RequestOrder $current)
+    {
+        return RequestOrderItem::query()
+            ->join('request_orders', 'request_orders.id', '=', 'request_order_items.request_order_id')
+            ->leftJoin('outlets', 'outlets.id', '=', 'request_orders.owner_id')
+            ->whereNull('request_orders.deleted_at')
+            ->where('request_orders.id', '!=', $current->id)
+            ->whereNotNull('request_orders.owner_id')
+            ->whereIn('request_orders.status', ['pending', 'approved', 'partial', 'processing'])
+            ->where('request_order_items.qty_requested', '>', 0)
+            ->where(function ($q) {
+                $q->whereNull('request_order_items.item_status')
+                    ->orWhere('request_order_items.item_status', '!=', 'rejected');
+            })
+            ->get([
+                'request_order_items.product_id',
+                'request_order_items.qty_requested',
+                'request_orders.id as ro_id',
+                'request_orders.code as ro_code',
+                'request_orders.owner_id',
+                'request_orders.status as ro_status',
+                'outlets.name as outlet_name',
+            ])
+            ->groupBy(fn ($r) => $r->product_id . '-' . $r->ro_id)
+            ->map(function ($rows) {
+                $first = $rows->first();
+
+                return [
+                    'product_id' => (int) $first->product_id,
+                    'ro_id'      => (int) $first->ro_id,
+                    'code'       => $first->ro_code,
+                    'owner_id'   => (int) $first->owner_id,
+                    'outlet'     => $first->outlet_name,
+                    'status'     => $first->ro_status,
+                    'qty'        => (int) $rows->sum('qty_requested'),
+                ];
+            })
+            ->values();
+    }
+
     public function edit(RequestOrder $requestOrder)
     {
         // opsional: kalau request sudah bukan pending lagi (misal sudah diverifikasi),
@@ -349,6 +424,8 @@ class RequestOrderController extends Controller
             'requestOrder' => $requestOrder,
             'outlets'      => Outlet::get(),
             'categories'   => Category::orderBy('name')->get(),
+            // Permintaan lain yang masih aktif (belum dikirim) -> dipakai untuk peringatan produk dobel.
+            'openRequests' => $this->openRequestRows($requestOrder),
             // Angka stok di form RO = stok fisik gudang (SUM stocks.qty), sama dengan menu Stok/Produk.
             // (Validasi alokasi SKU saat picking tetap memakai qty_available.)
             'products'     => Product::with(['stocks' => function ($q) {

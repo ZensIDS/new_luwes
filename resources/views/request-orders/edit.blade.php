@@ -195,6 +195,8 @@
         const csrfToken = '{{ csrf_token() }}';
         let products   = @json($products);
         let categories = @json($categories);
+        // Permintaan lain yang masih aktif (belum dikirim): [{product_id, ro_id, code, owner_id, outlet, status, qty}]
+        const openRequests = @json($openRequests);
 
         const routes = {
             autosaveHeader: `/request-orders/${requestOrderId}/autosave-header`,
@@ -229,6 +231,47 @@
             });
         }
 
+        function openRequestsFor(productId) {
+            return openRequests.filter(function (r) { return r.product_id == productId; });
+        }
+
+        // Peringatan di bawah pilihan produk: produk ini sudah diminta di RO lain yang belum selesai,
+        // dan apakah total permintaan aktif (RO lain + qty di RO ini) melebihi stok gudang.
+        function updateOpenWarning($row) {
+            const productId = $row.find('.product-select').val();
+            let $box = $row.find('.open-request-warning');
+            if (!$box.length) {
+                $box = $('<div class="open-request-warning small" style="margin-top:6px;"></div>');
+                $row.find('.product-select').closest('td').append($box);
+            }
+            $box.empty();
+            if (!productId) return;
+
+            const others = openRequestsFor(productId);
+            if (!others.length) return;
+
+            const ownerId = $('#owner_id').val();
+            const available = parseInt($row.find('.product-select option:selected').data('available')) || 0;
+            const qty = parseInt($row.find('.qty-input').val()) || 0;
+            const othersQty = others.reduce(function (sum, r) { return sum + r.qty; }, 0);
+            const sameOutlet = others.some(function (r) { return ownerId && r.owner_id == ownerId; });
+
+            const lines = others.map(function (r) {
+                return r.code + ' (' + (r.outlet || '-') + ', qty ' + r.qty + ', ' + r.status + ')';
+            });
+
+            $box.append($('<div class="text-' + (sameOutlet ? 'danger' : 'warning') + '">').append(
+                $('<i class="fa fa-exclamation-triangle"></i>'),
+                document.createTextNode(' Produk ini sudah diminta di RO lain yang belum selesai: ' + lines.join('; '))
+            ));
+
+            if (othersQty + qty > available) {
+                $box.append($('<div class="text-danger">').text(
+                    'Total permintaan aktif ' + (othersQty + qty) + ' melebihi stok gudang ' + available + '. Barang bisa tidak cukup saat diproses.'
+                ));
+            }
+        }
+
         function populateProductSelect($select, selectedId = null) {
             $select.empty().append('<option value="">Select Product</option>');
             $.each(products, function(index, product) {
@@ -240,6 +283,7 @@
                     'data-satuan-besar': product.satuan_besar || '',
                     'data-satuan': product.satuan || 'PCS',
                     text: product.code + ' - ' + product.name + ' : ' + available
+                        + (openRequestsFor(product.id).length ? '  ⚠ sudah ada di RO lain' : '')
                 });
                 $select.append(option);
             });
@@ -300,18 +344,20 @@
         $('#request_date, #notes').on('input change', autosaveHeader);
 
         // ---- item row autosave ----
-        function autosaveRow($row) {
+        function autosaveRow($row, force = false) {
             const productId = $row.find('.product-select').val();
             const qty       = $row.find('.qty-input').val();
             const itemId    = $row.data('item-id') || null;
 
             if (!productId) return;
 
+            updateOpenWarning($row);
+
             $.ajax({
                 url: routes.autosaveItem,
                 method: 'POST',
                 headers: { 'X-CSRF-TOKEN': csrfToken },
-                data: { id: itemId, product_id: productId, qty_requested: qty },
+                data: { id: itemId, product_id: productId, qty_requested: qty, force: force ? 1 : 0 },
                 success: function(res) {
                     $row.data('item-id', res.item_id);
                     $row.attr('data-item-id', res.item_id);
@@ -320,11 +366,32 @@
                 },
                 error: function(xhr) {
                     const msg = xhr.responseJSON?.message || 'Gagal menyimpan item';
+
+                    // RO dobel: tanya dulu, jangan langsung ditolak (kadang memang sengaja minta lagi).
+                    if (xhr.status === 422 && xhr.responseJSON?.code === 'duplicate_open_request') {
+                        if (confirm(msg + '\n\nTetap tambahkan produk ini ke RO ini?')) {
+                            autosaveRow($row, true);
+                        } else {
+                            // Batal: kosongkan pilihan produk di baris baru agar tidak ikut tersimpan.
+                            $row.find('.product-select').val('').trigger('change.select2');
+                            $row.find('.available-qty').text('-');
+                            $row.find('.konversi-info').text('-');
+                            $row.find('.open-request-warning').empty();
+                            $row.find('.row-status').html('<span class="label label-default">Dibatalkan</span>');
+                        }
+                        return;
+                    }
+
                     $row.find('.row-status').html('<span class="label label-danger">Gagal</span>');
                     showIndicator(msg, true);
                 },
             });
         }
+
+        // Ganti outlet -> hitung ulang peringatan (RO dobel di outlet yang sama ditandai merah).
+        $('#owner_id').on('change', function () {
+            $('#items-table tbody tr.item-row').each(function () { updateOpenWarning($(this)); });
+        });
 
         let qtyDebounce;
         $(document).on('change', '.product-select', function() {
@@ -356,6 +423,7 @@
 
         $(document).on('input', '.qty-input', function() {
             let $row = $(this).closest('tr');
+            updateOpenWarning($row);
             clearTimeout(qtyDebounce);
             qtyDebounce = setTimeout(function() {
                 autosaveRow($row);
