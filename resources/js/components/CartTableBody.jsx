@@ -1,4 +1,4 @@
-import React, { forwardRef, useImperativeHandle, useRef, useState } from "react";
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { formatRupiah } from "../utils";
 // Label promo per item: "Nama promo -Rp x" (dari breakdown server); bila tidak ada rincian, pakai nama promo saja.
 const promoLabels = (item) => {
@@ -20,6 +20,7 @@ const CartTableBody = forwardRef(({
     handleClickDelete,
     selectedCartProductId,
     setSelectedCartProductId,
+    lastScan,
 }, ref) => {
     const rowRefs = useRef([]);
     // Qty yang sedang diketik disimpan sementara (draft) dan baru dikirim saat Enter / keluar dari kolom,
@@ -106,25 +107,44 @@ const CartTableBody = forwardRef(({
         altAlone.current = false;
     };
 
+    // Kilatan singkat pada baris yang baru di-scan (tiap scan, termasuk scan ulang produk yang sama).
+    // Memakai Web Animations API supaya tidak butuh CSS tambahan; warna akhirnya = warna highlight tetap ("success").
+    useEffect(() => {
+        if (!lastScan) return;
+        const row = rowRefs.current[cart.findIndex((item) => item.id === lastScan.id)];
+        if (!row || typeof row.children[0]?.animate !== "function") return;
+        Array.from(row.children).forEach((cell) => cell.animate(
+            [{ backgroundColor: "#ffd54f" }, { backgroundColor: "#dff0d8" }],
+            { duration: 1200, easing: "ease-out" }
+        ));
+    }, [lastScan]);
+
     useImperativeHandle(ref, () => ({
         focusFirstRow: () => focusRow(0),
     }), [cart]);
 
     return (
         <>
-            {cart.map((c, index) => (
+            {cart.map((c, index) => {
+                // Item yang terakhir di-scan di-highlight hijau (menang atas "info"/"warning"); bila baris itu juga
+                // sedang dipilih, kotak biru tetap menandai pilihannya.
+                const isLastScanned = Boolean(lastScan) && lastScan.id === c.id;
+                const isSelected = selectedCartProductId === c.id;
+
+                return (
                 <tr
                     key={`item-${ index }`}
                     ref={(element) => { rowRefs.current[index] = element; }}
                     tabIndex="0"
-                    className={selectedCartProductId === c.id ? "info" : (Number(c.oversold_qty || 0) > 0 ? "warning" : "")}
+                    className={isLastScanned ? "success" : (isSelected ? "info" : (Number(c.oversold_qty || 0) > 0 ? "warning" : ""))}
+                    style={isLastScanned && isSelected ? { outline: "2px solid #31708f", outlineOffset: -2 } : undefined}
                     onClick={() => setSelectedCartProductId(c.id)}
                     onFocus={() => setSelectedCartProductId(c.id)}
                     onKeyDown={(event) => handleRowKeyDown(event, index)}
                     onKeyUp={handleRowKeyUp}
                     title="Tab/Shift+Tab atau ↑/↓ untuk berpindah item; Enter / Insert / Option untuk edit qty"
                 >
-                    <td>
+                    <td style={isLastScanned ? { boxShadow: "inset 5px 0 0 #3c763d" } : undefined}>
                         <span>{c.name}</span>
                         {Number(c.oversold_qty || 0) > 0 && (
                             <div
@@ -240,7 +260,8 @@ const CartTableBody = forwardRef(({
                         {formatRupiah(c.cashier_subtotal ?? (c.harga_jual * c.pivot.qty))}
                     </td>
                 </tr>
-            ))}
+                );
+            })}
         </>
     );
 });

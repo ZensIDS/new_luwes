@@ -27,41 +27,59 @@ class CartController extends Controller
             $cartItem->cart_seq = $seq;
         }
 
-        $allocations = [];
-        foreach ($cart as $cartIndex => $item) {
-            $ownerStocks = $item->ownerStocks()
+        // PERFORMA: semua data pendukung diambil SEKALI untuk seluruh isi keranjang (bukan 6-7 query per item).
+        // Sebelumnya waktu /cart naik lurus dengan jumlah item (ratusan query untuk keranjang besar), dan /cart
+        // dipanggil ulang setelah SETIAP scan, sehingga kasir makin lambat saat keranjang makin penuh.
+        $productIds = $cart->pluck('id')->unique()->values()->all();
+
+        // Batch yang bisa dijual, urutan FIFO sama dengan CashierSaleService (created_at, lalu id).
+        $ownerStocksByProduct = $productIds
+            ? OwnerStock::query()
                 ->where('owner_id', $outletId)
+                ->whereIn('product_id', $productIds)
                 ->where('qty', '>', 0)
                 ->where(function ($expiryQuery) {
                     $expiryQuery->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
                 })
-                ->with('stock')
                 ->orderBy('created_at')
-                ->get();
-            // Syarat sama persis dengan query $ownerStocks di atas -> cukup dijumlahkan dari hasilnya (hemat 1 query per item).
+                ->orderBy('id')
+                ->get()
+                ->groupBy('product_id')
+            : collect();
+
+        // Aturan harga aktif per produk (unik per outlet + produk).
+        $rulesByProduct = $productIds
+            ? OutletPrice::query()
+                ->where('outlet_id', $outletId)
+                ->whereIn('product_id', $productIds)
+                ->currentlyActive()
+                ->get()
+                ->keyBy('product_id')
+            : collect();
+
+        // HPP terbaru semua produk sekaligus (2 query total).
+        $latestHppByProduct = app(\App\Services\LatestHpp::class)->forProducts((int) $outletId, $productIds);
+
+        $allocations = [];
+        foreach ($cart as $cartIndex => $item) {
+            $ownerStocks = $ownerStocksByProduct->get($item->id, collect());
+            // Syarat sama persis dengan query $ownerStocksByProduct di atas -> cukup dijumlahkan dari hasilnya.
             $item->availableStock = $ownerStocks->sum('qty');
             // Qty di keranjang yang melebihi stok sistem: tetap boleh dijual (jadi stok minus), hanya ditandai.
             $item->oversold_qty = max(0, max(1, (int) $item->pivot->qty) - (int) $item->availableStock);
 
-            $rule = OutletPrice::with('outlet')->where('outlet_id', $outletId)
-                ->where('product_id', $item->id)
-                ->currentlyActive()
-                ->first();
+            $rule = $rulesByProduct->get($item->id);
             $remainingQty = max(1, (int) $item->pivot->qty);
-            $firstPrice = null;
             // Harga memakai HPP terbaru untuk semua batch; stok tetap berkurang per batch (FIFO).
-            $latestHpp = app(\App\Services\LatestHpp::class)->forProduct((int) $outletId, (int) $item->id);
+            $latestHpp = (float) ($latestHppByProduct[$item->id] ?? 0.0);
+            // Harga per unit sama untuk semua batch produk ini -> cukup dihitung sekali per item.
+            $price = $calculator->calculateItem($latestHpp, $rule, $item);
+
             foreach ($ownerStocks as $ownerStock) {
                 if ($remainingQty <= 0) {
                     break;
                 }
-                $price = $calculator->calculateItem(
-                    $latestHpp,
-                    $rule,
-                    $item
-                );
                 $allocatedQty = min($remainingQty, (int) $ownerStock->qty);
-                $firstPrice ??= $price;
                 $allocations[] = [
                     'cart_index' => $cartIndex,
                     'product' => $item,
@@ -77,8 +95,6 @@ class CartController extends Controller
             // Sisa qty di atas stok sistem dihitung sebagai alokasi batch MINUS dengan harga yang
             // sama seperti checkout, supaya total di layar = total saat bayar.
             if ($remainingQty > 0) {
-                $price = $calculator->calculateItem($latestHpp, $rule, $item);
-                $firstPrice ??= $price;
                 $allocations[] = [
                     'cart_index' => $cartIndex,
                     'product' => $item,
