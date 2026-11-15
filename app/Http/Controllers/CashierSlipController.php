@@ -97,29 +97,49 @@ class CashierSlipController extends Controller
         }
         uasort($all, fn ($a, $b) => [! CashierSession::isCashPaymentName($a), $a] <=> [! CashierSession::isCashPaymentName($b), $b]);
 
+        // Metode bayar yang nama depannya ATM atau QRIS (mis. "ATM 2% ( KECUALI BRI & BNI )", "QRIS 0,7%",
+        // "QRIS BRI") digabung jadi satu baris "ATM" / "QRIS": jumlah transaksi dan totalnya diakumulasi.
+        // Baris gabungan menempati urutan metode pertama dari kelompoknya.
+        $mergedPrefixes = ['ATM', 'QRIS'];
+        $mergedAt = [];
+        $mergedSum = [];
         $payRows = [];
         foreach ($all as $key => $name) {
             $p = $byName[$key] ?? null;
-            $payRows[] = [$name . ' (' . ($p['count'] ?? 0) . ')', $this->n($p['total'] ?? 0), 0];
+            $prefix = collect($mergedPrefixes)->first(
+                fn ($candidate) => preg_match('/^' . preg_quote($candidate, '/') . '(?![\p{L}\p{N}])/iu', $name) === 1
+            );
+
+            if ($prefix === null) {
+                $payRows[] = [$name . ' (' . ($p['count'] ?? 0) . ')', $this->n($p['total'] ?? 0), 0];
+
+                continue;
+            }
+
+            if (! isset($mergedAt[$prefix])) {
+                $mergedAt[$prefix] = count($payRows);
+                $mergedSum[$prefix] = ['count' => 0, 'total' => 0.0];
+                $payRows[] = [$prefix, '', 0]; // diisi setelah semua metode kelompok ini dijumlahkan
+            }
+            $mergedSum[$prefix]['count'] += (int) ($p['count'] ?? 0);
+            $mergedSum[$prefix]['total'] += (float) ($p['total'] ?? 0);
+        }
+        foreach ($mergedAt as $prefix => $index) {
+            $payRows[$index] = [$prefix . ' (' . $mergedSum[$prefix]['count'] . ')', $this->n($mergedSum[$prefix]['total']), 0];
         }
         $payRows[] = ['Total', 'Rp ' . $this->n($breakdown['sales_total']), 1];
         if ($breakdown['voucher_count'] > 0) {
             $payRows[] = ['Voucher ' . $breakdown['voucher_count'] . ' lbr', $this->n($breakdown['voucher_total']), 0];
         }
 
-        $cashRows = [
-            ['Saldo awal', $this->n($session->opening_cash), 0],
-            ['Penjualan tunai', $this->n($session->cash_sales), 0],
-        ];
+        $cashRows = [];
         if ((float) $session->cash_in > 0) {
             $cashRows[] = ['Kas masuk', $this->n($session->cash_in), 0];
         }
         $cashRows[] = ['BON', '-' . $this->n($session->cash_out), 0];
         $cashRows[] = ['Tunai Komputer', 'Rp ' . $this->n($session->expected_cash), 1];
         $cashRows[] = ['Uang fisik', 'Rp ' . $this->n($session->closing_cash), 1];
-        $cashRows[] = ['Selisih', $diff == 0 ? 'Pas' : (($diff > 0 ? 'Lebih +' : 'Kurang -') . $this->n(abs($diff))), 1];
-        $cashRows[] = ['Setoran', $this->n($session->cash_removed), 0];
-        $cashRows[] = ['Saldo Stock', $this->n($session->carry_over_cash), 0];
+        $cashRows[] = ['Selisih', $diff == 0 ? 'Pas' : (($diff > 0 ? '+' : '-') . $this->n(abs($diff))), 1];
 
         $bonLines = $session->drawerEntries->where('type', 'bon')->sortBy('recorded_at')->values()
             ->map(fn ($e) => [
