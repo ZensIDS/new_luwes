@@ -3,46 +3,71 @@
 @section('title', 'History Kasir')
 
 @section('container')
+    <style>
+        .ch-table { margin-bottom:0; }
+        .ch-table > thead > tr > th { background:#f3f4f6; color:#374151; font-size:12px; text-transform:uppercase; letter-spacing:.3px; vertical-align:middle; white-space:nowrap; border-bottom:2px solid #d1d5db; }
+        .ch-table > tbody > tr.ch-main > td { vertical-align:middle; border-top:2px solid #d1d5db; background:#fff; }
+        .ch-table > tbody > tr.ch-detail > td { background:#f9fafb; border-top:1px dashed #e5e7eb; padding:12px 14px; }
+        .ch-table td.num, .ch-table th.num { text-align:right; white-space:nowrap; }
+        .ch-period strong { display:block; }
+        .ch-period small { color:#9ca3af; }
+        .ch-outlet small { display:block; color:#6b7280; line-height:1.5; }
+        .ch-shifts { margin:2px 0 0; padding-left:0; list-style:none; }
+        .ch-shifts li { font-size:12px; color:#6b7280; line-height:1.5; }
+        .ch-income { font-weight:700; color:#00a65a; }
+        .ch-actions .btn { margin:2px 2px 0 0; }
+        .ch-note { margin-top:8px; padding-top:8px; border-top:1px solid #e5e7eb; font-size:13px; }
+        .ch-note .ch-note-title { color:#6b7280; font-weight:600; }
+        .ch-drawer { margin-top:6px; font-size:13px; }
+        .ch-drawer .ch-entry { display:block; padding:2px 0; }
+        .ch-detail.is-hidden { display:none; }
+        .ch-toggle .fa { transition:transform .15s; }
+        .ch-toggle.is-open .fa { transform:rotate(180deg); }
+        .ch-help { color:#6b7280; font-size:12px; margin:0 0 12px; }
+    </style>
+
     <section class="content-header">
         <h1>History Kasir <small>Open, BON, dan tutup cash drawer</small></h1>
     </section>
     <section class="content">
-        <div class="box">
+        @php($rp = fn ($number) => 'Rp ' . number_format((float) $number, 0, ',', '.'))
+        @php($canSeeCash = $canSeeCash ?? false)
+        @php($colspan = $canSeeCash ? 11 : 8)
+        @php($authUser = auth()->user())
+        @php($editLogs = $canSeeCash
+            ? $activities->filter(fn ($a) => $a->subject_type === \App\Models\CashierSession::class && isset($a->properties['edit_number']))->groupBy('subject_id')
+            : collect())
+
+        <div class="box box-primary">
             <div class="box-header with-border">
-                <a href="{{ route('penjualan.index') }}" class="btn btn-default"><i class="fa fa-arrow-left"></i> Kembali ke penjualan</a>
-                <span class="text-muted" style="margin-left:10px;">Semua aktivitas dicatat dengan Spatie Activitylog.</span>
+                <a href="{{ route('penjualan.index') }}" class="btn btn-default btn-sm"><i class="fa fa-arrow-left"></i> Kembali ke penjualan</a>
+                <span class="text-muted small" style="margin-left:10px;">Semua aktivitas dicatat dengan Spatie Activitylog.</span>
+                <button type="button" class="btn btn-default btn-sm pull-right" id="chToggleAll"><i class="fa fa-expand"></i> Buka semua rincian</button>
             </div>
             <div class="box-body table-responsive">
-                @php($rp = fn ($number) => 'Rp ' . number_format((float) $number, 0, ',', '.'))
-                @php($canSeeCash = $canSeeCash ?? false)
-                @php($colspan = $canSeeCash ? 12 : 10)
-                @php($authUser = auth()->user())
-                @php($editLogs = $canSeeCash
-                    ? $activities->filter(fn ($a) => $a->subject_type === \App\Models\CashierSession::class && isset($a->properties['edit_number']))->groupBy('subject_id')
-                    : collect())
-                <p class="text-muted small" style="margin-bottom:8px;">
-                    <strong>Uang fisik</strong> = uang hasil penjualan tunai (ditambah kas masuk, dikurangi BON), dihitung terpisah dari
-                    <strong>saldo besok</strong>. <strong>Selisih</strong> = uang fisik &minus; kas seharusnya.
+                <p class="ch-help">
+                    <strong>Pendapatan</strong> = total penjualan semua metode bayar pada sesi tersebut.
+                    <strong>Uang fisik</strong> = uang tunai hasil penjualan (ditambah kas masuk, dikurangi BON).
+                    <strong>Selisih</strong> = uang fisik &minus; kas seharusnya.
                     Sesi yang ditutup sebelum perhitungan ini diperbarui tetap memakai angka lama.
                 </p>
-                <table class="table table-bordered table-striped">
+                <table class="table table-bordered ch-table">
                     <thead>
                         <tr>
                             <th>Periode</th>
                             <th>Outlet / Kassa</th>
-                            <th>Saldo awal</th>
                             @if ($canSeeCash)
-                                <th>Penjualan tunai</th>
+                                <th class="num">Pendapatan</th>
+                                <th class="num">Penjualan tunai</th>
                             @endif
-                            <th>BON</th>
+                            <th class="num">BON</th>
                             @if ($canSeeCash)
-                                <th>Kas seharusnya</th>
+                                <th class="num">Kas seharusnya</th>
                             @endif
-                            <th>Uang fisik</th>
-                            <th>Selisih</th>
-                            <th>Saldo besok</th>
-                            <th>Setoran tutup</th>
-                            <th>Total disetor/keluar</th>
+                            <th class="num">Uang fisik</th>
+                            <th class="num">Selisih</th>
+                            <th class="num">Setoran tutup</th>
+                            <th class="num">Total disetor/keluar</th>
                             <th>Status</th>
                         </tr>
                     </thead>
@@ -56,50 +81,51 @@
                             ])
                             @php($breakdown = $breakdowns[$session->id] ?? \App\Models\CashierSession::emptyBreakdown())
                             @php($difference = $isOpen ? null : (float) $session->discrepancy)
-                            <tr>
-                                <td>
-                                    {{ $session->opened_at?->format('d/m/Y H:i') }}<br>
-                                    <small class="text-muted">{{ $session->closed_at?->format('d/m/Y H:i') ?? 'masih berjalan' }}</small>
+                            <tr class="ch-main">
+                                <td class="ch-period">
+                                    <strong>{{ $session->opened_at?->format('d/m/Y H:i') }}</strong>
+                                    <small>s/d {{ $session->closed_at?->format('d/m/Y H:i') ?? 'masih berjalan' }}</small>
+                                    <button type="button" class="btn btn-default btn-xs ch-toggle" data-target="#ch-detail-{{ $session->id }}" style="margin-top:6px;"><i class="fa fa-chevron-down"></i> Rincian</button>
                                 </td>
-                                <td>
-                                    {{ $session->outlet?->name }}<br>
-                                    <small>Kassa (akun): {{ $session->cashier?->name ?? 'User dihapus' }}</small><br>
-                                    <small>Nama kasir:</small>
-                                    @forelse ($session->shifts as $shift)
-                                        <br><small>&bull; {{ $shift->name }} ({{ $shift->started_at?->format('H:i') }}–{{ $shift->ended_at?->format('H:i') ?? 'sekarang' }})</small>
-                                    @empty
-                                        <small>—</small>
-                                    @endforelse
+                                <td class="ch-outlet">
+                                    <strong>{{ $session->outlet?->name }}</strong>
+                                    <small>Kassa (akun): {{ $session->cashier?->name ?? 'User dihapus' }}</small>
+                                    <ul class="ch-shifts">
+                                        @forelse ($session->shifts as $shift)
+                                            <li>&bull; {{ $shift->name }} ({{ $shift->started_at?->format('H:i') }}–{{ $shift->ended_at?->format('H:i') ?? 'sekarang' }})</li>
+                                        @empty
+                                            <li>Nama kasir: —</li>
+                                        @endforelse
+                                    </ul>
                                 </td>
-                                <td>@currency($session->opening_cash)</td>
                                 @if ($canSeeCash)
-                                    <td>@currency($sessionSummary['cash_sales'] ?? 0)</td>
+                                    <td class="num ch-income">{{ $rp($breakdown['sales_total'] ?? 0) }}</td>
+                                    <td class="num">@currency($sessionSummary['cash_sales'] ?? 0)</td>
                                 @endif
-                                <td class="text-danger">@currency($sessionSummary['cash_out'] ?? 0)</td>
+                                <td class="num text-danger">@currency($sessionSummary['cash_out'] ?? 0)</td>
                                 @if ($canSeeCash)
-                                    <td>@currency($sessionSummary['expected_cash'] ?? 0)</td>
+                                    <td class="num">@currency($sessionSummary['expected_cash'] ?? 0)</td>
                                 @endif
-                                <td>{!! $isOpen ? '<span class="text-muted">—</span>' : $rp($session->closing_cash) !!}</td>
-                                <td class="{{ $difference === null ? 'text-muted' : ($difference == 0 ? 'text-success' : 'text-danger') }}">
+                                <td class="num">{!! $isOpen ? '<span class="text-muted">—</span>' : $rp($session->closing_cash) !!}</td>
+                                <td class="num {{ $difference === null ? 'text-muted' : ($difference == 0 ? 'text-success' : 'text-danger') }}">
                                     @if ($difference === null)
                                         —
                                     @elseif ($difference == 0)
-                                        <strong>Pas</strong>
+                                        <span class="label label-success">Pas</span>
                                     @else
                                         <strong>{{ $difference > 0 ? '+' : '-' }} {{ $rp(abs($difference)) }}</strong>
                                     @endif
                                 </td>
-                                <td>{!! $isOpen ? '<span class="text-muted">—</span>' : $rp($session->carry_over_cash) !!}</td>
-                                <td>{!! $isOpen ? '<span class="text-muted">—</span>' : $rp($session->cash_removed) !!}</td>
-                                <td>@currency(($sessionSummary['cash_out'] ?? 0) + (float) ($session->cash_removed ?? 0))</td>
-                                <td>
+                                <td class="num">{!! $isOpen ? '<span class="text-muted">—</span>' : $rp($session->cash_removed) !!}</td>
+                                <td class="num">@currency(($sessionSummary['cash_out'] ?? 0) + (float) ($session->cash_removed ?? 0))</td>
+                                <td class="ch-actions">
                                     @if ($isOpen)
                                         <span class="label label-success">OPEN</span>
                                     @else
                                         <span class="label label-default">CLOSED</span><br>
-                                        <a href="{{ route('cashier.print-close', ['cashierSession' => $session->id, 'reprint' => 1, 'auto' => 1, 'from' => 'history']) }}" class="btn btn-warning btn-xs" style="margin-top:4px;" title="Cetak ulang ringkasan tutup kasir"><i class="fa fa-print"></i> Re-Print</a>
+                                        <a href="{{ route('cashier.print-close', ['cashierSession' => $session->id, 'reprint' => 1, 'auto' => 1, 'from' => 'history']) }}" class="btn btn-warning btn-xs" title="Cetak ulang ringkasan tutup kasir"><i class="fa fa-print"></i> Re-Print</a>
                                         @if ($session->canBeEditedBy($authUser))
-                                            <button type="button" class="btn btn-primary btn-xs js-edit-session" style="margin-top:4px;"
+                                            <button type="button" class="btn btn-primary btn-xs js-edit-session"
                                                 data-action="{{ route('cashier.update-close', $session) }}"
                                                 data-difference-url="{{ route('cashier.close-difference', $session) }}"
                                                 data-closing="{{ (float) $session->closing_cash }}"
@@ -116,32 +142,36 @@
                                     @endif
                                 </td>
                             </tr>
-                            <tr class="active">
+                            <tr class="ch-detail is-hidden" id="ch-detail-{{ $session->id }}">
                                 <td colspan="{{ $colspan }}">
-                                    @include('cashier._breakdown', ['breakdown' => $breakdown, 'showCash' => $canSeeCash])
-                                    <strong>Catatan:</strong> {{ $session->closing_note ?: $session->opening_note ?: '-' }}
-                                    @foreach ($editLogs[$session->id] ?? [] as $log)
-                                        <div class="small text-muted" style="margin-top:3px;">
-                                            <i class="fa fa-pencil"></i> Edit ke-{{ $log->properties['edit_number'] }} oleh {{ $log->causer?->name ?? 'System' }} ({{ $log->created_at?->format('d/m/Y H:i') }}):
-                                            uang fisik {{ $rp($log->properties['old']['closing_cash'] ?? 0) }} &rarr; {{ $rp($log->properties['attributes']['closing_cash'] ?? 0) }},
-                                            saldo besok {{ $rp($log->properties['old']['carry_over_cash'] ?? 0) }} &rarr; {{ $rp($log->properties['attributes']['carry_over_cash'] ?? 0) }},
-                                            catatan "{{ $log->properties['old']['closing_note'] ?? '-' }}" &rarr; "{{ $log->properties['attributes']['closing_note'] ?? '-' }}"
-                                        </div>
-                                    @endforeach
-                                    @if ($session->drawerEntries->isNotEmpty())
-                                        <span style="margin-left:18px;"><strong>Aktivitas drawer:</strong>
-                                            @foreach ($session->drawerEntries as $entry)
-                                                @if ($entry->type === 'check')
-                                                    Cek fisik Rp {{ number_format($entry->amount, 0, ',', '.') }} (selisih {{ $entry->difference >= 0 ? '+' : '' }}Rp {{ number_format($entry->difference, 0, ',', '.') }}) — {{ $entry->note }}
-                                                @elseif ($entry->type === 'cash_in')
-                                                    Kas masuk Rp {{ number_format($entry->amount, 0, ',', '.') }} — {{ $entry->note }}
-                                                @else
-                                                    BON Rp {{ number_format($entry->amount, 0, ',', '.') }}{{ filled($entry->note) ? ' — ' . $entry->note : '' }}
-                                                    <a href="{{ route('cashier.print-bon', ['entry' => $entry->id, 'reprint' => 1, 'auto' => 1, 'from' => 'history']) }}" class="btn btn-warning btn-xs" title="Cetak ulang BON"><i class="fa fa-print"></i> Re-Print</a>
-                                                @endif{{ $loop->last ? '' : '; ' }}
-                                            @endforeach
-                                        </span>
-                                    @endif
+                                    @include('cashier._breakdown', ['breakdown' => $breakdown, 'showCash' => $canSeeCash, 'groupPayments' => true])
+                                    <div class="ch-note">
+                                        <span class="ch-note-title">Catatan:</span> {{ $session->closing_note ?: $session->opening_note ?: '-' }}
+                                        @foreach ($editLogs[$session->id] ?? [] as $log)
+                                            <div class="small text-muted" style="margin-top:3px;">
+                                                <i class="fa fa-pencil"></i> Edit ke-{{ $log->properties['edit_number'] }} oleh {{ $log->causer?->name ?? 'System' }} ({{ $log->created_at?->format('d/m/Y H:i') }}):
+                                                uang fisik {{ $rp($log->properties['old']['closing_cash'] ?? 0) }} &rarr; {{ $rp($log->properties['attributes']['closing_cash'] ?? 0) }},
+                                                saldo besok {{ $rp($log->properties['old']['carry_over_cash'] ?? 0) }} &rarr; {{ $rp($log->properties['attributes']['carry_over_cash'] ?? 0) }},
+                                                catatan "{{ $log->properties['old']['closing_note'] ?? '-' }}" &rarr; "{{ $log->properties['attributes']['closing_note'] ?? '-' }}"
+                                            </div>
+                                        @endforeach
+                                        @if ($session->drawerEntries->isNotEmpty())
+                                            <div class="ch-drawer"><span class="ch-note-title">Aktivitas drawer:</span>
+                                                @foreach ($session->drawerEntries as $entry)
+                                                    <span class="ch-entry">
+                                                        @if ($entry->type === 'check')
+                                                            &bull; Cek fisik Rp {{ number_format($entry->amount, 0, ',', '.') }} (selisih {{ $entry->difference >= 0 ? '+' : '' }}Rp {{ number_format($entry->difference, 0, ',', '.') }}) — {{ $entry->note }}
+                                                        @elseif ($entry->type === 'cash_in')
+                                                            &bull; Kas masuk Rp {{ number_format($entry->amount, 0, ',', '.') }} — {{ $entry->note }}
+                                                        @else
+                                                            &bull; BON Rp {{ number_format($entry->amount, 0, ',', '.') }}{{ filled($entry->note) ? ' — ' . $entry->note : '' }}
+                                                            <a href="{{ route('cashier.print-bon', ['entry' => $entry->id, 'reprint' => 1, 'auto' => 1, 'from' => 'history']) }}" class="btn btn-warning btn-xs" title="Cetak ulang BON"><i class="fa fa-print"></i> Re-Print</a>
+                                                        @endif
+                                                    </span>
+                                                @endforeach
+                                            </div>
+                                        @endif
+                                    </div>
                                 </td>
                             </tr>
                         @empty
@@ -150,6 +180,12 @@
                     </tbody>
                 </table>
             </div>
+            @if ($sessions->hasPages())
+                <div class="box-footer clearfix">
+                    <span class="text-muted small pull-left" style="margin-top:8px;">Menampilkan {{ $sessions->firstItem() }}–{{ $sessions->lastItem() }} dari {{ $sessions->total() }} sesi</span>
+                    <div class="pull-right">{{ $sessions->links() }}</div>
+                </div>
+            @endif
         </div>
 
         {{-- <div class="box"> --}}
@@ -235,4 +271,31 @@
         window.CASH_CAN_SEE = @json((bool) ($canSeeCash ?? false));
     </script>
     @include('cashier._edit-session-script')
+    <script>
+        (function () {
+            var toggles = document.querySelectorAll('.ch-toggle');
+            function setOpen(btn, open) {
+                var row = document.querySelector(btn.getAttribute('data-target'));
+                if (!row) return;
+                row.classList.toggle('is-hidden', !open);
+                btn.classList.toggle('is-open', open);
+            }
+            toggles.forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    setOpen(btn, btn.classList.contains('is-open') ? false : true);
+                });
+            });
+            var all = document.getElementById('chToggleAll');
+            if (all) {
+                var opened = false;
+                all.addEventListener('click', function () {
+                    opened = !opened;
+                    toggles.forEach(function (btn) { setOpen(btn, opened); });
+                    all.innerHTML = opened
+                        ? '<i class="fa fa-compress"></i> Tutup semua rincian'
+                        : '<i class="fa fa-expand"></i> Buka semua rincian';
+                });
+            }
+        })();
+    </script>
 @endsection

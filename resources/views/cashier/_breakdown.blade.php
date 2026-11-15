@@ -2,9 +2,12 @@
     Rincian penjualan per metode bayar + voucher untuk satu sesi kasir.
     Dipakai di History Kasir dan modal Tutup kasir.
     Variabel: $breakdown (CashierSession::breakdownFor / summary()['breakdown']).
+    Opsional: $groupPayments (default false) menggabungkan metode bayar berkata pertama sama (ATM BCA + ATM BNI => ATM).
     Opsional: $showCash (default true). Bila false, total tunai, total semua metode, dan angka non-tunai disembunyikan.
 --}}
 @php($showCash = $showCash ?? true)
+@php($groupPayments = $groupPayments ?? false)
+@php($paymentRows = $groupPayments ? \App\Models\CashierSession::groupPaymentsByFirstWord($breakdown['payments']) : $breakdown['payments'])
 @php($rp = fn ($number) => 'Rp ' . number_format((float) $number, 0, ',', '.'))
 <div class="row">
     <div class="col-md-7">
@@ -17,7 +20,7 @@
                 </tr>
             </thead>
             <tbody>
-                @forelse ($breakdown['payments'] as $payment)
+                @forelse ($paymentRows as $payment)
                     <tr>
                         <td>
                             {{ $payment['name'] }}
@@ -38,7 +41,7 @@
                     <tr><td colspan="3" class="text-center text-muted">Belum ada penjualan.</td></tr>
                 @endforelse
             </tbody>
-            @if ($showCash && count($breakdown['payments']) > 0)
+            @if ($showCash && count($paymentRows) > 0)
                 <tfoot>
                     <tr>
                         <th>Total semua metode</th>

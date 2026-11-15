@@ -291,30 +291,29 @@ class CashierSessionController extends Controller
         if ($outletId) {
             $query->where('outlet_id', $outletId);
         }
-        $sessions = $query->get();
+        $sessions = $query->paginate(15)->withQueryString();
 
-        $sessionIds = $sessions->pluck('id');
-        $entryIds = $sessions->flatMap(fn (CashierSession $session) => $session->drawerEntries->pluck('id'));
+        // Activitylog hanya untuk sesi di halaman ini (dipakai untuk riwayat edit per sesi).
+        $sessionIds = $sessions->getCollection()->pluck('id');
+        $entryIds = $sessions->getCollection()->flatMap(fn (CashierSession $session) => $session->drawerEntries->pluck('id'));
         $activities = Activity::query()
             ->where('log_name', 'Cashier')
             ->with('causer')
-            ->when($outletId, function ($activityQuery) use ($sessionIds, $entryIds) {
-                $activityQuery->where(function ($query) use ($sessionIds, $entryIds) {
-                    $query->where(function ($subjectQuery) use ($sessionIds) {
-                        $subjectQuery->where('subject_type', CashierSession::class)
-                            ->whereIn('subject_id', $sessionIds->all() ?: [0]);
-                    })->orWhere(function ($subjectQuery) use ($entryIds) {
-                        $subjectQuery->where('subject_type', CashierDrawerEntry::class)
-                            ->whereIn('subject_id', $entryIds->all() ?: [0]);
-                    });
+            ->where(function ($query) use ($sessionIds, $entryIds) {
+                $query->where(function ($subjectQuery) use ($sessionIds) {
+                    $subjectQuery->where('subject_type', CashierSession::class)
+                        ->whereIn('subject_id', $sessionIds->all() ?: [0]);
+                })->orWhere(function ($subjectQuery) use ($entryIds) {
+                    $subjectQuery->where('subject_type', CashierDrawerEntry::class)
+                        ->whereIn('subject_id', $entryIds->all() ?: [0]);
                 });
             })
             ->latest()
-            ->limit(100)
+            ->limit(300)
             ->get();
 
         // Rincian per metode bayar + voucher untuk semua sesi (2 query, bukan per baris).
-        $breakdowns = CashierSession::breakdownFor($sessions->pluck('id')->all());
+        $breakdowns = CashierSession::breakdownFor($sessionIds->all());
 
         $canSeeCash = (bool) $request->user()?->canSeeCashFigures();
 

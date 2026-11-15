@@ -131,6 +131,37 @@ class CashierSession extends Model
         return $name === '' || preg_match('/tunai|cash/i', $name) === 1;
     }
 
+    /**
+     * Gabungkan metode bayar yang kata pertamanya sama (mis. "ATM BCA" + "ATM Mandiri" => "ATM",
+     * "QRIS BRI" + "QRIS Dana" => "QRIS"). Nama satu kata (mis. "Tunai") tetap apa adanya.
+     * Hanya untuk tampilan; data breakdown asli tidak diubah.
+     *
+     * @param  array<int, array{name:string,is_cash:bool,count:int,total:float}>  $payments
+     * @return array<int, array{name:string,is_cash:bool,count:int,total:float}>
+     */
+    public static function groupPaymentsByFirstWord(array $payments): array
+    {
+        $grouped = [];
+        foreach ($payments as $payment) {
+            $name = trim((string) ($payment['name'] ?? ''));
+            $first = preg_split('/\s+/u', $name, 2)[0] ?? '';
+            $first = $first !== '' ? $first : 'Tunai';
+            $key = mb_strtolower($first);
+
+            if (! isset($grouped[$key])) {
+                $grouped[$key] = ['name' => $first, 'is_cash' => false, 'count' => 0, 'total' => 0.0];
+            }
+            $grouped[$key]['is_cash'] = $grouped[$key]['is_cash'] || (bool) ($payment['is_cash'] ?? false);
+            $grouped[$key]['count'] += (int) ($payment['count'] ?? 0);
+            $grouped[$key]['total'] += (float) ($payment['total'] ?? 0);
+        }
+
+        $grouped = array_values($grouped);
+        usort($grouped, fn ($a, $b) => [! $a['is_cash'], $a['name']] <=> [! $b['is_cash'], $b['name']]);
+
+        return $grouped;
+    }
+
     public static function emptyBreakdown(): array
     {
         return [
