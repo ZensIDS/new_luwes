@@ -18,8 +18,8 @@ use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
  * Laporan Toko: Penjualan Kassa harian (satu baris per sesi kassa).
  *
  * Kolom: Nama Kassa (akun kassa), Nama Kasir (semua shift di sesi itu, satu per baris), Saldo Awal,
- * Penjualan Tunai, Penjualan per metode bayar non-tunai (kolom dinamis), Bon, Setoran (setoran tutup kasir),
- * Setoran Total (Bon + Setoran).
+ * Penjualan Tunai, Penjualan per metode bayar non-tunai (kolom dinamis), Total Non Tunai, Total Pendapatan
+ * (tunai + non-tunai, semua metode), Bon, Setoran (setoran tutup kasir), Setoran Total (Bon + Setoran).
  *
  * Parameter request: tanggal (Y-m-d, default hari ini), outlet_id (opsional; staff-outlet terkunci ke outletnya).
  * Sesi dipilih menurut tanggal buka. Sesi belum tutup tetap tampil (tanda "BELUM TUTUP", setoran "-").
@@ -128,6 +128,8 @@ class KassaHarianExport extends BaseLaporanTokoExport
                 'opening' => (float) $session->opening_cash,
                 'tunai' => $tunai,
                 'non_cash' => $nonCash,
+                'total_non_cash' => array_sum($nonCash),
+                'total_income' => $tunai + array_sum($nonCash),
                 'bon' => $bon,
                 'setoran' => $setoranTutup,
                 'total_setoran' => $bon + (float) ($setoranTutup ?? 0),
@@ -187,6 +189,8 @@ class KassaHarianExport extends BaseLaporanTokoExport
             $cols[] = ['h' => $method, 'fmt' => $rp];
         }
         $cols = array_merge($cols, [
+            ['h' => 'Total Non Tunai', 'fmt' => $rp],
+            ['h' => 'Total Pendapatan', 'fmt' => $rp],
             ['h' => 'Bon', 'fmt' => $rp],
             ['h' => 'Setoran', 'fmt' => $rp],
             ['h' => 'Setoran Total', 'fmt' => $rp],
@@ -213,7 +217,7 @@ class KassaHarianExport extends BaseLaporanTokoExport
             foreach ($methods as $method) {
                 $values[] = (float) ($row['non_cash'][$method] ?? 0.0);
             }
-            array_push($values, $row['bon'], $row['setoran'] ?? '-', $row['total_setoran']);
+            array_push($values, $row['total_non_cash'], $row['total_income'], $row['bon'], $row['setoran'] ?? '-', $row['total_setoran']);
 
             $w->row($values, $row['closed'] ? [] : ['fill' => Theme::WARN_BG, 'font' => Theme::WARN_FG]);
         }
