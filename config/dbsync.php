@@ -47,6 +47,9 @@ return [
         'cache',
         'cache_locks',
         'cart_storage',
+        // Keranjang kasir POS: data sementara per kasir/outlet yang dikosongkan tiap checkout.
+        // Disinkron hanya memicu penghapusan massal (ditahan delete_guard) tanpa manfaat.
+        'user_cart',
         'db_sync_runs',
         'db_sync_rows',
         'db_sync_conflicts',

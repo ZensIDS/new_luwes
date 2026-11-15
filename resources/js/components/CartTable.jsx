@@ -55,6 +55,7 @@ const CartTable = ({
     selectedCartProductId,
     setSelectedCartProductId,
     cartTableRef,
+    lastScan,
 }) => {
     const selectedPaymentMethod = paymentMethods.find((method) => String(method.id) === String(paymentMethodId));
     const requiresPaymentReference = SHOW_PAYMENT_REFERENCE && Boolean(paymentMethodId) && !/tunai|cash/i.test(selectedPaymentMethod?.name || "");
@@ -83,6 +84,7 @@ const CartTable = ({
                             handleClickDelete={handleClickDelete}
                             selectedCartProductId={selectedCartProductId}
                             setSelectedCartProductId={setSelectedCartProductId}
+                            lastScan={lastScan}
                         />
                     </tbody>
                 </table>

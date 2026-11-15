@@ -133,6 +133,15 @@ const Cart = () => {
     const [cashbackModalOpen, setCashbackModalOpen] = useState(false);
     const barcodeRef = useRef(null);
     const searchRef = useRef(null);
+    // Refresh keranjang (GET /cart) dijalankan satu per satu: bila masih ada yang berjalan, permintaan baru
+    // hanya disimpan (yang terbaru saja) dan dijalankan setelah yang berjalan selesai. Mencegah request
+    // menumpuk saat scan cepat, dan respons lama tidak lagi menimpa data yang lebih baru.
+    const cartInFlightRef = useRef(false);
+    const cartPendingRef = useRef(null);
+    // Item yang terakhir di-scan / ditambahkan ({ id, tick }) untuk highlight baris di keranjang.
+    // scanMarkerRef menyimpan id sampai data keranjang terbaru (yang sudah memuat item itu) tiba.
+    const [lastScan, setLastScan] = useState(null);
+    const scanMarkerRef = useRef(null);
     const voucherRef = useRef(null);
     const customerRef = useRef(null);
     const paymentMethodRef = useRef(null);
@@ -219,12 +228,33 @@ const Cart = () => {
     const grandTotal = Math.round(Math.max(0, getSubtotal() - voucherTotal - cashbackTotal)) + kresekTotal;
 
     const loadCart = (promotionCodes = appliedPromotions.map((promotion) => promotion.code)) => {
+        if (cartInFlightRef.current) {
+            cartPendingRef.current = promotionCodes;
+            return;
+        }
+
+        cartInFlightRef.current = true;
         const params = new URLSearchParams({ outlet_id: outlet.id });
         promotionCodes.forEach((code) => params.append("promotion_codes[]", code));
         axios.get("/cart?" + params.toString()).then((response) => {
             setCart(response.data || []);
             setPaidAmount((current) => current === "" ? "" : current);
-        }).catch((error) => setErrorMessage(error.response?.data?.message || "Gagal memuat keranjang."));
+            // Highlight baru dipicu setelah keranjang terbaru tiba. Bila masih ada refresh lain yang antre
+            // (scan lebih baru), tunggu respons refresh itu supaya yang di-highlight pasti sudah ada di data.
+            if (cartPendingRef.current === null && scanMarkerRef.current !== null) {
+                const scannedId = scanMarkerRef.current;
+                scanMarkerRef.current = null;
+                setLastScan({ id: scannedId, tick: Date.now() });
+            }
+        }).catch((error) => setErrorMessage(error.response?.data?.message || "Gagal memuat keranjang."))
+            .finally(() => {
+                cartInFlightRef.current = false;
+                const pending = cartPendingRef.current;
+                if (pending) {
+                    cartPendingRef.current = null;
+                    loadCart(pending);
+                }
+            });
     };
 
     // Hentikan pemuatan halaman berikutnya (dipanggil tiap pencarian baru / daftar dikosongkan).
@@ -413,6 +443,7 @@ const Cart = () => {
                 .then(() => {
                     setBarcode("");
                     setErrorMessage("");
+                    scanMarkerRef.current = product.id ?? null;
                     loadCart();
                     barcodeRef.current?.focus();
                 })
@@ -478,7 +509,10 @@ const Cart = () => {
 
     const emptyCart = () => {
         axios.post("/cart-empty", { _method: "DELETE", outlet_id: outlet.id })
-            .then(() => setCart([]));
+            .then(() => {
+                setCart([]);
+                setLastScan(null);
+            });
     };
 
     const holdTransaction = () => {
@@ -492,6 +526,7 @@ const Cart = () => {
             name,
         }).then(() => {
             setCart([]);
+            setLastScan(null);
             setAppliedVouchers([]);
             setErrorMessage("");
             barcodeRef.current?.focus();
@@ -521,6 +556,7 @@ const Cart = () => {
                 }).then(() => {
                     setCustomerId(customer || "");
                     setAppliedVouchers([]);
+                    setLastScan(null);
                     loadCart([]);
                     barcodeRef.current?.focus();
                 });
@@ -561,6 +597,7 @@ const Cart = () => {
 
     const resetCheckoutState = () => {
         setCart([]);
+        setLastScan(null);
         setAppliedVouchers([]);
         setAppliedPromotions([]);
         setCustomerId("");
@@ -864,6 +901,7 @@ const Cart = () => {
                         selectedCartProductId={selectedCartProductId}
                         setSelectedCartProductId={setSelectedCartProductId}
                         cartTableRef={cartTableRef}
+                        lastScan={lastScan}
                         onSyncPromotions={syncPromotions}
                     />
                 </div>
