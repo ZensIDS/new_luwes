@@ -13,15 +13,14 @@
         $mode = request('mode') === 'warna' ? 'warna' : 'thermal';
         // Label 68 mm (termasuk A4 label 68 mm): tinggi label maksimal 35 mm, sama dengan label harga.
         $tall = $w === 68;
-        $barcodeH = $tall ? '5mm' : '6mm';
+        // Barcode diperbesar sedikit (sebelumnya 5mm / 6mm) supaya lebih mudah di-scan.
+        $barcodeH = $tall ? '7mm' : '8mm';
         // Ukuran per kertas: [padding luar, padding isi, font nominal, font kode]
         $paperStyle = [
             58 => ['outer' => '1.5mm', 'content' => '1.5mm', 'value' => '28px', 'code' => '9px'],
             68 => ['outer' => '2mm', 'content' => '2.2mm', 'value' => '32px', 'code' => '9.5px'],
             80 => ['outer' => '2.5mm', 'content' => '3mm', 'value' => '36px', 'code' => '10px'],
         ][$w];
-        $labelName = strtoupper($outlets->firstWhere('id', (int) $outletId)?->name ?? 'LUWES');
-        $labelStrip = str_repeat($labelName . ' • VOUCHER • ', 5);
     @endphp
     <style>
         * { box-sizing:border-box; }
@@ -35,7 +34,7 @@
         table { width:100%; border-collapse:collapse; margin-top:14px; }
         th, td { padding:7px; border:1px solid #ddd; text-align:left; }
         th { background:#f5f5f5; }
-        /* Desain voucher ringkas (pipih) mengikuti label harga: strip outlet di atas dan kiri-kanan */
+        /* Desain voucher ringkas (pipih) mengikuti label harga, tanpa strip teks di tepi */
         .label-grid { width:{{ $isA4 ? '204mm' : $w . 'mm' }}; margin:0 auto; {{ $isA4 ? 'display:grid; grid-template-columns:repeat(3, 68mm); gap:0; align-items:start;' : '' }} }
         .label-outer { width:{{ $w }}mm; padding:1.2mm {{ $paperStyle['outer'] }}; break-inside:avoid; page-break-inside:avoid; background:#fff; {{ $isA4 ? 'border-right:0.25mm dotted #444; border-bottom:0.25mm dotted #444;' : 'border-bottom:1px dashed #777;' }}
                {{ $tall ? 'height:34.5mm; overflow:hidden;' : '' }} -webkit-print-color-adjust:exact; print-color-adjust:exact; }
@@ -44,20 +43,15 @@
         .label-outer:nth-child(-n+3) { border-top:0.25mm dotted #444; }
         @endif
         /* Warna aksen sama dengan label harga: thermal hitam putih, warna = pink (#e0577a) + latar pink muda. */
-        .frame { --accent:{{ $mode === 'warna' ? '#e0577a' : '#000' }}; --soft:{{ $mode === 'warna' ? '#fbe6ea' : '#fff' }}; --stripbg:{{ $mode === 'warna' ? '#e0577a' : '#fff' }}; --stripfg:{{ $mode === 'warna' ? '#fff' : '#000' }};
-                 display:grid; grid-template-columns:2.6mm 1fr 2.6mm; grid-template-rows:2.6mm 1fr; border:1px solid var(--accent); background:var(--soft); {{ $tall ? 'height:100%;' : '' }} }
-        .strip { background:var(--stripbg); color:var(--stripfg); overflow:hidden; white-space:nowrap; font-size:5px; font-weight:800; letter-spacing:.5px; }
-        .strip-top { grid-column:1 / 4; display:flex; align-items:center; border-bottom:1px solid var(--accent); }
-        .strip-left, .strip-right { display:flex; align-items:center; justify-content:center; border-right:1px solid var(--accent); }
-        .strip-right { border-right:none; border-left:1px solid var(--accent); }
-        .strip-left span, .strip-right span { writing-mode:vertical-rl; transform:rotate(180deg); white-space:nowrap; }
-        .label-content { padding:1mm {{ $paperStyle['content'] }} 1.2mm; text-align:center; min-width:0; overflow:hidden; }
+        .frame { --accent:{{ $mode === 'warna' ? '#e0577a' : '#000' }}; --soft:{{ $mode === 'warna' ? '#fbe6ea' : '#fff' }};
+                 border:1px solid var(--accent); background:var(--soft); {{ $tall ? 'height:100%;' : '' }} }
+        .label-content { padding:1.2mm {{ $paperStyle['content'] }} 1.2mm; text-align:center; min-width:0; overflow:hidden; }
         .value-label { font-size:7.5px; font-weight:900; letter-spacing:2.5px; line-height:1.2; color:var(--accent); }
         .value-main { font-size:{{ $paperStyle['value'] }}; font-weight:900; line-height:1.05; letter-spacing:.2px; color:var(--accent); }
         .value-main .rp { font-size:15px; font-weight:700; vertical-align:3px; margin-right:1px; }
         .value-main .pct { font-size:20px; font-weight:800; margin-left:1px; }
         .value-sub { font-size:8px; font-weight:700; line-height:1.25; {{ $tall ? 'display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;' : '' }} }
-        .voucher-barcode { height:{{ $barcodeH }}; width:70%; margin:1mm auto .6mm; padding:0; overflow:hidden; background:#fff; }
+        .voucher-barcode { height:{{ $barcodeH }}; width:86%; margin:1mm auto .6mm; padding:0 1.5mm; overflow:hidden; background:#fff; } /* padding kiri-kanan putih = quiet zone */
         .voucher-barcode svg { display:block; width:100%; height:{{ $barcodeH }}; shape-rendering:crispEdges; }
         .code { font-family:'Courier New', monospace; font-size:{{ $paperStyle['code'] }}; font-weight:700; letter-spacing:1.2px; text-align:center; line-height:1.2; }
         @page { size:{{ $isA4 ? 'A4' : $paper . 'mm auto' }}; margin:{{ $isA4 ? '3mm' : '0' }}; }
@@ -188,8 +182,6 @@
                 @for ($index = 0; $index < $voucher->print_qty; $index++)
                     <div class="label-outer">
                         <div class="frame">
-                            <div class="strip strip-top"><span>{{ $labelStrip }}</span></div>
-                            <div class="strip strip-left"><span>{{ $labelName }} • VOUCHER • </span></div>
                             <div class="label-content">
                                 <div class="value-label">VOUCHER POTONGAN</div>
                                 <div class="value-main">
@@ -201,7 +193,6 @@
                                 </div>
                                 <div class="code">{{ $voucher->code }}</div>
                             </div>
-                            <div class="strip strip-right"><span>{{ $labelName }} • VOUCHER • </span></div>
                         </div>
                     </div>
                 @endfor
