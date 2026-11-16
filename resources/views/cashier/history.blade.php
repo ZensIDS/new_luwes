@@ -229,7 +229,10 @@
                                     @if ($canSeeCash)
                                         <tr class="info"><th>Uang hasil penjualan yang seharusnya ada</th><th class="text-right" id="editExpectedText">Rp 0</th></tr>
                                     @endif
-                                    <tr id="editDifferenceRow"><td>Selisih dengan uang fisik</td><td class="text-right"><strong id="editDifferenceText">isi uang fisik</strong></td></tr>
+                                    {{-- Role kasir tidak melihat selisih di layar (sama seperti form tutup kasir); selisih tetap tercetak di slip. --}}
+                                    @if (auth()->user()?->role !== 'kasir')
+                                        <tr id="editDifferenceRow"><td>Selisih dengan uang fisik</td><td class="text-right"><strong id="editDifferenceText">isi uang fisik</strong></td></tr>
+                                    @endif
                                     <tr><td>Total uang di laci setelah tutup <small class="text-muted">(uang fisik + saldo besok)</small></td><td class="text-right"><strong id="editDrawerTotal">Rp 0</strong></td></tr>
                                 </tbody>
                             </table>

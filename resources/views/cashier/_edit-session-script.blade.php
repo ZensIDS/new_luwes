@@ -2,6 +2,7 @@
     JS modal "Edit tutup kasir" di History Kasir.
     - superadmin & staff-outlet: selisih dihitung di browser dari data-expected pada tombol Edit.
     - role lain: angka seharusnya tidak ada di HTML; selisih ditanya ke server (hanya selisih yang kembali).
+    - role kasir: baris selisih tidak dirender; hanya "Total uang di laci" yang dihitung.
 --}}
 <script>
     (function () {
@@ -19,6 +20,7 @@
         const titleEl = document.getElementById('editSessionTitle');
         const limitInfo = document.getElementById('editSessionLimitInfo');
 
+        const hideDiff = !diffRow || !diffText; // baris selisih tidak ada (role kasir)
         const canSee = Boolean(window.CASH_CAN_SEE);
         const isKasir = window.CASH_ROLE === 'kasir';
         const limit = Number(window.CASH_KASIR_EDIT_LIMIT || 2);
@@ -61,6 +63,8 @@
             const hasClosing = String(closing.value || '').trim() !== '';
             const physical = toNumber(closing.value);
             drawerText.textContent = rp(physical + toNumber(carry.value));
+
+            if (hideDiff) return;
 
             if (!hasClosing) {
                 seq++;

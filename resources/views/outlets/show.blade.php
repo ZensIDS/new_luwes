@@ -234,10 +234,13 @@
                                             <th class="text-right">Rp {{ number_format($summary['expected_cash'] ?? 0, 0, ',', '.') }}</th>
                                         </tr>
                                     @endif
-                                    <tr id="closeDifferenceRow">
-                                        <td>Selisih dengan uang fisik</td>
-                                        <td class="text-right"><strong id="closeDifferenceText">isi uang fisik</strong></td>
-                                    </tr>
+                                    {{-- Role kasir tidak melihat selisih di layar; selisih tetap tercetak di slip tutup kasir (CashierSlipController::close). --}}
+                                    @if (auth()->user()?->role !== 'kasir')
+                                        <tr id="closeDifferenceRow">
+                                            <td>Selisih dengan uang fisik</td>
+                                            <td class="text-right"><strong id="closeDifferenceText">isi uang fisik</strong></td>
+                                        </tr>
+                                    @endif
                                     <tr>
                                         <td>Total uang di laci setelah tutup <small class="text-muted">(uang fisik + saldo besok)</small></td>
                                         <td class="text-right"><strong id="closeDrawerTotal">Rp 0</strong></td>
@@ -296,6 +299,7 @@
         // Selisih tutup kasir dihitung saat uang fisik / saldo besok diketik.
         // - superadmin & staff-outlet: dihitung di browser dari angka "seharusnya" di halaman.
         // - role lain: angka "seharusnya" tidak ada di HTML; selisih ditanya ke server (hanya selisih yang kembali).
+        // - role kasir: baris selisih disembunyikan; hanya "Total uang di laci" yang dihitung (selisih tetap tercetak di slip).
         (function () {
             const expectedRow = document.getElementById('closeExpectedRow');
             const diffRow = document.getElementById('closeDifferenceRow');
@@ -303,13 +307,23 @@
             const carry = document.getElementById('carry_over_cash');
             const text = document.getElementById('closeDifferenceText');
             const drawer = document.getElementById('closeDrawerTotal');
-            if (!diffRow || !closing || !carry || !text || !drawer) return;
+            if (!closing || !carry || !drawer) return;
+
+            const toNumber = (value) => Number(String(value || '').replace(/[^\d]/g, '')) || 0;
+            const rp = (value) => 'Rp ' + Math.abs(value).toLocaleString('id-ID');
+
+            if (!diffRow || !text) {
+                // Baris selisih tidak dirender (role kasir): cukup perbarui total uang di laci.
+                const renderDrawer = () => { drawer.textContent = rp(toNumber(closing.value) + toNumber(carry.value)); };
+                closing.addEventListener('input', renderDrawer);
+                carry.addEventListener('input', renderDrawer);
+                renderDrawer();
+                return;
+            }
 
             const remote = !expectedRow;
             const differenceUrl = @json($cashierSession ? route('cashier.close-difference', $cashierSession) : null);
             const expected = remote ? 0 : Number(expectedRow.dataset.expected || 0);
-            const toNumber = (value) => Number(String(value || '').replace(/[^\d]/g, '')) || 0;
-            const rp = (value) => 'Rp ' + Math.abs(value).toLocaleString('id-ID');
             const states = ['info', 'success', 'danger'];
             const rows = () => (expectedRow ? [expectedRow, diffRow] : [diffRow]);
 
