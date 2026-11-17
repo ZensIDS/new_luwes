@@ -60,6 +60,40 @@ class SetStockController extends Controller
         return Excel::download($export, $export->fileName());
     }
 
+    /** Cari produk berdasarkan nama (semua kata yang diketik). Maks 20 hasil. */
+    public function search(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'q' => ['required', 'string', 'min:1', 'max:100', 'regex:/^[^\x00-\x1F\x7F]+$/'],
+        ]);
+        OutletAccess::id($request);
+
+        $q = trim($data['q']);
+        $words = array_values(array_filter(preg_split('/\s+/', $q)));
+        $escape = fn (string $v) => addcslashes($v, '\\%_');
+
+        // Semua kata yang diketik harus ada di nama produk (urutan bebas); yang diawali kata pertama tampil lebih dulu.
+        $products = Product::query()
+            ->where(function ($query) use ($words, $escape) {
+                foreach ($words as $word) {
+                    $query->where('name', 'like', '%' . $escape($word) . '%');
+                }
+            })
+            ->orderByRaw('CASE WHEN name LIKE ? THEN 0 ELSE 1 END', [$escape($words[0] ?? '') . '%'])
+            ->orderBy('name')
+            ->limit(20)
+            ->get(['id', 'code', 'name', 'satuan']);
+
+        return response()->json([
+            'products' => $products->map(fn ($p) => [
+                'id' => $p->id,
+                'code' => $p->code,
+                'name' => $p->name,
+                'satuan' => $p->satuan ?: 'pcs',
+            ])->values(),
+        ]);
+    }
+
     /** Cari produk persis berdasarkan barcode + info untuk kartu produk. */
     public function scan(Request $request, PriceCalculator $calculator, LatestHpp $latestHpp, OutletStockService $stockService): JsonResponse
     {
@@ -86,11 +120,6 @@ class SetStockController extends Controller
         $stockNow = (int) OwnerStock::where('owner_id', $outletId)
             ->where('product_id', $product->id)
             ->sum('qty');
-        // Saldo minus saja (<= 0): Set Stock menutup minus ini lebih dulu, jadi stok jadi = qty + minus.
-        $deficitNow = (int) min(0, (int) OwnerStock::deficit()
-            ->where('owner_id', $outletId)
-            ->where('product_id', $product->id)
-            ->sum('qty'));
 
         $item = null;
         $draft = SetStockDraft::where('active_outlet_id', $outletId)->orderBy('id')->first();
@@ -119,7 +148,6 @@ class SetStockController extends Controller
                 'price_strike' => $calculator->money($price['hpp_setelah_pajak'] + $price['margin_amount']),
                 'price_net' => (float) $price['price'],
                 'stock_now' => $stockNow,
-                'deficit' => $deficitNow,
                 // true = Set Stock < 72 jam lalu: qty yang diinput akan DITAMBAH ke stok sistem.
                 'additive' => $stockService->hasRecentSetStock($outletId, $product->id, $draft?->id),
             ],
@@ -128,7 +156,7 @@ class SetStockController extends Controller
     }
 
     /** Isi keranjang (draft aktif toko ini). Dipakai juga untuk memulihkan draft saat halaman dibuka lagi. */
-    public function draft(Request $request, OutletStockService $stockService): JsonResponse
+    public function draft(Request $request): JsonResponse
     {
         $outletId = OutletAccess::id($request);
         $draft = SetStockDraft::where('active_outlet_id', $outletId)->orderBy('id')->first();
@@ -157,36 +185,6 @@ class SetStockController extends Controller
                     'updated_by' => $row->updated_by_name,
                     'updated_at' => $row->updated_at ? \Illuminate\Support\Carbon::parse($row->updated_at)->timezone('Asia/Jakarta')->format('d/m H:i') : null,
                 ]);
-        }
-
-        if ($items->isNotEmpty()) {
-            $productIds = $items->pluck('product_id')->all();
-            $additiveMap = $stockService->recentSetStockProductIds($outletId, $productIds, $draft->id);
-            $stockMap = [];
-            $deficitMap = [];
-            foreach (array_chunk($productIds, 1000) as $chunk) {
-                $deficitMap += OwnerStock::deficit()
-                    ->where('owner_id', $outletId)
-                    ->whereIn('product_id', $chunk)
-                    ->groupBy('product_id')
-                    ->selectRaw('product_id, SUM(qty) as total')
-                    ->pluck('total', 'product_id')
-                    ->all();
-                $stockMap += OwnerStock::where('owner_id', $outletId)
-                    ->whereIn('product_id', $chunk)
-                    ->groupBy('product_id')
-                    ->selectRaw('product_id, SUM(qty) as total')
-                    ->pluck('total', 'product_id')
-                    ->all();
-            }
-
-            // additive = qty di keranjang akan DITAMBAH ke stok saat ini (set ulang < 72 jam); stock_now sama
-            // dengan di kartu scan (termasuk saldo minus), dipakai untuk pratinjau "stok jadi".
-            $items = $items->map(fn ($row) => $row + [
-                'additive' => isset($additiveMap[$row['product_id']]),
-                'stock_now' => (int) ($stockMap[$row['product_id']] ?? 0),
-                'deficit' => (int) min(0, (int) ($deficitMap[$row['product_id']] ?? 0)),
-            ]);
         }
 
         return response()->json([
@@ -307,7 +305,6 @@ class SetStockController extends Controller
                 $changed = 0;
                 $unchanged = 0;
                 $added = 0;
-                $settled = 0;
 
                 foreach ($items as $item) {
                     try {
@@ -322,9 +319,6 @@ class SetStockController extends Controller
                         $result ? $changed++ : $unchanged++;
                         if (($result['mode'] ?? null) === 'add') {
                             $added++;
-                        }
-                        if (($result['settled'] ?? 0) > 0) {
-                            $settled++;
                         }
                     } catch (Throwable $e) {
                         $failures[] = ($item->product?->code ?? '#' . $item->product_id) . ' - '
@@ -345,7 +339,7 @@ class SetStockController extends Controller
                     'saved_at' => now(),
                 ]);
 
-                return ['total' => $items->count(), 'changed' => $changed, 'unchanged' => $unchanged, 'added' => $added, 'settled' => $settled];
+                return ['total' => $items->count(), 'changed' => $changed, 'unchanged' => $unchanged, 'added' => $added];
             });
         } catch (RuntimeException $e) {
             if ($e->getMessage() !== 'SET_STOCK_FAILED') {
@@ -361,8 +355,7 @@ class SetStockController extends Controller
         return response()->json([
             'message' => 'Set Stock tersimpan: ' . $summary['total'] . ' produk (' . $summary['changed']
                 . ' berubah, ' . $summary['unchanged'] . ' qty sudah sama'
-                . ($summary['added'] ? ', ' . $summary['added'] . ' ditambahkan ke stok karena set ulang < 72 jam' : '')
-                . ($summary['settled'] ? ', ' . $summary['settled'] . ' menutup stok minus dari penjualan sebelumnya' : '') . ').',
+                . ($summary['added'] ? ', ' . $summary['added'] . ' ditambahkan ke stok karena set ulang < 72 jam' : '') . ').',
             'summary' => $summary,
         ]);
     }
