@@ -430,9 +430,35 @@ class OwnerStockController extends Controller
             // minus dicek/ditutup lewat halaman Stok Minus.
             'deficitCount' => $selectedOwner ? app(DeficitStockService::class)->countOpen($selectedOwner->id) : 0,
             'suppliers' => $this->supplierOptions($this->scopeOutletIds($outlets, $selectedOwner), true),
+            'setStockKey' => self::SET_STOCK_KEY,
             'categoryOptions' => $this->categoryOptions(),
             'locationOptions' => $this->locationOptions(),
         ]);
+    }
+
+    /** Nilai "supplier" khusus di filter opname: semua stok hasil Set Stock (tanpa melihat supplier). */
+    public const SET_STOCK_KEY = 'set_stock';
+
+    /**
+     * Batch yang dianggap "hasil Set Stock" di satu outlet: batch yang dibuat oleh Set Stock (source_type set_stock),
+     * ATAU batch apa pun milik produk yang sudah pernah disimpan lewat Set Stock di outlet itu.
+     * $prefix = awalan kolom ('os.' untuk query builder ber-alias, '' untuk model).
+     */
+    protected function applySetStockFilter($query, int $outletId, string $prefix = '')
+    {
+        // Batch MINUS tidak ikut opname (ditutup lewat halaman Stok Minus), sama seperti opname per supplier.
+        $query->where(function ($where) use ($prefix) {
+            $where->whereNull($prefix . 'batch_number')->orWhere($prefix . 'batch_number', '!=', \App\Models\OwnerStock::DEFICIT_BATCH);
+        });
+
+        return $query->where(function ($where) use ($outletId, $prefix) {
+            $where->where($prefix . 'source_type', 'set_stock')
+                ->orWhereIn($prefix . 'product_id', DB::table('set_stock_draft_items as ssi')
+                    ->join('set_stock_drafts as ssd', 'ssd.id', '=', 'ssi.draft_id')
+                    ->where('ssd.outlet_id', $outletId)
+                    ->where('ssd.status', 'done')
+                    ->select('ssi.product_id'));
+        });
     }
 
     /**
@@ -441,9 +467,10 @@ class OwnerStockController extends Controller
      */
     public function getOpnameData(Request $request)
     {
+        $isSetStock = $request->input('supplier_id') === self::SET_STOCK_KEY;
         $request->validate([
             'outlet_id' => 'required|integer|exists:outlets,id',
-            'supplier_id' => 'required|integer|exists:suppliers,id',
+            'supplier_id' => $isSetStock ? 'required|string' : 'required|integer|exists:suppliers,id',
             'kategori' => 'nullable|string',
             'lokasi' => 'nullable|string',
         ], [
@@ -466,7 +493,11 @@ class OwnerStockController extends Controller
                 $join->on('op.id', '=', 'os.source_id')
                     ->where('os.source_type', '=', OutletPurchase::class);
             })
-            ->whereRaw('COALESCE(pb.supplier_id, op.supplier_id) = ?', [$request->supplier_id])
+            ->when(
+                $isSetStock,
+                fn ($query) => $this->applySetStockFilter($query, (int) $outletId, 'os.'),
+                fn ($query) => $query->whereRaw('COALESCE(pb.supplier_id, op.supplier_id) = ?', [$request->supplier_id])
+            )
             ->when($request->filled('kategori'), fn ($query) => $query->where('c.name', $request->kategori))
             ->when($request->filled('lokasi'), fn ($query) => $query->where('p.lokasi', $request->lokasi))
             ->orderBy('os.product_id')
@@ -496,9 +527,10 @@ class OwnerStockController extends Controller
 
     public function saveOpname(Request $request, OutletStockService $stockService)
     {
+        $isSetStock = $request->input('supplier_id') === self::SET_STOCK_KEY;
         $request->validate([
             'outlet_id' => 'required|integer|exists:outlets,id',
-            'supplier_id' => 'required|integer|exists:suppliers,id',
+            'supplier_id' => $isSetStock ? 'required|string' : 'required|integer|exists:suppliers,id',
             'adjustment_date' => 'required|date',
             'items' => 'required|array|min:1',
             'items.*.owner_stock_id' => 'required|exists:owner_stocks,id',
@@ -519,7 +551,11 @@ class OwnerStockController extends Controller
         // memastikan batch memang milik outlet & supplier yang dipilih.
         $ownerStockQuery = OwnerStock::where('owner_id', $outletId)
             ->whereIn('id', collect($request->items)->pluck('owner_stock_id')->unique()->values());
-        $this->applySupplierFilter($ownerStockQuery, $request->supplier_id);
+        if ($isSetStock) {
+            $this->applySetStockFilter($ownerStockQuery, (int) $outletId);
+        } else {
+            $this->applySupplierFilter($ownerStockQuery, $request->supplier_id);
+        }
         $ownerStocks = $ownerStockQuery->get()->keyBy('id');
 
         DB::transaction(function () use ($request, $ownerStocks, $stockService) {
