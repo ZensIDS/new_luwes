@@ -68,7 +68,7 @@
                 @else
                     <div class="alert alert-warning" style="margin-bottom:14px;">
                         <i class="fa fa-exclamation-triangle"></i>
-                        Qty yang disimpan <b>menimpa</b> stok toko <b>{{ $selectedOutlet->name }}</b> (stok sebelumnya ditampilkan di kartu produk).
+                        Qty yang disimpan <b>menimpa</b> stok toko <b>{{ $selectedOutlet->name }}</b> (stok sebelumnya ditampilkan di kartu produk). Bila stok sedang <b>minus</b> (sudah ada penjualan), qty ini menutup minus lebih dulu: misal minus 2 + Set Stock 10 = stok 8.
                         Keranjang dipakai bersama oleh semua pengguna toko ini dan otomatis tersimpan.
                     </div>
 
@@ -109,6 +109,7 @@
                                     <button type="button" id="btnCancel" class="btn btn-default btn-lg">Batal (Esc)</button>
                                 </div>
                                 <div class="ss-note" id="pDraftNote" style="display:none;"></div>
+                                <div class="ss-note" id="pPreview" style="display:none;"></div>
                                 <div class="ss-note" id="pHppWarn" style="display:none;">HPP produk ini 0. Cek harga beli produk sebelum menyimpan.</div>
                             </div>
 
@@ -139,8 +140,8 @@
                         </div>
                         <div class="form-group">
                             <label for="exportName">Filter nama depan produk</label>
-                            <input type="text" name="nama_awal" id="exportName" class="form-control" maxlength="100" autocomplete="off" placeholder="Contoh: indomie (kosongkan untuk semua produk)">
-                            <p class="help-block" style="margin-bottom:0;">Hanya produk yang namanya diawali teks ini yang di-export.</p>
+                            <select name="nama_awal" id="exportName" class="form-control" style="width:100%;" data-placeholder="Ketik 2 huruf nama depan, mis. IN (kosongkan untuk semua produk)"><option value=""></option></select>
+                            <p class="help-block" style="margin-bottom:0;">Ketik minimal 2 huruf lalu pilih dari daftar (atau pakai teks yang diketik). Hanya produk yang namanya diawali teks ini yang di-export.</p>
                         </div>
                         <div class="row">
                             <div class="col-xs-6 form-group">
@@ -230,7 +231,26 @@
 
             function focusScan() { $scan.val('').focus(); }
 
-            function closeCard() { current = null; $card.hide(); focusScan(); }
+            function closeCard() { current = null; $card.hide(); $('#pPreview').hide(); focusScan(); }
+
+            // Pratinjau hasil akhir stok: set ulang < 72 jam = stok sekarang + qty, selain itu = qty menimpa stok.
+            function updatePreview() {
+                if (!current) { $('#pPreview').hide(); return; }
+                const p = current.product, raw = $.trim($qty.val());
+                if (raw === '' || !/^\d+$/.test(raw)) { $('#pPreview').hide(); return; }
+                const q = parseInt(raw, 10);
+                const d = p.deficit || 0; // saldo minus (<= 0), ditutup lebih dulu oleh qty Set Stock
+                let msg;
+                if (p.additive) {
+                    msg = 'Stok sistem ' + nf.format(p.stock_now) + ' + ' + nf.format(q) + ' = ' + nf.format(p.stock_now + q) + ' (ditambah, bukan menimpa)';
+                } else if (d < 0) {
+                    msg = 'Stok minus ' + nf.format(d) + ' ditutup dulu: ' + nf.format(q) + ' ' + nf.format(d) + ' = ' + nf.format(q + d) + ' (minus tidak dihapus)';
+                } else {
+                    msg = 'Stok akan menjadi ' + nf.format(q) + ' (menimpa stok sistem ' + nf.format(p.stock_now) + ')';
+                }
+                $('#pPreview').show().text(msg);
+            }
+            $qty.on('input', updatePreview);
 
             function showCard(data) {
                 current = data;
@@ -243,6 +263,7 @@
                 $('#pNet').text(rp(p.price_net));
                 $('#pHppWarn').toggle(!(p.hpp > 0));
                 $('#qtyLabel').text(p.additive ? 'Qty tambahan (ditambah ke stok, set ulang < 72 jam)' : 'Qty baru (menimpa stok)');
+                updatePreview();
                 if (it) {
                     $('#pDraftNote').show().text('Sudah ada di keranjang: qty ' + it.qty + ' (discan ' + it.scan_count + 'x, terakhir diubah ' + (it.updated_by || '-') + ' ' + (it.updated_at || '') + '). Qty terisi kembali, cek ulang lalu Enter.');
                     $qty.val(it.qty);
@@ -250,6 +271,7 @@
                     $('#pDraftNote').hide();
                     $qty.val('');
                 }
+                updatePreview();
                 $card.show();
                 $qty.trigger('focus').trigger('select');
             }
@@ -361,7 +383,7 @@
                 }
                 $('#basketBody').html(rows.map(function (i) {
                     return '<tr data-id="' + i.id + '" data-version="' + i.version + '" data-product="' + i.product_id + '">' +
-                        '<td class="nm"><div title="' + esc(i.name) + '">' + esc(i.name) + '</div><small>' + esc(i.code) + ' &middot; ' + esc(i.updated_by || '-') + ' ' + esc(i.updated_at || '') + (i.scan_count > 1 ? ' &middot; ' + i.scan_count + 'x scan' : '') + '</small></td>' +
+                        '<td class="nm"><div title="' + esc(i.name) + '">' + esc(i.name) + (i.additive ? ' <span class="label label-warning" title="Set ulang < 72 jam: qty ditambah ke stok">+ tambah</span>' : '') + '</div><small>' + esc(i.code) + ' &middot; ' + esc(i.updated_by || '-') + ' ' + esc(i.updated_at || '') + (i.scan_count > 1 ? ' &middot; ' + i.scan_count + 'x scan' : '') + '<br>' + (i.additive ? 'Stok ' + nf.format(i.stock_now) + ' + ' + nf.format(i.qty) + ' = <b>' + nf.format(i.stock_now + i.qty) + '</b>' : 'Stok ' + nf.format(i.stock_now) + ' &rarr; <b>' + nf.format(i.qty + (i.deficit || 0)) + '</b>' + (i.deficit < 0 ? ' (minus ' + nf.format(i.deficit) + ' ditutup)' : '')) + '</small></td>' +
                         '<td style="text-align:right"><input type="number" min="0" step="1" class="form-control input-sm q" value="' + i.qty + '" data-orig="' + i.qty + '"></td>' +
                         '<td style="text-align:right"><button type="button" class="btn btn-danger btn-xs btn-del"><i class="fa fa-trash"></i></button></td></tr>';
                 }).join(''));
@@ -405,7 +427,11 @@
             // ---- simpan ----
             $('#btnSave').on('click', function () {
                 if (saving || !basket.length) return;
-                if (!confirm('Simpan ' + basket.length + ' produk? Qty akan MENIMPA stok toko ini dan tidak bisa dibatalkan dari halaman ini.')) return;
+                const addN = basket.filter(function (i) { return i.additive; }).length;
+                const note = addN
+                    ? addN + ' produk (set ulang < 72 jam) akan DITAMBAH ke stok; ' + (basket.length - addN) + ' produk lainnya MENIMPA stok.'
+                    : 'Qty akan MENIMPA stok toko ini.';
+                if (!confirm('Simpan ' + basket.length + ' produk? ' + note + ' Tidak bisa dibatalkan dari halaman ini.')) return;
                 saving = true;
                 const $btn = $(this).prop('disabled', true).html('<i class="fa fa-spinner fa-spin"></i> Menyimpan...');
                 $('#saveFailures').hide().empty();
@@ -428,6 +454,38 @@
                         $btn.html('<i class="fa fa-save"></i> Simpan Set Stock');
                         renderBasket();
                     });
+            });
+
+            // Filter nama depan produk (export): Select2 + saran brand dari folder Master Harga Jual
+            $('#exportModal').on('shown.bs.modal', function () {
+                const $name = $('#exportName');
+                if ($name.data('select2')) { return; }
+                $name.select2({
+                    dropdownParent: $('#exportModal'),
+                    width: '100%',
+                    allowClear: true,
+                    tags: true,
+                    placeholder: $name.data('placeholder') || '',
+                    minimumInputLength: 2,
+                    createTag: function (params) {
+                        const term = $.trim(params.term || '').toUpperCase();
+                        return term.length >= 2 ? { id: term, text: term } : null;
+                    },
+                    language: {
+                        inputTooShort: function () { return 'Ketik minimal 2 huruf nama depan produk'; },
+                        searching: function () { return 'Mencari...'; }
+                    },
+                    ajax: {
+                        url: @json(route('laporan.outlet.stok-harian.brands')),
+                        dataType: 'json',
+                        delay: 250,
+                        cache: true,
+                        data: function (params) { return { q: $.trim(params.term || ''), outlet_id: outletId }; },
+                        processResults: function (items) {
+                            return { results: $.map(items, function (brand) { return { id: brand, text: brand }; }) };
+                        }
+                    }
+                });
             });
 
             // pulihkan keranjang saat halaman dibuka
