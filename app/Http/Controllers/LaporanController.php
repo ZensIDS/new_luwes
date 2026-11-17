@@ -35,6 +35,7 @@ use App\Exports\OutletAllStockExport;
 use App\Exports\OutletMinimalStockExport;
 use App\Exports\KassaHarianExport;
 use App\Exports\OutletPenjualanExport;
+use App\Exports\OutletSellOutBrandExport;
 use App\Exports\OutletRafaksiExport;
 use App\Exports\OutletReturExport;
 use App\Exports\LaporanToko\ReportMeta;
@@ -222,6 +223,33 @@ class LaporanController extends Controller
     public function exportOutletPenjualan(Request $request)
     {
         return Excel::download(new OutletPenjualanExport($request), ReportMeta::fileNameFor($request, 'Penjualan-Toko'));
+    }
+
+    /**
+     * Sell Out Brand: berapa banyak satu brand (nama depan barang) terjual pada periode.
+     * Brand wajib diisi. Tidak tersedia untuk role kasir.
+     */
+    public function exportOutletSellOutBrand(Request $request)
+    {
+        abort_if($request->user()?->role === 'kasir', 403, 'Laporan ini tidak tersedia untuk role kasir.');
+
+        $request->validate([
+            'brand' => ['required', 'string', 'max:100'],
+            'outlet_id' => ['nullable', 'integer'],
+            'kasir_id' => ['nullable', 'integer'],
+            'tanggal_mulai' => ['nullable', 'date_format:Y-m-d'],
+            'tanggal_selesai' => ['nullable', 'date_format:Y-m-d'],
+        ]);
+
+        $brand = OutletLaporanService::brandFromRequest($request);
+        abort_if($brand === null, 422, 'Brand wajib diisi.');
+
+        $slug = trim((string) preg_replace('/[^A-Za-z0-9\-]+/', '-', $brand), '-') ?: 'Brand';
+
+        return Excel::download(
+            new OutletSellOutBrandExport($request, $brand),
+            ReportMeta::fileNameFor($request, 'Sell-Out-Brand-'.$slug)
+        );
     }
 
     /** Laporan Penjualan Kassa harian: satu baris per sesi kasir pada satu tanggal. */

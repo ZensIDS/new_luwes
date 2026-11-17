@@ -93,11 +93,17 @@ $(function () {
             if (v) params[$(this).data('param')] = v;
         });
 
-        if (params.tanggal_mulai && params.tanggal_selesai && params.tanggal_mulai > params.tanggal_selesai) {
-            modal.find('.rpt-error').show();
+        modal.find('.rpt-error').hide();
+
+        if (modal.find('.js-brand[data-required]').length && !params.brand) {
+            modal.find('.js-brand-error').show();
             return;
         }
-        modal.find('.rpt-error').hide();
+
+        if (params.tanggal_mulai && params.tanggal_selesai && params.tanggal_mulai > params.tanggal_selesai) {
+            modal.find('.js-date-error').show();
+            return;
+        }
 
         var query = $.param(params), url = $(this).data('url');
         window.location.href = query ? url + '?' + query : url;

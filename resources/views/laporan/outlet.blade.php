@@ -9,6 +9,9 @@
             ['id'=>'outlet_penjualan', 'title'=>'Penjualan Outlet', 'icon'=>'fa-shopping-cart', 'color'=>'green', 'xls'=>'laporan.outlet.penjualan',
              'date'=>true, 'outlet'=>true, 'cashier'=>true, 'rafaksi'=>false,
              'desc'=>'Penjualan per kasir lengkap dengan rekap metode pembayaran, bon, dan setoran akhir.'],
+            ['id'=>'outlet_sell_out_brand', 'title'=>'Sell Out Brand', 'icon'=>'fa-line-chart', 'color'=>'purple', 'xls'=>'laporan.outlet.sell-out-brand',
+             'date'=>true, 'outlet'=>true, 'brand'=>true, 'brand_required'=>true, 'cashier'=>true, 'rafaksi'=>false,
+             'desc'=>'Berapa banyak satu brand terjual: rekap harian per invoice, rekap per hari, dan rekap per produk. Brand = nama depan barang. Retur tidak dihitung, barang pengganti dihitung.'],
             ['id'=>'outlet_kassa', 'title'=>'Penjualan Kassa Harian', 'icon'=>'fa-calculator', 'color'=>'blue', 'xls'=>'laporan.outlet.kassa',
              'date'=>false, 'single_date'=>true, 'outlet'=>true, 'cashier'=>false, 'rafaksi'=>false,
              'desc'=>'Per kassa pada satu tanggal: nama kasir, saldo awal, penjualan tunai dan per metode bayar, bon, setoran, dan setoran total.'],
@@ -39,6 +42,14 @@
              'desc'=>'Retur barang dari toko ke gudang.'],
         ],
     ];
+
+    // Sell Out Brand tidak tersedia untuk role kasir (sama dengan route-nya: ditolak 403).
+    if (auth()->user()?->role === 'kasir') {
+        $groups['Penjualan'] = array_values(array_filter(
+            $groups['Penjualan'],
+            fn ($r) => $r['id'] !== 'outlet_sell_out_brand'
+        ));
+    }
 
     // Laporan Kassa memuat angka kas: hanya superadmin / owner / staff-outlet (sama dengan route-nya).
     if (! in_array(auth()->user()?->role, ['superadmin', 'owner', 'staff-outlet'], true)) {

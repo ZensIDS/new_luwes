@@ -6,17 +6,41 @@
             <th>Harga Jual</th>
             <th>Sub total</th>
         </tr>
-        @php $totalCost = 0; @endphp
-        @foreach ($value->displayItems() as $item)
+        @php
+            // Filter Per Brand: hanya barang yang namanya diawali / brand-nya diawali teks filter yang ditampilkan.
+            $brandFilter = trim((string) ($brandFilter ?? ''));
+            $allItems = $value->displayItems();
+            $shownItems = $brandFilter === '' ? $allItems : collect($allItems)->filter(function ($item) use ($brandFilter) {
+                return mb_stripos((string) ($item->product?->name ?? ''), $brandFilter) === 0
+                    || mb_stripos((string) ($item->product?->brand ?? ''), $brandFilter) === 0;
+            })->values();
+            $brandSubtotal = 0;
+            // Total nota selalu dari SEMUA barang (dipakai fallback grand total), bukan hanya barang yang tampil.
+            $totalCost = collect($allItems)->sum(fn ($i) => $i->subtotal ?? ($i->qty * $i->price));
+            // Kresek bukan barang brand: disembunyikan saat filter brand aktif.
+            $kreseks = $brandFilter === '' ? $value->kreseks : [];
+        @endphp
+        @foreach ($shownItems as $item)
             <tr>
                 <td>{{ $item->serial_number ? $item->serial_number : $item->product?->code }} - {{ $item->product?->name ?? '(produk dihapus)' }}</td>
                 <td>{{ $item->qty }}</td>
                 <td>@currency($item->price)</td>
                 <td>@currency($item->subtotal ?? ($item->qty * $item->price))</td>
             </tr>
-        @php $totalCost += $item->subtotal ?? ($item->qty * $item->price); @endphp
+        @php
+            $brandSubtotal += $item->subtotal ?? ($item->qty * $item->price);
+        @endphp
         @endforeach
-        @foreach ($value->kreseks as $kresek)
+        @if ($brandFilter !== '')
+            <tr class="info">
+                <th colspan="3">Subtotal brand "{{ $brandFilter }}" ({{ $shownItems->count() }} dari {{ count($allItems) }} barang di nota ini)</th>
+                <th>@currency($brandSubtotal)</th>
+            </tr>
+            <tr>
+                <td colspan="4" class="text-muted small">Total di bawah adalah total seluruh nota (semua barang), bukan hanya brand yang difilter.</td>
+            </tr>
+        @endif
+        @foreach ($kreseks as $kresek)
             <tr>
                 <td>{{ $kresek->name }}</td>
                 <td>{{ $kresek->qty }}</td>

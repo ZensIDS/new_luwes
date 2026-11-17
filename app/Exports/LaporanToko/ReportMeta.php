@@ -35,7 +35,7 @@ final class ReportMeta
     /**
      * @param string   $title     Judul di sheet, mis. "LAPORAN PENJUALAN OUTLET".
      * @param string   $fileLabel Bagian nama file, mis. "Penjualan-Toko".
-     * @param string[] $show      Filter yang ditampilkan: 'outlet', 'kasir', 'rafaksi', 'lokasi'.
+     * @param string[] $show      Filter yang ditampilkan: 'outlet', 'kasir', 'rafaksi', 'lokasi', 'brand'.
      * @param ?array   $range     [Carbon awal, Carbon akhir] untuk menimpa periode dari request (mis. periode rafaksi terpilih).
      * @param ?Carbon  $snapshot  Isi untuk laporan posisi (stok) per satu tanggal: info "Per Tanggal" menggantikan "Periode".
      */
@@ -55,6 +55,9 @@ final class ReportMeta
         }
         if (in_array('lokasi', $show, true)) {
             $info['Lokasi'] = $request->filled('lokasi') ? (string) $request->input('lokasi') : 'Semua Lokasi';
+        }
+        if (in_array('brand', $show, true)) {
+            $info['Brand'] = \App\Services\OutletLaporanService::brandFromRequest($request) ?? 'Semua Brand';
         }
 
         return new self(

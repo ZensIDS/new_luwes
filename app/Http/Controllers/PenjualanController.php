@@ -125,6 +125,12 @@ class PenjualanController extends Controller
         $searchValue = trim((string) $request->input('search.value', ''));
         $prefix = $searchValue !== '' ? addcslashes($searchValue, '\\%_') . '%' : null;
 
+        // Filter Per Brand: awalan nama produk (kata pertama = brand, atau nama lengkap) atau kolom brand.
+        // Penjualan yang tidak punya barang brand itu disembunyikan, dan rincian nota hanya memuat barang brand itu.
+        // Role kasir tidak memakai filter ini: input brand dari request diabaikan (bukan hanya disembunyikan di layar).
+        $brandValue = $user->role === 'kasir' ? '' : mb_substr(trim((string) $request->input('brand', '')), 0, 100);
+        $brandPrefix = $brandValue !== '' ? addcslashes($brandValue, '\\%_') . '%' : null;
+
         $hasOrder = $request->has('order.0.column');
         $orderDir = $hasOrder && strtolower((string) $request->input('order.0.dir')) === 'asc' ? 'asc' : 'desc';
         $sortable = [1 => 'penjualans.created_at', 2 => 'penjualans.code'];
@@ -159,7 +165,21 @@ class PenjualanController extends Controller
             });
         }
 
-        $recordsFiltered = $prefix === null ? $recordsTotal : (clone $base)->count('penjualans.id');
+        if ($brandPrefix !== null) {
+            $base->whereExists(function ($sub) use ($brandPrefix) {
+                $sub->select(DB::raw(1))
+                    ->from('penjualan_items as pb')
+                    ->join('products as pbp', 'pbp.id', '=', 'pb.product_id')
+                    ->whereColumn('pb.penjualan_id', 'penjualans.id')
+                    ->whereNull('pb.deleted_at')
+                    ->where(function ($w) use ($brandPrefix) {
+                        $w->where('pbp.name', 'like', $brandPrefix)
+                            ->orWhere('pbp.brand', 'like', $brandPrefix);
+                    });
+            });
+        }
+
+        $recordsFiltered = ($prefix === null && $brandPrefix === null) ? $recordsTotal : (clone $base)->count('penjualans.id');
 
         // Deferred join: urutkan/paginate hanya kolom id, baru muat baris lengkap untuk halaman ini.
         $pageIds = $base
@@ -178,7 +198,7 @@ class PenjualanController extends Controller
             'voucher',
             'kreseks',
             // withTrashed: produk yang sudah di-soft-delete tetap tampil di riwayat penjualan
-            'items.product' => fn ($q) => $q->withTrashed()->select('id', 'code', 'name'),
+            'items.product' => fn ($q) => $q->withTrashed()->select('id', 'code', 'name', 'brand'),
         ])
             ->withCount('refundPenjualans')
             ->whereIn('id', $pageIds)
@@ -186,7 +206,7 @@ class PenjualanController extends Controller
             ->sortBy(fn ($penjualan) => $order[$penjualan->id])
             ->values();
 
-        $data = $penjualans->map(function ($value) use ($canDeleteSales, $cancellation, $user) {
+        $data = $penjualans->map(function ($value) use ($canDeleteSales, $cancellation, $user, $brandValue) {
             $aksi = '<div class="btn-group">'
                 . '<button type="button" class="btn btn-default btn-sm btn-toggle-detail" title="Lihat rincian barang"><i class="fa fa-chevron-down"></i> Detail</button>'
                 . '<a class="btn btn-info btn-sm" href="' . e(route('penjualan.show', $value->id)) . '" title="Buka halaman penjualan"><i class="fa fa-eye"></i> Show</a>'
@@ -232,7 +252,7 @@ class PenjualanController extends Controller
                 e($value->outlet->name ?? '___customer'),
                 e($value->kasir->name ?? '___customer'),
                 e($value->cashierShift?->name ?? '—'),
-                view('penjualan._detail', ['value' => $value])->render(),
+                view('penjualan._detail', ['value' => $value, 'brandFilter' => $brandValue])->render(),
                 $aksi,
             ];
         });

@@ -32,10 +32,18 @@
                                     @endforeach
                                 </select>
                             </div>
-                            <div class="form-group">
+                            <div class="form-group" style="margin-right:15px">
                                 <label for="daterange" style="margin-right:8px">Tanggal</label>
                                 <input type="text" id="daterange" class="form-control" style="min-width:230px" readonly>
                             </div>
+                            {{-- Filter Per Brand: tidak tersedia untuk role kasir. --}}
+                            @if (auth()->user()?->role !== 'kasir')
+                                <div class="form-group">
+                                    <label for="brand" style="margin-right:8px">Per Brand</label>
+                                    <input type="search" id="brand" class="form-control" style="min-width:260px" maxlength="100" autocomplete="off"
+                                        placeholder="Awalan brand / nama produk, mis. ABC" title="Hanya barang dengan brand ini yang tampil di setiap nota; nota tanpa brand ini disembunyikan.">
+                                </div>
+                            @endif
                         </div>
                         {{-- <p class="pj-hint">Default menampilkan penjualan hari ini. Ubah rentang tanggal untuk melihat data sebelumnya. Klik <strong>Detail</strong> pada baris untuk melihat rincian barang. Tekan <kbd>F4</kbd> untuk Re-Print nota penjualan teratas.</p> --}}
                     </div>
@@ -108,6 +116,7 @@ $(function () {
                 d.kasir_id = $('#kasir_id').val() || '';
                 d.date_from = dateFrom;
                 d.date_to = dateTo;
+                d.brand = $.trim($('#brand').val() || ''); // #brand tidak ada untuk role kasir -> kosong
             }
         },
         order: [[1, 'desc']], // tanggal terbaru dulu
@@ -131,6 +140,13 @@ $(function () {
     });
 
     $('#kasir_id').on('change', function () { table.ajax.reload(); });
+
+    // Filter Per Brand: muat ulang tabel setelah berhenti mengetik (server memfilter nota dan barang per nota).
+    var brandTimer = null;
+    $('#brand').on('input', function () {
+        clearTimeout(brandTimer);
+        brandTimer = setTimeout(function () { table.ajax.reload(); }, 400);
+    });
 
     // Shortcut F4 = Re-Print nota pada baris teratas tabel (penjualan terbaru; ikut hasil filter/pencarian).
     $(document).on('keydown', function (e) {
