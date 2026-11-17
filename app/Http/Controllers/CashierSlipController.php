@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Models\CashierDrawerEntry;
 use App\Models\CashierSession;
-use App\Models\PaymentMethod;
 use App\Support\ReceiptHeader;
 use Illuminate\Http\Request;
 
@@ -78,83 +77,50 @@ class CashierSlipController extends Controller
             ['Tutup', $session->closed_at?->format('d/m/Y H:i') ?? '-'],
         ];
 
-        // Tampilkan SEMUA metode bayar (termasuk yang Rp 0), plus metode yang terpakai di sesi ini
-        // tapi sudah dihapus dari master. Tunai selalu ada dan di atas.
-        $byName = [];
-        foreach ($breakdown['payments'] as $p) {
-            $byName[mb_strtolower(trim($p['name']))] = $p;
-        }
-        $methods = PaymentMethod::query()->orderBy('name')->pluck('name')->map(fn ($n) => trim((string) $n))->filter()->all();
-        $all = [];
-        foreach ($methods as $name) {
-            $all[mb_strtolower($name)] = $name;
-        }
-        foreach ($byName as $key => $p) {
-            $all[$key] ??= trim($p['name']);
-        }
-        if (! collect($all)->contains(fn ($name) => CashierSession::isCashPaymentName($name))) {
-            $all['tunai'] = 'Tunai';
-        }
-        uasort($all, fn ($a, $b) => [! CashierSession::isCashPaymentName($a), $a] <=> [! CashierSession::isCashPaymentName($b), $b]);
+        // Urutan slip tutup kasir (tanpa judul "PENJUALAN" dan tanpa "RINCIAN BON"):
+        //   BON, ATM/QRIS, Voucher, Uang fisik
+        //   -----
+        //   TUNAI: TOTAL, Tunai Komputer
+        //   -----
+        //   Selisih
+        // ATM/QRIS = SEMUA penjualan non-tunai (ATM, QRIS, transfer, dll) digabung jadi satu baris.
+        // TOTAL = jumlah baris di atas garis: BON + ATM/QRIS + Voucher + Uang fisik.
+        // Tunai Komputer = uang tunai yang seharusnya ada menurut sistem (expected_cash), rumusnya tidak berubah.
+        $nonCashCount = (int) collect($breakdown['payments'])
+            ->reject(fn ($p) => (bool) ($p['is_cash'] ?? CashierSession::isCashPaymentName($p['name'] ?? '')))
+            ->sum('count');
+        $nonCashTotal = (float) $breakdown['non_cash_total'];
+        $hasVoucher = (int) $breakdown['voucher_count'] > 0;
+        $voucherTotal = $hasVoucher ? (float) $breakdown['voucher_total'] : 0.0;
+        $bonTotal = (float) $session->cash_out;
+        $closingCash = (float) $session->closing_cash;
 
-        // Metode bayar yang nama depannya ATM atau QRIS (mis. "ATM 2% ( KECUALI BRI & BNI )", "QRIS 0,7%",
-        // "QRIS BRI") digabung jadi satu baris "ATM" / "QRIS": jumlah transaksi dan totalnya diakumulasi.
-        // Baris gabungan menempati urutan metode pertama dari kelompoknya.
-        $mergedPrefixes = ['ATM', 'QRIS'];
-        $mergedAt = [];
-        $mergedSum = [];
-        $payRows = [];
-        foreach ($all as $key => $name) {
-            $p = $byName[$key] ?? null;
-            $prefix = collect($mergedPrefixes)->first(
-                fn ($candidate) => preg_match('/^' . preg_quote($candidate, '/') . '(?![\p{L}\p{N}])/iu', $name) === 1
-            );
-
-            if ($prefix === null) {
-                $payRows[] = [$name . ' (' . ($p['count'] ?? 0) . ')', $this->n($p['total'] ?? 0), 0];
-
-                continue;
-            }
-
-            if (! isset($mergedAt[$prefix])) {
-                $mergedAt[$prefix] = count($payRows);
-                $mergedSum[$prefix] = ['count' => 0, 'total' => 0.0];
-                $payRows[] = [$prefix, '', 0]; // diisi setelah semua metode kelompok ini dijumlahkan
-            }
-            $mergedSum[$prefix]['count'] += (int) ($p['count'] ?? 0);
-            $mergedSum[$prefix]['total'] += (float) ($p['total'] ?? 0);
+        $topRows = [
+            ['BON', $this->n($bonTotal), 0],
+            ['ATM/QRIS (' . $nonCashCount . ')', $this->n($nonCashTotal), 0],
+        ];
+        if ($hasVoucher) {
+            $topRows[] = ['Voucher ' . $breakdown['voucher_count'] . ' lbr', $this->n($voucherTotal), 0];
         }
-        foreach ($mergedAt as $prefix => $index) {
-            $payRows[$index] = [$prefix . ' (' . $mergedSum[$prefix]['count'] . ')', $this->n($mergedSum[$prefix]['total']), 0];
-        }
-        $payRows[] = ['Total', 'Rp ' . $this->n($breakdown['sales_total']), 1];
-        if ($breakdown['voucher_count'] > 0) {
-            $payRows[] = ['Voucher ' . $breakdown['voucher_count'] . ' lbr', $this->n($breakdown['voucher_total']), 0];
-        }
+        $topRows[] = ['Uang fisik', 'Rp ' . $this->n($closingCash), 1];
 
-        $cashRows = [];
+        $cashRows = [
+            ['TOTAL', 'Rp ' . $this->n($bonTotal + $nonCashTotal + $voucherTotal + $closingCash), 1],
+        ];
         if ((float) $session->cash_in > 0) {
             $cashRows[] = ['Kas masuk', $this->n($session->cash_in), 0];
         }
-        $cashRows[] = ['BON', '-' . $this->n($session->cash_out), 0];
         $cashRows[] = ['Tunai Komputer', 'Rp ' . $this->n($session->expected_cash), 1];
-        $cashRows[] = ['Uang fisik', 'Rp ' . $this->n($session->closing_cash), 1];
-        $cashRows[] = ['Selisih', $diff == 0 ? 'Pas' : (($diff > 0 ? '+' : '-') . $this->n(abs($diff))), 1];
 
-        $bonLines = $session->drawerEntries->where('type', 'bon')->sortBy('recorded_at')->values()
-            ->map(fn ($e) => [
-                ($e->recorded_at?->format('H:i') ?? '-') . (filled($e->note) ? ' ' . trim((string) $e->note) : ''),
-                $this->n($e->amount),
-                0,
-            ])->all();
+        $diffRows = [
+            ['Selisih', $diff == 0 ? 'Pas' : (($diff > 0 ? '+' : '-') . $this->n(abs($diff))), 1],
+        ];
 
         $sections = [
-            ['title' => 'PENJUALAN', 'rows' => $payRows, 'lines' => []],
+            ['title' => null, 'rows' => $topRows, 'lines' => []],
             ['title' => 'TUNAI', 'rows' => $cashRows, 'lines' => []],
+            ['title' => null, 'rows' => $diffRows, 'lines' => []],
         ];
-        if ($bonLines) {
-            $sections[] = ['title' => 'RINCIAN BON', 'rows' => $bonLines, 'lines' => []];
-        }
         if (filled($session->closing_note)) {
             $sections[] = ['title' => null, 'rows' => [], 'lines' => ['Catatan: ' . trim((string) $session->closing_note)]];
         }
