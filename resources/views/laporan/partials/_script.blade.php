@@ -93,19 +93,17 @@ $(function () {
             if (v) params[$(this).data('param')] = v;
         });
 
-        // Outlet wajib (laporan yang menandainya dengan data-required).
-        if (modal.find('[data-required]').length && !params.outlet_id) {
-            modal.find('.rpt-error').hide();
-            modal.find('.rpt-error-outlet').show();
+        modal.find('.rpt-error').hide();
+
+        if (modal.find('.js-brand[data-required]').length && !params.brand) {
+            modal.find('.js-brand-error').show();
             return;
         }
 
         if (params.tanggal_mulai && params.tanggal_selesai && params.tanggal_mulai > params.tanggal_selesai) {
-            modal.find('.rpt-error').hide();
-            modal.find('.rpt-error-date').show();
+            modal.find('.js-date-error').show();
             return;
         }
-        modal.find('.rpt-error').hide();
 
         var query = $.param(params), url = $(this).data('url');
         window.location.href = query ? url + '?' + query : url;

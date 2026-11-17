@@ -65,11 +65,17 @@
 
                 @if (!empty($r['brand']))
                     <div class="form-group">
-                        <label>Brand (nama depan barang)</label>
+                        <label>Brand (nama depan barang){!! !empty($r['brand_required']) ? ' <span class="text-red">*</span>' : '' !!}</label>
                         <select class="form-control js-brand" data-param="brand" style="width:100%;"
+                            {{ !empty($r['brand_required']) ? 'data-required=1' : '' }}
                             data-url="{{ route('laporan.outlet.stok-harian.brands') }}"
                             data-placeholder="Ketik 2 huruf nama depan, mis. IN"><option value=""></option></select>
-                        <span class="help-block" style="margin-bottom:0;">Ketik minimal 2 huruf, lalu pilih brand dari daftar. Kosongkan untuk semua brand.</span>
+                        <span class="help-block" style="margin-bottom:0;">
+                            Ketik minimal 2 huruf, lalu pilih brand dari daftar.{{ empty($r['brand_required']) ? ' Kosongkan untuk semua brand.' : ' Wajib dipilih.' }}
+                        </span>
+                        @if (!empty($r['brand_required']))
+                            <p class="rpt-error js-brand-error"><i class="fa fa-exclamation-circle"></i> Pilih brand terlebih dahulu.</p>
+                        @endif
                     </div>
                 @endif
 
@@ -104,8 +110,7 @@
                     <p class="text-muted" style="margin:0;">Laporan ini tidak memerlukan filter.</p>
                 @endif
 
-                <p class="rpt-error rpt-error-date"><i class="fa fa-exclamation-circle"></i> Tanggal mulai tidak boleh lebih besar dari tanggal selesai.</p>
-                <p class="rpt-error rpt-error-outlet"><i class="fa fa-exclamation-circle"></i> Pilih outlet terlebih dahulu.</p>
+                <p class="rpt-error js-date-error"><i class="fa fa-exclamation-circle"></i> Tanggal mulai tidak boleh lebih besar dari tanggal selesai.</p>
             </div>
 
             <div class="modal-footer">

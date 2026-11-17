@@ -35,13 +35,49 @@ class OutletLaporanService
         ];
     }
 
-    public function sales(Request $request): array
+    /**
+     * Brand dari request = kata pertama nama barang (huruf besar), sama dengan folder Master Harga Jual
+     * dan laporan Stok Toko Harian. Null bila kosong.
+     */
+    public static function brandFromRequest(Request $request): ?string
+    {
+        $brand = PriceFolderIndex::normalize((string) $request->input('brand', ''));
+        $brand = preg_split('/\s+/', $brand, -1, PREG_SPLIT_NO_EMPTY)[0] ?? '';
+
+        return $brand !== '' ? $brand : null;
+    }
+
+    /** Kunci brand sebuah nama barang; harus sama dengan PriceFolderIndex::keySql(). */
+    public static function brandKeyOf(string $name): string
+    {
+        $name = trim($name);
+        if ($name === '' || ! preg_match('/^[A-Za-z]/', $name)) {
+            return PriceFolderIndex::OTHER;
+        }
+
+        return mb_strtoupper(explode(' ', $name, 2)[0], 'UTF-8');
+    }
+
+    protected function inBrand(?Product $product, string $brand): bool
+    {
+        return $product !== null && self::brandKeyOf((string) $product->name) === $brand;
+    }
+
+    /**
+     * @param ?string $brand Bila diisi (Sell Out Brand): hanya barang brand itu yang dihitung. Retur memakai aturan yang
+     *                       sama dengan Penjualan Outlet (barang diretur dikurangkan, barang pengganti dihitung).
+     *                       Hasil 'transactions', 'paymentMethods' dan 'summary' lalu hanya mencakup barang brand itu.
+     *                       Tambahan hasil 'brandStats': per barang qty nota (kotor) dan qty retur.
+     */
+    public function sales(Request $request, ?string $brand = null): array
     {
         [$start, $end] = $this->dateRange($request);
         $outletId = $this->outletId($request);
         $cashierId = $request->filled('kasir_id') ? (int) $request->input('kasir_id') : null;
+        $brandStats = [];
 
         $sales = $this->saleQuery($start, $end, $outletId, $cashierId)
+            ->when($brand !== null, fn ($query) => $query->whereHas('items.product', fn ($p) => $p->whereRaw(PriceFolderIndex::keySql().' = ?', [$brand])))
             ->with([
                 'outlet', 'kasir', 'cashierShift', 'paymentMethod',
                 'items.product', 'vouchers.products',
@@ -56,10 +92,23 @@ class OutletLaporanService
         foreach ($sales as $sale) {
             $voucherByItem = $this->voucherAllocation($sale);
             $saleTotal = 0.0;
+            $rowsBefore = $rows->count();
             foreach ($sale->items as $item) {
+                if ($brand !== null && ! $this->inBrand($item->product, $brand)) {
+                    continue;
+                }
+
                 $returnedQty = (float) ($returnedByItem[$item->id] ?? 0);
                 $qty = max(0, (float) $item->qty - $returnedQty);
                 $unitPrice = (float) ($item->price ?? 0);
+
+                if ($brand !== null) {
+                    $statKey = ($item->product?->code ?? '-').'|'.($item->product?->name ?? '-');
+                    $brandStats[$statKey] ??= ['barcode' => $item->product?->code ?? '-', 'product' => $item->product?->name ?? '-', 'gross' => 0.0, 'returned' => 0.0];
+                    $brandStats[$statKey]['gross'] += (float) $item->qty;
+                    $brandStats[$statKey]['returned'] += min($returnedQty, (float) $item->qty);
+                }
+
                 if ($qty <= 0) {
                     continue;
                 }
@@ -80,6 +129,10 @@ class OutletLaporanService
                 ]));
             }
 
+            if ($brand !== null && $rows->count() === $rowsBefore) {
+                continue; // semua barang brand di nota ini sudah diretur: nota tidak dihitung
+            }
+
             $transactions->push([
                 'date' => $sale->created_at,
                 'invoice' => $sale->code,
@@ -93,12 +146,16 @@ class OutletLaporanService
         // A replacement item is a sale for reporting purposes. It is added at
         // the date of the return, while the returned item is removed above.
         $refunds = $this->refundQuery($start, $end, $outletId)
+            ->when($brand !== null, fn ($query) => $query->whereHas('items', fn ($i) => $i->where('type', 'replacement')
+                ->whereHas('product', fn ($p) => $p->whereRaw(PriceFolderIndex::keySql().' = ?', [$brand]))))
             ->with(['outlet', 'penjualan.kasir', 'penjualan.cashierShift', 'items.product'])
             ->orderBy('created_at')->orderBy('id')->get();
 
         foreach ($refunds as $refund) {
             $replacementTotal = 0.0;
-            foreach ($refund->items->where('type', 'replacement') as $item) {
+            $replacementItems = $refund->items->where('type', 'replacement')
+                ->filter(fn ($item) => $brand === null || $this->inBrand($item->product, $brand));
+            foreach ($replacementItems as $item) {
                 $qty = (float) ($item->qty ?? 0);
                 $unitPrice = (float) ($item->unit_price ?? 0);
                 $subtotal = (float) ($item->subtotal ?? ($qty * $unitPrice));
@@ -145,6 +202,7 @@ class OutletLaporanService
             'rows' => $displayRows,
             'transactions' => $transactions->values(),
             'paymentMethods' => $paymentMethods,
+            'brandStats' => $brandStats,
             'summary' => [
                 'total_penjualan' => (float) $transactions->sum('total'),
                 'bon' => $bon,
