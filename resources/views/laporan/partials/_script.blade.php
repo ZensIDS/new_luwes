@@ -83,6 +83,67 @@ $(function () {
         $(this).closest('.modal').find('.js-brand').val(null).trigger('change');
     });
 
+    // ---- Preview laporan (tanpa unduh) ----
+    var $pv = $(
+        '<div id="rptPreviewModal" class="modal fade" tabindex="-1" role="dialog"><div class="modal-dialog"><div class="modal-content">' +
+        '<div class="modal-header"><button type="button" class="close" data-dismiss="modal">&times;</button>' +
+        '<h4 class="modal-title"><i class="fa fa-eye"></i> <span class="js-pv-title">Preview</span></h4></div>' +
+        '<div class="modal-body"><div class="rpt-pv-loading"><i class="fa fa-spinner fa-spin fa-2x"></i><p>Menyiapkan preview...</p></div></div>' +
+        '</div></div></div>'
+    ).appendTo('body');
+
+    // Preview tampil di atas modal filter (backdrop-nya ikut dinaikkan).
+    $pv.on('shown.bs.modal', function () { $('.modal-backdrop').last().css('z-index', 1055); });
+    $pv.on('hidden.bs.modal', function () { if ($('.modal.in').length) { $('body').addClass('modal-open'); } });
+
+    function esc(v) { return $('<div>').text(v == null ? '' : v).html(); }
+
+    function showPreview(res) {
+        var body = $pv.find('.modal-body'), tabs = '', panes = '';
+        $.each(res.sheets, function (i, s) {
+            var note = s.total_rows > s.shown_rows
+                ? 'Menampilkan ' + s.shown_rows + ' dari ' + s.total_rows + ' baris. Unduh Excel untuk data lengkap.'
+                : s.total_rows + ' baris.';
+            tabs += '<button type="button" class="btn btn-xs js-pv-tab ' + (i === 0 ? 'btn-primary' : 'btn-default') + '" data-i="' + i + '">' + esc(s.name) + '</button>';
+            panes += '<div class="js-pv-pane" data-i="' + i + '"' + (i === 0 ? '' : ' style="display:none"') + '>' +
+                '<p class="rpt-pv-note">' + esc(note) + '</p><div class="rpt-pv-scroll">' + s.html + '</div></div>';
+        });
+        body.html((res.sheets.length > 1 ? '<div class="rpt-pv-tabs">' + tabs + '</div>' : '') + panes);
+    }
+
+    $(document).on('click', '.js-pv-tab', function () {
+        var i = $(this).data('i');
+        $('.js-pv-tab').removeClass('btn-primary').addClass('btn-default');
+        $(this).removeClass('btn-default').addClass('btn-primary');
+        $('.js-pv-pane').hide().filter('[data-i="' + i + '"]').show();
+    });
+
+    $(document).on('click', '.js-preview', function () {
+        var modal = $(this).closest('.modal'), params = {};
+
+        modal.find('[data-param]').each(function () {
+            var v = $(this).val();
+            if (v) params[$(this).data('param')] = v;
+        });
+
+        modal.find('.rpt-error').hide();
+        if (modal.find('.js-brand[data-required]').length && !params.brand) { modal.find('.js-brand-error').show(); return; }
+        if (params.tanggal_mulai && params.tanggal_selesai && params.tanggal_mulai > params.tanggal_selesai) { modal.find('.js-date-error').show(); return; }
+
+        $pv.find('.js-pv-title').text('Preview: ' + $(this).data('title'));
+        $pv.find('.modal-body').html('<div class="rpt-pv-loading"><i class="fa fa-spinner fa-spin fa-2x"></i><p>Menyiapkan preview...</p></div>');
+        $pv.modal('show');
+
+        $.ajax({ url: $(this).data('url'), data: params, dataType: 'json', headers: { 'Accept': 'application/json' }, timeout: 180000 })
+            .done(showPreview)
+            .fail(function (xhr) {
+                var j = xhr.responseJSON || {}, msg = j.message || 'Preview gagal dimuat.';
+                if (j.errors) { msg = $.map(j.errors, function (e) { return e.join(' '); }).join(' '); }
+                if (xhr.statusText === 'timeout') { msg = 'Preview terlalu lama. Persempit filter lalu coba lagi.'; }
+                $pv.find('.modal-body').html('<p class="text-danger" style="margin:20px 0;"><i class="fa fa-exclamation-circle"></i> ' + esc(msg) + '</p>');
+            });
+    });
+
     // ---- Unduh Excel ----
     $(document).on('click', '.js-export', function (event) {
         event.preventDefault();

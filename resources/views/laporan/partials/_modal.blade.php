@@ -114,6 +114,11 @@
 
             <div class="modal-footer">
                 <button type="button" class="btn btn-default" data-dismiss="modal">Batal</button>
+                @if (\App\Http\Controllers\LaporanPreviewController::supports($r['id']))
+                    <button type="button" class="btn btn-info js-preview" data-url="{{ route('laporan.outlet.preview', $r['id']) }}" data-title="{{ $r['title'] }}">
+                        <i class="fa fa-eye"></i> Preview
+                    </button>
+                @endif
                 <a href="{{ route($r['xls']) }}" class="btn btn-success js-export" data-url="{{ route($r['xls']) }}">
                     <i class="fa fa-file-excel-o"></i> Unduh Excel
                 </a>
