@@ -195,7 +195,8 @@
         const csrfToken = '{{ csrf_token() }}';
         let products   = @json($products);
         let categories = @json($categories);
-        // Permintaan lain yang masih aktif (belum dikirim): [{product_id, ro_id, code, owner_id, outlet, status, qty}]
+        // Permintaan lain yang masih aktif (belum dikirim): [{product_id, ro_id, code, owner_id, outlet, status, date, qty}]
+        // Dianggap dobel hanya bila di HARI YANG SAMA dengan tanggal request RO ini (lihat openRequestsFor).
         const openRequests = @json($openRequests);
 
         const routes = {
@@ -231,20 +232,34 @@
             });
         }
 
-        function openRequestsFor(productId) {
-            return openRequests.filter(function (r) { return r.product_id == productId; });
+        // Tanggal request RO ini (Y-m-d) dari input tanggal; kosong -> hari ini (waktu browser).
+        function roDay() {
+            const v = $('#request_date').val();
+            if (v) return v;
+            const d = new Date();
+            return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
         }
 
-        // Peringatan di bawah pilihan produk: produk ini sudah diminta di RO lain yang belum selesai,
-        // dan apakah total permintaan aktif (RO lain + qty di RO ini) melebihi stok gudang.
+        // RO lain yang masih aktif untuk produk ini DAN di hari yang sama dengan RO ini.
+        // $day opsional: pemanggil yang memproses banyak produk sekaligus (populateProductSelect) mengisinya sekali
+        // supaya tidak membaca input tanggal berulang-ulang.
+        function openRequestsFor(productId, day) {
+            day = day || roDay();
+            return openRequests.filter(function (r) { return r.product_id == productId && r.date === day; });
+        }
+
+        // Peringatan RO dobel: SATU baris ringkas di bawah pilihan produk (tidak memanjangkan baris input).
+        // Detail lengkap (kode RO, outlet, qty, status) ada di tooltip saat kursor diarahkan ke peringatan.
+        // Hanya muncul bila produk sudah diminta di RO lain yang belum selesai pada hari yang sama.
         function updateOpenWarning($row) {
             const productId = $row.find('.product-select').val();
             let $box = $row.find('.open-request-warning');
             if (!$box.length) {
-                $box = $('<div class="open-request-warning small" style="margin-top:6px;"></div>');
+                // max-width:0 + min-width:100% + nowrap: teks dipotong titik-titik dan tidak melebarkan kolom.
+                $box = $('<div class="open-request-warning" style="margin-top:3px; font-size:11px; line-height:1.3; display:block; min-width:100%; max-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></div>');
                 $row.find('.product-select').closest('td').append($box);
             }
-            $box.empty();
+            $box.empty().removeAttr('title').removeClass('text-danger text-warning');
             if (!productId) return;
 
             const others = openRequestsFor(productId);
@@ -255,25 +270,24 @@
             const qty = parseInt($row.find('.qty-input').val()) || 0;
             const othersQty = others.reduce(function (sum, r) { return sum + r.qty; }, 0);
             const sameOutlet = others.some(function (r) { return ownerId && r.owner_id == ownerId; });
+            const exceeds = othersQty + qty > available;
 
-            const lines = others.map(function (r) {
-                return r.code + ' (' + (r.outlet || '-') + ', qty ' + r.qty + ', ' + r.status + ')';
-            });
+            let short = 'Double hari ini: ' + others.map(function (r) { return r.code + ' (' + r.qty + ')'; }).join(', ');
+            if (exceeds) short += ' | total ' + (othersQty + qty) + ' > stok ' + available;
 
-            $box.append($('<div class="text-' + (sameOutlet ? 'danger' : 'warning') + '">').append(
+            const detail = others.map(function (r) {
+                return r.code + ' - ' + (r.outlet || '-') + ', qty ' + r.qty + ', ' + r.status;
+            }).join('\n') + (exceeds ? '\nTotal permintaan aktif ' + (othersQty + qty) + ' melebihi stok gudang ' + available + '.' : '');
+
+            $box.attr('title', detail).addClass('text-' + (sameOutlet || exceeds ? 'danger' : 'warning')).append(
                 $('<i class="fa fa-exclamation-triangle"></i>'),
-                document.createTextNode(' Produk ini sudah diminta di RO lain yang belum selesai: ' + lines.join('; '))
-            ));
-
-            if (othersQty + qty > available) {
-                $box.append($('<div class="text-danger">').text(
-                    'Total permintaan aktif ' + (othersQty + qty) + ' melebihi stok gudang ' + available + '. Barang bisa tidak cukup saat diproses.'
-                ));
-            }
+                document.createTextNode(' ' + short)
+            );
         }
 
         function populateProductSelect($select, selectedId = null) {
             $select.empty().append('<option value="">Select Product</option>');
+            const today = roDay();
             $.each(products, function(index, product) {
                 let available = product.total_available || 0;
                 let option = $('<option>', {
@@ -283,7 +297,7 @@
                     'data-satuan-besar': product.satuan_besar || '',
                     'data-satuan': product.satuan || 'PCS',
                     text: product.code + ' - ' + product.name + ' : ' + available
-                        + (openRequestsFor(product.id).length ? '  ⚠ sudah ada di RO lain' : '')
+                        + (openRequestsFor(product.id, today).length ? '  ⚠ double hari ini' : '')
                 });
                 $select.append(option);
             });
@@ -369,7 +383,7 @@
 
                     // RO dobel: tanya dulu, jangan langsung ditolak (kadang memang sengaja minta lagi).
                     if (xhr.status === 422 && xhr.responseJSON?.code === 'duplicate_open_request') {
-                        if (confirm(msg + '\n\nTetap tambahkan produk ini ke RO ini?')) {
+                        if (confirm(msg + '\nTetap tambahkan?')) {
                             autosaveRow($row, true);
                         } else {
                             // Batal: kosongkan pilihan produk di baris baru agar tidak ikut tersimpan.
@@ -388,8 +402,9 @@
             });
         }
 
-        // Ganti outlet -> hitung ulang peringatan (RO dobel di outlet yang sama ditandai merah).
-        $('#owner_id').on('change', function () {
+        // Ganti outlet atau tanggal request -> hitung ulang peringatan (RO dobel di outlet yang sama ditandai merah;
+        // hanya RO di hari yang sama dengan tanggal request ini yang dihitung dobel).
+        $('#owner_id, #request_date').on('change', function () {
             $('#items-table tbody tr.item-row').each(function () { updateOpenWarning($(this)); });
         });
 

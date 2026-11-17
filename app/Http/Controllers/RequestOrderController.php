@@ -270,20 +270,24 @@ class RequestOrderController extends Controller
                 : null;
 
             if (! $existingItem || (int) $existingItem->product_id !== (int) $data['product_id']) {
+                // Hanya RO di HARI YANG SAMA (tanggal request RO ini) yang dianggap dobel.
+                $day = $this->requestDay($requestOrder);
+
                 $sameOutlet = $this->openRequestRows($requestOrder)
                     ->where('product_id', (int) $data['product_id'])
                     ->where('owner_id', (int) $requestOrder->owner_id)
+                    ->where('date', $day)
                     ->values();
 
                 if ($sameOutlet->isNotEmpty()) {
                     $list = $sameOutlet
-                        ->map(fn ($r) => "{$r['code']} (qty {$r['qty']}, {$r['status']})")
+                        ->map(fn ($r) => "{$r['code']} (qty {$r['qty']})")
                         ->implode(', ');
 
                     return response()->json([
                         'status'  => 'error',
                         'code'    => 'duplicate_open_request',
-                        'message' => "Produk ini sudah diminta outlet yang sama di RO yang belum selesai: {$list}.",
+                        'message' => "Sudah diminta hari ini di {$list}.",
                     ], 422);
                 }
             }
@@ -368,10 +372,17 @@ class RequestOrderController extends Controller
     /**
      * Item dari RO LAIN yang masih aktif (pending/approved/partial/processing, belum dikirim).
      * RO draf yang belum dipilih outletnya diabaikan. Item 'rejected' (sisa tak teralokasi) tidak dihitung.
-     * Dipakai untuk memperingatkan permintaan dobel untuk produk yang sama.
+     * Dipakai untuk memperingatkan permintaan dobel untuk produk yang sama (hanya yang di hari yang sama;
+     * penyaringan hari dilakukan pemanggil memakai kolom 'date').
      *
      * @return \Illuminate\Support\Collection<int, array>
      */
+    /** Tanggal (Y-m-d) sebuah RO = tanggal request; bila kosong, tanggal dibuat. Dipakai untuk cek RO dobel hari yang sama. */
+    protected function requestDay(RequestOrder $ro): string
+    {
+        return ($ro->request_date ?? $ro->created_at ?? now())->toDateString();
+    }
+
     protected function openRequestRows(RequestOrder $current)
     {
         return RequestOrderItem::query()
@@ -393,6 +404,8 @@ class RequestOrderController extends Controller
                 'request_orders.code as ro_code',
                 'request_orders.owner_id',
                 'request_orders.status as ro_status',
+                'request_orders.request_date as ro_request_date',
+                'request_orders.created_at as ro_created_at',
                 'outlets.name as outlet_name',
             ])
             ->groupBy(fn ($r) => $r->product_id . '-' . $r->ro_id)
@@ -406,6 +419,8 @@ class RequestOrderController extends Controller
                     'owner_id'   => (int) $first->owner_id,
                     'outlet'     => $first->outlet_name,
                     'status'     => $first->ro_status,
+                    // Tanggal RO (Y-m-d): dasar "hari yang sama" untuk peringatan RO dobel.
+                    'date'       => \Carbon\Carbon::parse($first->ro_request_date ?? $first->ro_created_at)->toDateString(),
                     'qty'        => (int) $rows->sum('qty_requested'),
                 ];
             })
