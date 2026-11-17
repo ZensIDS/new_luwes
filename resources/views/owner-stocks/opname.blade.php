@@ -77,6 +77,7 @@
                                 <label for="filterSupplier">Supplier <span class="text-red">*</span></label>
                                 <select id="filterSupplier" class="form-control input-sm select2" {{ $selectedOwner ? '' : 'disabled' }}>
                                     <option value="">-- Pilih Supplier --</option>
+                                    <option value="{{ $setStockKey }}" {{ request('supplier_id') === $setStockKey ? 'selected' : '' }}>★ Hasil Set Stock (semua produk yang sudah di-set stock)</option>
                                     @foreach ($suppliers as $supplier)
                                         <option value="{{ $supplier->id }}" {{ request('supplier_id') == $supplier->id ? 'selected' : '' }}>{{ $supplier->name }}</option>
                                     @endforeach
@@ -92,7 +93,7 @@
                         </div>
                         <p class="text-muted" style="margin:10px 0 15px;">
                             @if ($selectedOwner)
-                                Pilih supplier terlebih dahulu untuk memuat data stock {{ $selectedOwner->name }}. Kategori dan lokasi bersifat opsional.
+                                Pilih supplier terlebih dahulu untuk memuat data stock {{ $selectedOwner->name }}, atau pilih <b>Hasil Set Stock</b> untuk opname semua stok yang berasal dari Set Stock. Kategori dan lokasi bersifat opsional.
                             @else
                                 Pilih outlet, lalu pilih supplier untuk memuat data stock.
                             @endif
