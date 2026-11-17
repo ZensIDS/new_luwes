@@ -38,4 +38,19 @@
     .rpt-presets { margin:-4px 0 14px; }
     .rpt-presets .btn { border-radius:14px; padding:2px 10px; font-size:12px; margin:0 4px 4px 0; }
     .rpt-error { display:none; margin:0 0 12px; font-size:12.5px; color:#dc2626; }
+
+    /* Preview laporan */
+    #rptPreviewModal { z-index:1060; }
+    #rptPreviewModal .modal-dialog { width:96%; max-width:1400px; margin:20px auto; }
+    #rptPreviewModal .modal-content { border-radius:10px; border:0; }
+    #rptPreviewModal .modal-header { border-bottom:1px solid #f0f0f0; padding:14px 20px; }
+    #rptPreviewModal .modal-body { padding:14px 20px; }
+    .rpt-pv-note { font-size:12.5px; color:#6b7280; margin:0 0 10px; }
+    .rpt-pv-tabs { margin:0 0 10px; }
+    .rpt-pv-tabs .btn { border-radius:14px; padding:2px 12px; font-size:12px; margin:0 4px 4px 0; }
+    .rpt-pv-scroll { max-height:65vh; overflow:auto; border:1px solid #e5e7eb; border-radius:6px; }
+    .rpt-pv-table { border-collapse:collapse; font-size:12px; white-space:nowrap; }
+    .rpt-pv-table td { border:1px solid #e5e7eb; padding:3px 8px; vertical-align:top; }
+    .rpt-pv-table tr.rpt-pv-blank td { height:10px; padding:0 8px; }
+    .rpt-pv-loading { text-align:center; padding:50px 0; color:#6b7280; }
 </style>
