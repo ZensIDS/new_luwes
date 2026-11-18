@@ -48,7 +48,9 @@
                                     <small class="text-muted">@currency($refund->replacement_total)</small>
                                 </td>
                                 <td>
-                                    @if ($refund->difference > 0)
+                                    @if ($refund->refund_amount > 0)
+                                        <span class="label label-danger">Uang kembali @currency($refund->refund_amount)</span>
+                                    @elseif ($refund->difference > 0)
                                         <span class="label label-warning">+ @currency($refund->difference)</span>
                                     @else
                                         <span class="label label-success">Tidak ada selisih</span>

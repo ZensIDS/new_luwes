@@ -18,6 +18,7 @@ class RefundPenjualan extends Model
         'returned_total',
         'replacement_total',
         'difference',
+        'refund_amount',
         'payment_method_name',
         'payment_reference',
         'notes',
@@ -27,6 +28,7 @@ class RefundPenjualan extends Model
         'returned_total' => 'float',
         'replacement_total' => 'float',
         'difference' => 'float',
+        'refund_amount' => 'float',
     ];
 
     public function penjualan()

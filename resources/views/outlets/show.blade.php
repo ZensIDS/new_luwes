@@ -228,6 +228,9 @@
                                         <tr><td>Kas masuk (mis. selisih tukar barang)</td><td class="text-right">Rp {{ number_format($summary['cash_in'] ?? 0, 0, ',', '.') }}</td></tr>
                                     @endif
                                     <tr><td>BON / uang keluar</td><td class="text-right text-danger">- Rp {{ number_format($summary['cash_out'] ?? 0, 0, ',', '.') }}</td></tr>
+                                    @if ($canSeeCash && ($summary['refund_cash'] ?? 0) > 0)
+                                        <tr><td>Uang kembali retur (bukan BON)</td><td class="text-right text-danger">- Rp {{ number_format($summary['refund_cash'], 0, ',', '.') }}</td></tr>
+                                    @endif
                                     @if ($canSeeCash)
                                         <tr id="closeExpectedRow" class="info" data-expected="{{ (float) ($summary['expected_cash'] ?? 0) }}">
                                             <th>Uang hasil penjualan yang seharusnya ada</th>

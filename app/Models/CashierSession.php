@@ -261,10 +261,12 @@ class CashierSession extends Model
         $cashOut = (float) $this->drawerEntries()
             ->whereIn('type', ['bon', 'cash_out'])
             ->sum('amount');
+        // Uang kembali retur tanpa pengganti: BUKAN BON. Hanya mengurangi uang di laci (pendapatan sudah dikurangi retur).
+        $refundCash = (float) $this->drawerEntries()->where('type', 'refund')->sum('amount');
         // opening_cash is the float carried from the previous day. It is kept
         // separately from today's cash movement, matching the outlet workflow:
         // sales - BON = cash available to settle at the end of the day.
-        $expectedCash = $cashSales + $cashIn - $cashOut;
+        $expectedCash = $cashSales + $cashIn - $cashOut - $refundCash;
         $breakdown = self::breakdownFor([(int) $this->id])[(int) $this->id] ?? self::emptyBreakdown();
 
         return [
@@ -276,7 +278,8 @@ class CashierSession extends Model
             'cash_sales' => $cashSales,
             'cash_in' => $cashIn,
             'cash_out' => $cashOut,
-            'net_cash_income' => $cashSales + $cashIn - $cashOut,
+            'refund_cash' => $refundCash,
+            'net_cash_income' => $cashSales + $cashIn - $cashOut - $refundCash,
             'cash_settled' => $cashOut + (float) ($this->cash_removed ?? 0),
             'expected_cash' => $expectedCash,
             'closing_cash' => $this->closing_cash,

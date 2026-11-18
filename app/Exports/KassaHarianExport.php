@@ -67,8 +67,10 @@ class KassaHarianExport extends BaseLaporanTokoExport
         $this->resolve();
 
         $sessions = CashierSession::query()
-            ->with(['outlet:id,name', 'cashier:id,name', 'shifts'])
+            ->with(['outlet:id,name', 'cashier:id,name,role', 'shifts'])
             ->whereBetween('opened_at', [$this->date->copy()->startOfDay(), $this->date->copy()->endOfDay()])
+            // Hanya sesi milik akun ber-role kasir (siapa pun yang melihat laporan); superadmin/owner tidak masuk.
+            ->whereHas('cashier', fn ($query) => $query->where('role', 'kasir'))
             ->when($this->outletId, fn ($query) => $query->where('outlet_id', $this->outletId))
             ->orderBy('outlet_id')
             ->orderBy('opened_at')
@@ -94,6 +96,20 @@ class KassaHarianExport extends BaseLaporanTokoExport
             }
         }
 
+        // Retur penjualan di sesi ini: uang kembali ke pembeli MENGURANGI pendapatan (tunai);
+        // selisih yang dibayar pembeli untuk barang pengganti lebih mahal MENAMBAH pendapatan sesuai metode bayarnya.
+        $refunds = [];
+        if ($ids) {
+            foreach (\App\Models\RefundPenjualan::query()->whereIn('cashier_session_id', $ids)->get(['cashier_session_id', 'refund_amount', 'difference', 'payment_method_name']) as $refund) {
+                $key = (int) $refund->cashier_session_id;
+                $refunds[$key]['refund'] = ($refunds[$key]['refund'] ?? 0.0) + (float) $refund->refund_amount;
+                if ((float) $refund->difference > 0) {
+                    $method = trim((string) $refund->payment_method_name) ?: 'Tunai';
+                    $refunds[$key]['extra'][$method] = ($refunds[$key]['extra'][$method] ?? 0.0) + (float) $refund->difference;
+                }
+            }
+        }
+
         $methods = [];
         $rows = [];
         $open = 0;
@@ -115,15 +131,27 @@ class KassaHarianExport extends BaseLaporanTokoExport
                 }
             }
 
+            $tunai -= (float) ($refunds[$id]['refund'] ?? 0.0);
+            foreach (($refunds[$id]['extra'] ?? []) as $method => $amount) {
+                if (CashierSession::isCashPaymentName($method)) {
+                    $tunai += $amount;
+                } else {
+                    $nonCash[$method] = ($nonCash[$method] ?? 0.0) + $amount;
+                    $methods[$method] = true;
+                }
+            }
+
             $bon = (float) ($drawer[$id]['bon'] ?? 0.0);
 
             $setoranTutup = $closed ? (float) ($session->cash_removed ?? $session->closing_cash ?? 0) : null;
             $kasir = $session->shifts->pluck('name')->filter()->implode("\n");
+            // Nama kassa = nama akun (user) yang membuka sesi; Nama Kasir = nama kasir di tiap shift.
+            $kassaName = $session->cashier?->name ?? '-';
 
             $rows[] = [
                 'outlet' => $session->outlet?->name ?? '-',
-                'kassa' => $session->cashier?->name ?? '-',
-                'kasir' => $kasir !== '' ? $kasir : ($session->cashier?->name ?? '-'),
+                'kassa' => $kassaName,
+                'kasir' => $kasir !== '' ? $kasir : $kassaName,
                 'closed' => $closed,
                 'opening' => (float) $session->opening_cash,
                 'tunai' => $tunai,
