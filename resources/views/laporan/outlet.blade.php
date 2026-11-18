@@ -10,7 +10,7 @@
              'date'=>true, 'outlet'=>true, 'cashier'=>true, 'rafaksi'=>false,
              'desc'=>'Penjualan per kasir lengkap dengan rekap metode pembayaran, bon, dan setoran akhir.'],
             ['id'=>'outlet_sell_out_brand', 'title'=>'Sell Out Brand', 'icon'=>'fa-line-chart', 'color'=>'purple', 'xls'=>'laporan.outlet.sell-out-brand',
-             'date'=>true, 'outlet'=>true, 'brand'=>true, 'brand_required'=>true, 'cashier'=>true, 'rafaksi'=>false,
+             'date'=>true, 'outlet'=>true, 'brand'=>true, 'brand_required'=>true, 'cashier'=>true, 'cashier_role'=>'kasir', 'rafaksi'=>false,
              'desc'=>'Berapa banyak satu brand terjual: rekap harian per invoice, rekap per hari, dan rekap per produk. Brand = nama depan barang. Retur tidak dihitung, barang pengganti dihitung.'],
             ['id'=>'outlet_kassa', 'title'=>'Penjualan Kassa Harian', 'icon'=>'fa-calculator', 'color'=>'blue', 'xls'=>'laporan.outlet.kassa',
              'date'=>false, 'single_date'=>true, 'outlet'=>true, 'cashier'=>false, 'rafaksi'=>false,

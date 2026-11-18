@@ -244,6 +244,15 @@ class LaporanController extends Controller
         $brand = OutletLaporanService::brandFromRequest($request);
         abort_if($brand === null, 422, 'Brand wajib diisi.');
 
+        // Akun kasir yang bisa dipilih hanya role kasir (dijaga juga di server, bukan hanya di pilihan layar).
+        if ($request->filled('kasir_id')) {
+            abort_unless(
+                User::whereKey((int) $request->input('kasir_id'))->where('role', 'kasir')->exists(),
+                422,
+                'Akun kasir harus ber-role kasir.'
+            );
+        }
+
         $slug = trim((string) preg_replace('/[^A-Za-z0-9\-]+/', '-', $brand), '-') ?: 'Brand';
 
         return Excel::download(
