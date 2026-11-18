@@ -34,7 +34,9 @@
                             </div>
                             <div class="form-group" style="margin-right:15px">
                                 <label for="daterange" style="margin-right:8px">Tanggal</label>
-                                <input type="text" id="daterange" class="form-control" style="min-width:230px" readonly>
+                                {{-- Kasir hanya melihat penjualan hari ini: tanggal dikunci (server juga memaksa hari ini). --}}
+                                <input type="text" id="daterange" class="form-control" style="min-width:230px" readonly
+                                    @if ($isCashier) disabled title="Kasir hanya dapat melihat penjualan hari ini" @endif>
                             </div>
                             {{-- Filter Per Brand: tersedia untuk semua role (termasuk kasir). --}}
                             <div class="form-group">
@@ -82,6 +84,7 @@ $(function () {
         $('#daterange').val(start.format('DD/MM/YYYY') + ' - ' + end.format('DD/MM/YYYY'));
     }
 
+    @unless ($isCashier)
     // daterangepicker bawaan AdminLTE (v1.x) membaca `format` di level atas, v2+ di `locale.format`: kirim keduanya.
     $('#daterange').daterangepicker({
         format: 'DD/MM/YYYY',
@@ -101,6 +104,7 @@ $(function () {
         setRange(start, end);
         table.ajax.reload();
     });
+    @endunless
     setRange(moment(), moment());
 
     // Server-side: hanya satu halaman yang dikirim ke browser (aman untuk ratusan ribu penjualan).
