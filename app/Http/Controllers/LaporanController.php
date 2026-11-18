@@ -74,8 +74,13 @@ class LaporanController extends Controller
 
     public function indexOutlet()
     {
+        $viewer = auth()->user();
+
         return view('laporan.outlet', [
-            'cashiers' => User::whereIn('role', ['staff-outlet', 'kasir'])->orderBy('name')->get(),
+            // Role kasir hanya melihat akun kasir di outletnya sendiri.
+            'cashiers' => User::whereIn('role', ['staff-outlet', 'kasir'])
+                ->when($viewer?->role === 'kasir', fn ($q) => $q->where('role', 'kasir')->where('outlet_id', $viewer->outlet_id))
+                ->orderBy('name')->get(),
             'outlets' => OutletAccess::outlets(),
             'rafaksis' => \App\Models\Promotion::query()->orderByDesc('start_at')->orderBy('name')->get(),
         ]);
@@ -232,8 +237,6 @@ class LaporanController extends Controller
      */
     public function exportOutletSellOutBrand(Request $request)
     {
-        abort_if($request->user()?->role === 'kasir', 403, 'Laporan ini tidak tersedia untuk role kasir.');
-
         $request->validate([
             'brand' => ['required', 'string', 'max:100'],
             'outlet_id' => ['nullable', 'integer'],
@@ -251,6 +254,17 @@ class LaporanController extends Controller
                 User::whereKey((int) $request->input('kasir_id'))->where('role', 'kasir')->exists(),
                 422,
                 'Akun kasir harus ber-role kasir.'
+            );
+        }
+
+        // Role kasir hanya boleh melihat data outletnya sendiri (outlet sudah dikunci OutletAccess);
+        // filter akun kasir juga hanya boleh akun di outlet yang sama.
+        $viewer = $request->user();
+        if ($viewer?->role === 'kasir' && $request->filled('kasir_id')) {
+            abort_unless(
+                User::whereKey((int) $request->input('kasir_id'))->where('outlet_id', $viewer->outlet_id)->exists(),
+                403,
+                'Akun kasir tersebut bukan dari outlet Anda.'
             );
         }
 

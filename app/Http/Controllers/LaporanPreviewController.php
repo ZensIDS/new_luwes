@@ -40,6 +40,9 @@ class LaporanPreviewController extends Controller
     {
         abort_unless(self::supports($report), 404);
 
+        // Role kasir hanya boleh Sell Out Brand.
+        abort_if($request->user()?->role === 'kasir' && $report !== 'outlet_sell_out_brand', 403, 'Laporan ini tidak tersedia untuk role kasir.');
+
         // Sama dengan route export-nya: Laporan Kassa hanya untuk superadmin / owner / staff-outlet.
         if ($report === 'outlet_kassa') {
             abort_unless(in_array($request->user()?->role, ['superadmin', 'owner', 'staff-outlet'], true), 403, 'Laporan ini tidak tersedia untuk role Anda.');
