@@ -52,14 +52,12 @@
                                 <label for="daterange" style="margin-right:8px">Tanggal</label>
                                 <input type="text" id="daterange" class="form-control" style="min-width:230px" readonly>
                             </div>
-                            {{-- Filter Per Brand: tidak tersedia untuk role kasir. --}}
-                            @if (auth()->user()?->role !== 'kasir')
-                                <div class="form-group">
-                                    <label for="brand" style="margin-right:8px">Per Brand</label>
-                                    <input type="search" id="brand" class="form-control" style="min-width:260px" maxlength="100" autocomplete="off"
-                                        placeholder="Awalan brand / nama produk, mis. ABC" title="Hanya barang dengan brand ini yang tampil di setiap nota; nota tanpa brand ini disembunyikan.">
-                                </div>
-                            @endif
+                            {{-- Filter Per Brand: tersedia untuk semua role (termasuk kasir). --}}
+                            <div class="form-group">
+                                <label for="brand" style="margin-right:8px">Per Brand</label>
+                                <input type="search" id="brand" class="form-control" style="min-width:260px" maxlength="100" autocomplete="off"
+                                    placeholder="Awalan brand / nama produk, mis. ABC" title="Hanya barang dengan brand ini yang tampil di setiap nota; nota tanpa brand ini disembunyikan.">
+                            </div>
                         </div>
                         {{-- <p class="pj-hint">Default menampilkan penjualan hari ini. Ubah rentang tanggal untuk melihat data sebelumnya. Klik <strong>Detail</strong> pada baris untuk melihat rincian barang. Tekan <kbd>F4</kbd> untuk Re-Print nota penjualan teratas.</p> --}}
                     </div>
@@ -133,7 +131,7 @@ $(function () {
                 d.kasir_id = $('#kasir_id').val() || '';
                 d.date_from = dateFrom;
                 d.date_to = dateTo;
-                d.brand = $.trim($('#brand').val() || ''); // #brand tidak ada untuk role kasir -> kosong
+                d.brand = $.trim($('#brand').val() || '');
             }
         },
         order: [[1, 'desc']], // tanggal terbaru dulu
