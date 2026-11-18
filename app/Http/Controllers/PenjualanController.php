@@ -127,8 +127,9 @@ class PenjualanController extends Controller
 
         // Filter Per Brand: awalan nama produk (kata pertama = brand, atau nama lengkap) atau kolom brand.
         // Penjualan yang tidak punya barang brand itu disembunyikan, dan rincian nota hanya memuat barang brand itu.
-        // Role kasir tidak memakai filter ini: input brand dari request diabaikan (bukan hanya disembunyikan di layar).
-        $brandValue = $user->role === 'kasir' ? '' : mb_substr(trim((string) $request->input('brand', '')), 0, 100);
+        // Filter ini tersedia untuk semua role. Cakupan data tetap mengikuti aturan akses akun kasir di atas
+        // (kasir hanya melihat penjualannya sendiri), filter brand hanya mempersempit hasilnya.
+        $brandValue = mb_substr(trim((string) $request->input('brand', '')), 0, 100);
         $brandPrefix = $brandValue !== '' ? addcslashes($brandValue, '\\%_') . '%' : null;
 
         $hasOrder = $request->has('order.0.column');
