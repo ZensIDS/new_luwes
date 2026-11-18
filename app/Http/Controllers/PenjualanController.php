@@ -117,7 +117,11 @@ class PenjualanController extends Controller
             return $empty();
         }
 
-        [$from, $to] = $this->resolveDateRange($request->input('date_from'), $request->input('date_to'));
+        // Kasir hanya boleh melihat penjualan HARI INI: rentang tanggal dari request diabaikan (dipaksa di server,
+        // bukan hanya disembunyikan di layar). Role lain bebas memilih rentang tanggal.
+        [$from, $to] = $isCashier
+            ? [now()->startOfDay(), now()->endOfDay()]
+            : $this->resolveDateRange($request->input('date_from'), $request->input('date_to'));
 
         $start = max((int) $request->input('start', 0), 0);
         $length = (int) $request->input('length', 25);
@@ -292,6 +296,13 @@ class PenjualanController extends Controller
 
         if ($user->role === 'kasir') {
             abort_unless((string) $penjualan->kasir_id === (string) $user->id, 403, 'Anda tidak memiliki akses ke penjualan ini.');
+
+            // Kasir hanya melihat penjualan hari ini. Pengecualian: nota dari sesi kasir yang MASIH TERBUKA
+            // (mis. sesi melewati tengah malam) tetap bisa dibuka, supaya Reprint (F4) tidak putus.
+            $isToday = (bool) $penjualan->created_at?->isToday();
+            $inOpenSession = ! $isToday && $penjualan->cashier_session_id
+                && CashierSession::query()->whereKey($penjualan->cashier_session_id)->where('status', 'open')->exists();
+            abort_unless($isToday || $inOpenSession, 403, 'Kasir hanya dapat melihat penjualan hari ini.');
         } elseif ($user->role === 'staff-outlet') {
             abort_unless((int) $penjualan->outlet_id === (int) $user->outlet_id, 403, 'Anda tidak memiliki akses ke penjualan ini.');
         }
