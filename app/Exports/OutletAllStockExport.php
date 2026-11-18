@@ -17,7 +17,7 @@ class OutletAllStockExport extends BaseLaporanTokoExport
 
     protected function makeMeta(): ReportMeta
     {
-        return ReportMeta::fromRequest($this->request, 'LAPORAN ALL STOCK OUTLET', 'All-Stock-Toko', ['outlet'], now());
+        return ReportMeta::fromRequest($this->request, 'LAPORAN ALL STOCK OUTLET', 'All-Stock-Toko', ['outlet', 'brand'], now());
     }
 
     protected function sheetName(): string
@@ -42,6 +42,15 @@ class OutletAllStockExport extends BaseLaporanTokoExport
             ['h' => 'Persediaan Sebelum Pajak', 'fmt' => Theme::FMT_RUPIAH, 'min' => 18],
             ['h' => 'Persediaan Setelah Pajak', 'fmt' => Theme::FMT_RUPIAH, 'min' => 18],
         ])->kop()->info()->header();
+
+        if (collect($data['rows'] ?? [])->isEmpty()) {
+            $brand = OutletLaporanService::brandFromRequest($this->request);
+            $w->notice($brand
+                ? "Tidak ada stok barang dengan nama depan \"{$brand}\". Pilih brand dari saran yang muncul saat mengetik."
+                : 'Tidak ada data stok.');
+
+            return;
+        }
 
         $outletId = null;
         $first = null;

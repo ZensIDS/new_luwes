@@ -276,7 +276,11 @@ class LaporanController extends Controller
 
     public function exportOutletAllStock(Request $request)
     {
-        return Excel::download(new OutletAllStockExport($request), ReportMeta::fileNameFor($request, 'All-Stock-Toko', now()));
+        // Nama file memuat brand bila difilter, sama seperti Stok Toko Harian.
+        $brand = OutletLaporanService::brandFromRequest($request);
+        $brandSlug = $brand ? '-'.(trim((string) preg_replace('/[^A-Za-z0-9\-]+/', '-', $brand), '-') ?: 'Brand') : '';
+
+        return Excel::download(new OutletAllStockExport($request), ReportMeta::fileNameFor($request, 'All-Stock-Toko'.$brandSlug, now()));
     }
 
     public function exportReturSupplier(Request $request)
