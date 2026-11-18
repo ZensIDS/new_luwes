@@ -213,7 +213,8 @@ class RefundPenjualanController extends Controller
             'returns.*.product_id' => ['nullable', 'integer', 'exists:products,id'],
             'returns.*.owner_stock_id' => ['nullable', 'integer', 'exists:owner_stocks,id'],
             'returns.*.qty' => ['required', 'integer', 'min:1'],
-            'replacements' => ['required', 'array', 'min:1'],
+            // Barang pengganti OPSIONAL: tanpa pengganti, uang barang yang diretur dikembalikan ke pembeli.
+            'replacements' => ['nullable', 'array'],
             'replacements.*.product_id' => ['nullable', 'integer', 'exists:products,id'],
             'replacements.*.owner_stock_id' => ['nullable', 'integer', 'exists:owner_stocks,id'],
             'replacements.*.qty' => ['required', 'integer', 'min:1'],
@@ -227,8 +228,6 @@ class RefundPenjualanController extends Controller
             'penjualan_id.exists' => 'Invoice tidak ditemukan.',
             'returns.required' => 'Scan minimal satu barang yang diretur.',
             'returns.min' => 'Scan minimal satu barang yang diretur.',
-            'replacements.required' => 'Scan minimal satu barang pengganti.',
-            'replacements.min' => 'Scan minimal satu barang pengganti.',
         ]);
 
         $settings = json_decode(Storage::disk('public')->get('settings.json') ?? '{}', true) ?? [];
@@ -346,7 +345,8 @@ class RefundPenjualanController extends Controller
                     $returnedTotal += $unitPrice * (int) $row['qty'];
                 }
 
-                $replacementRows = collect($data['replacements'])->values();
+                $replacementRows = collect($data['replacements'] ?? [])->values();
+                $hasReplacement = $replacementRows->isNotEmpty();
                 $replacementStockIds = $replacementRows->pluck('owner_stock_id')->filter()->map(fn ($id) => (int) $id)->unique();
                 $replacementExplicitStocks = $replacementStockIds->isNotEmpty()
                     ? OwnerStock::with('product')->where('owner_id', $outletId)
@@ -435,10 +435,10 @@ class RefundPenjualanController extends Controller
                 }
 
                 $replacementTotal = $calculator->money($replacementTotal);
-                if ($replacementTotal < $returnedTotal) {
-                    throw ValidationException::withMessages(['replacements' => 'Total barang pengganti harus bernilai sama atau lebih mahal dari total barang yang diretur.']);
-                }
-                $difference = $calculator->money($replacementTotal - $returnedTotal);
+                // Pengganti lebih mahal: pembeli membayar selisih. Pengganti lebih murah / kosong:
+                // kekurangannya dikembalikan ke pembeli (uang keluar dari laci kasir).
+                $refundAmount = $replacementTotal < $returnedTotal ? $calculator->money($returnedTotal - $replacementTotal) : 0.0;
+                $difference = $replacementTotal > $returnedTotal ? $calculator->money($replacementTotal - $returnedTotal) : 0.0;
                 $differencePaid = $calculator->money($data['difference_paid'] ?? 0);
                 if ($differencePaid !== $difference) {
                     throw ValidationException::withMessages(['difference_paid' => 'Selisih barang pengganti harus dibayar sebesar Rp '.number_format($difference, 0, ',', '.').'.']);
@@ -450,6 +450,7 @@ class RefundPenjualanController extends Controller
                 }
                 $refund->update([
                     'replacement_total' => $replacementTotal, 'difference' => $difference,
+                    'refund_amount' => $refundAmount,
                     'payment_method_name' => $paymentMethodName,
                     'payment_reference' => $difference > 0 && ! $isCashPayment ? ($data['payment_reference'] ?? null) : null,
                 ]);
@@ -473,13 +474,21 @@ class RefundPenjualanController extends Controller
                     ]);
                 }
 
-                if ($difference > 0) {
+                if ($difference > 0 || $refundAmount > 0) {
                     $session = CashierSession::query()->where('outlet_id', $outletId)
                         ->where('cashier_id', $request->user()->getAuthIdentifier())->where('status', 'open')
                         ->lockForUpdate()->first();
                     if ($session) {
                         $refund->update(['cashier_session_id' => $session->id]);
-                        if ($isCashPayment) {
+                        if ($refundAmount > 0) {
+                            // Uang kembali ke pembeli keluar dari laci: mengurangi uang seharusnya di Tunai Komputer.
+                            CashierDrawerEntry::create([
+                                'cashier_session_id' => $session->id, 'outlet_id' => $outletId,
+                                'cashier_id' => $request->user()->getAuthIdentifier(), 'type' => 'refund',
+                                'amount' => $refundAmount, 'note' => "Uang kembali retur penjualan {$refund->code}", 'recorded_at' => now(),
+                            ]);
+                        }
+                        if ($difference > 0 && $isCashPayment) {
                             CashierDrawerEntry::create([
                                 'cashier_session_id' => $session->id, 'outlet_id' => $outletId,
                                 'cashier_id' => $request->user()->getAuthIdentifier(), 'type' => 'cash_in',
@@ -492,8 +501,13 @@ class RefundPenjualanController extends Controller
                 return $refund;
             });
 
-            return redirect()->route('refundPenjualan.index')
-                ->with('toast_success', "Berhasil menyimpan {$refund->code}. Barang retur masuk kembali ke stock toko.");
+            $message = "Berhasil menyimpan {$refund->code}. Barang retur masuk kembali ke stock toko.";
+            if ((float) $refund->refund_amount > 0) {
+                $message .= ' Kembalikan uang Rp '.number_format((float) $refund->refund_amount, 0, ',', '.').' kepada pembeli.'
+                    .($refund->cashier_session_id ? '' : ' (Tidak ada sesi kasir terbuka: uang keluar ini belum tercatat di laci kasir.)');
+            }
+
+            return redirect()->route('refundPenjualan.index')->with('toast_success', $message);
         } catch (ValidationException $e) {
             throw $e;
         } catch (Throwable $e) {

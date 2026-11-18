@@ -129,8 +129,8 @@ class OutletLaporanService
                 ]));
             }
 
-            if ($brand !== null && $rows->count() === $rowsBefore) {
-                continue; // semua barang brand di nota ini sudah diretur: nota tidak dihitung
+            if ($rows->count() === $rowsBefore) {
+                continue; // semua barang di nota ini sudah diretur (tanpa pengganti): nota tidak dihitung
             }
 
             $transactions->push([
@@ -342,7 +342,8 @@ class OutletLaporanService
                     'barang_pengganti' => $replacement?->product?->name ?? '-',
                     'barcode_pengganti' => $replacement?->product?->code ?? '-',
                     'qty_pengganti' => (float) ($replacement?->qty ?? 0),
-                    'selisih' => $index === 0 ? (float) ($refund->difference ?? 0) : 0,
+                    // + = pembeli membayar selisih; - = uang dikembalikan ke pembeli (retur tanpa pengganti).
+                    'selisih' => $index === 0 ? (float) ($refund->difference ?? 0) - (float) ($refund->refund_amount ?? 0) : 0,
                     'keterangan' => $refund->notes ?? '',
                 ]);
             }
@@ -354,7 +355,7 @@ class OutletLaporanService
                 'jumlah_retur' => $refunds->count(),
                 'total_barang_retur' => (float) $refunds->flatMap(fn ($refund) => $refund->items)->where('type', 'return')->sum('qty'),
                 'total_barang_pengganti' => (float) $refunds->flatMap(fn ($refund) => $refund->items)->where('type', 'replacement')->sum('qty'),
-                'total_selisih' => (float) $refunds->sum('difference'),
+                'total_selisih' => (float) $refunds->sum('difference') - (float) $refunds->sum('refund_amount'),
             ],
             ...$this->filters($request),
         ];

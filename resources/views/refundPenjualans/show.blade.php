@@ -34,6 +34,9 @@
                         <tr><th colspan="4" class="text-right">Nilai barang diretur</th><th>@currency($refundPenjualan->returned_total)</th></tr>
                         <tr><th colspan="4" class="text-right">Nilai barang pengganti</th><th>@currency($refundPenjualan->replacement_total)</th></tr>
                         <tr><th colspan="4" class="text-right">Selisih dibayar</th><th>@currency($refundPenjualan->difference)</th></tr>
+                        @if ($refundPenjualan->refund_amount > 0)
+                            <tr class="danger"><th colspan="4" class="text-right">Uang dikembalikan ke pembeli</th><th>@currency($refundPenjualan->refund_amount)</th></tr>
+                        @endif
                     </tfoot>
                 </table>
 

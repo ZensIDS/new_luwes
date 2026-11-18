@@ -8,7 +8,7 @@
         <div class="return-pos-header">
             <div>
                 <strong><i class="fa fa-exchange"></i> Retur / Ganti Barang</strong>
-                <span class="text-muted">Scan barang, hitung nilainya, lalu scan barang pengganti.</span>
+                <span class="text-muted">Scan barang, hitung nilainya, lalu scan barang pengganti (opsional). Tanpa pengganti, uang dikembalikan ke pembeli.</span>
             </div>
             <div class="return-pos-actions">
                 @if ($outletId)
@@ -79,7 +79,7 @@
                     <div class="return-pos-box replacement-step">
                         <div class="return-pos-box-header">
                             <span class="step-number">2</span>
-                            <div><strong>Barang pengganti</strong><small>Nilai total harus sama atau lebih besar dari barang yang dikembalikan.</small></div>
+                            <div><strong>Barang pengganti <span class="text-muted">(opsional)</span></strong><small>Kosongkan jika pembeli tidak mengambil barang pengganti: uang barang retur dikembalikan ke pembeli. Jika pengganti lebih murah, kekurangannya dikembalikan ke pembeli; jika lebih mahal, pembeli membayar selisih.</small></div>
                         </div>
                         <div class="return-pos-box-body">
                             <div class="scan-line">
@@ -105,6 +105,11 @@
                                 <dt>Nilai barang pengganti</dt><dd id="replacementTotalText">Rp 0</dd>
                                 <dt class="difference-label">Selisih dibayar</dt><dd id="differenceText" class="difference-value">Tidak ada selisih</dd>
                             </dl>
+                            <div id="refundBox" class="alert alert-danger" style="display:none; margin-top:10px;">
+                                <div style="font-size:12px;">UANG DIKEMBALIKAN KE PEMBELI</div>
+                                <div id="refundText" style="font-size:24px; font-weight:700;">Rp 0</div>
+                                <small>Diambil dari laci kasir (Tunai) dan otomatis mengurangi laporan penjualan.</small>
+                            </div>
                             <div id="paymentBox" style="display:none">
                                 <hr>
                                 <div class="form-group">
@@ -136,7 +141,7 @@
                             <a href="{{ route('refundPenjualan.index') }}" class="btn btn-default btn-block">Batal</a>
                         </div>
                     </div>
-                    <p class="text-muted small return-help"><i class="fa fa-info-circle"></i> Nota hanya diperlukan jika ingin menghubungkan retur dengan transaksi lama. Stok retur masuk kembali dan stok barang pengganti berkurang saat disimpan. Barang pengganti tanpa stok sistem tetap bisa dipilih (dicatat sebagai stok minus).</p>
+                    <p class="text-muted small return-help"><i class="fa fa-info-circle"></i> Nota hanya diperlukan jika ingin menghubungkan retur dengan transaksi lama. Stok retur masuk kembali dan stok barang pengganti berkurang saat disimpan. Barang pengganti tanpa stok sistem tetap bisa dipilih (dicatat sebagai stok minus). Retur tanpa barang pengganti: uang dikembalikan ke pembeli dan tercatat sebagai uang keluar di sesi kasir.</p>
                 </aside>
             </div>
         </form>
@@ -252,7 +257,12 @@
                 paymentReferenceBox.style.display = difference > 0 && !isCash ? '' : 'none';
                 paymentReference.required = difference > 0 && !isCash;
                 if (isCash) paymentReference.value = '';
-                submitButton.disabled = !state.returns.length || !state.replacements.length || replacement < returned;
+                // Tanpa barang pengganti = uang kembali ke pembeli sebesar nilai barang retur.
+                // Pengganti kosong / lebih murah = uang kembali ke pembeli sebesar kekurangannya.
+                const refundDue = state.returns.length > 0 ? Math.max(0, returned - replacement) : 0;
+                document.getElementById('refundBox').style.display = refundDue > 0 ? '' : 'none';
+                document.getElementById('refundText').textContent = money(refundDue);
+                submitButton.disabled = !state.returns.length;
                 updateInputs();
             };
 
@@ -336,16 +346,20 @@
             form.addEventListener('submit', (event) => {
                 clearError();
                 const { returned, replacement } = totals();
-                if (!state.returns.length || !state.replacements.length || replacement < returned) {
+                if (!state.returns.length) {
                     event.preventDefault();
-                    showError('Scan minimal satu barang retur dan satu barang pengganti. Nilai barang pengganti tidak boleh lebih kecil.');
+                    showError('Scan minimal satu barang retur.');
+                    return;
+                }
+                if (returned > replacement && !window.confirm('Barang pengganti lebih murah / kosong. Kembalikan uang ' + money(returned - replacement) + ' kepada pembeli?')) {
+                    event.preventDefault();
                     return;
                 }
                 form.querySelectorAll('.generated-return-field').forEach((field) => field.remove());
                 const hidden = (name, value) => { const input = document.createElement('input'); input.type = 'hidden'; input.name = name; input.value = value ?? ''; input.className = 'generated-return-field'; form.appendChild(input); };
                 state.returns.forEach((item, index) => { hidden(`returns[${index}][product_id]`, item.product_id); hidden(`returns[${index}][item_id]`, item.item_id || ''); hidden(`returns[${index}][owner_stock_id]`, item.owner_stock_id || ''); hidden(`returns[${index}][qty]`, item.qty); });
                 state.replacements.forEach((item, index) => { hidden(`replacements[${index}][product_id]`, item.product_id); hidden(`replacements[${index}][owner_stock_id]`, item.owner_stock_id || ''); hidden(`replacements[${index}][qty]`, item.qty); });
-                differencePaid.value = String(Math.max(0, replacement - returned));
+                differencePaid.value = state.replacements.length ? String(Math.max(0, replacement - returned)) : '0';
             });
 
             render();

@@ -163,6 +163,8 @@
                                                             &bull; Cek fisik Rp {{ number_format($entry->amount, 0, ',', '.') }} (selisih {{ $entry->difference >= 0 ? '+' : '' }}Rp {{ number_format($entry->difference, 0, ',', '.') }}) — {{ $entry->note }}
                                                         @elseif ($entry->type === 'cash_in')
                                                             &bull; Kas masuk Rp {{ number_format($entry->amount, 0, ',', '.') }} — {{ $entry->note }}
+                                                        @elseif ($entry->type === 'refund')
+                                                            &bull; Uang kembali retur Rp {{ number_format($entry->amount, 0, ',', '.') }} — {{ $entry->note }}
                                                         @else
                                                             &bull; BON Rp {{ number_format($entry->amount, 0, ',', '.') }}{{ filled($entry->note) ? ' — ' . $entry->note : '' }}
                                                             <a href="{{ route('cashier.print-bon', ['entry' => $entry->id, 'reprint' => 1, 'auto' => 1, 'from' => 'history']) }}" class="btn btn-warning btn-xs" title="Cetak ulang BON"><i class="fa fa-print"></i> Re-Print</a>
