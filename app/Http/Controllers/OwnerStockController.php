@@ -473,11 +473,16 @@ class OwnerStockController extends Controller
             'supplier_id' => $isSetStock ? 'required|string' : 'required|integer|exists:suppliers,id',
             'kategori' => 'nullable|string',
             'lokasi' => 'nullable|string',
+            'product_ids' => 'nullable|array|max:100',
+            'product_ids.*' => 'integer',
         ], [
             'supplier_id.required' => 'Supplier harus dipilih.',
             'supplier_id.exists' => 'Supplier yang dipilih tidak ditemukan.',
         ]);
         $outletId = OutletAccess::id($request);
+
+        // Hasil Set Stock bisa ribuan produk: tidak boleh dimuat sekaligus, produk dipilih lewat scan / pencarian.
+        abort_if($isSetStock && ! $request->filled('product_ids'), 422, 'Pilih produk lewat scan atau pencarian terlebih dahulu.');
 
         $stocks = DB::table('owner_stocks as os')
             ->whereNull('os.deleted_at')
@@ -498,6 +503,7 @@ class OwnerStockController extends Controller
                 fn ($query) => $this->applySetStockFilter($query, (int) $outletId, 'os.'),
                 fn ($query) => $query->whereRaw('COALESCE(pb.supplier_id, op.supplier_id) = ?', [$request->supplier_id])
             )
+            ->when($request->filled('product_ids'), fn ($query) => $query->whereIn('os.product_id', array_map('intval', (array) $request->product_ids)))
             ->when($request->filled('kategori'), fn ($query) => $query->where('c.name', $request->kategori))
             ->when($request->filled('lokasi'), fn ($query) => $query->where('p.lokasi', $request->lokasi))
             ->orderBy('os.product_id')
@@ -523,6 +529,60 @@ class OwnerStockController extends Controller
             ]);
 
         return response()->json(['stocks' => $stocks->values()]);
+    }
+
+    /**
+     * Scan / cari produk untuk opname "Hasil Set Stock": hanya produk yang punya batch hasil Set Stock di outlet itu.
+     * Barcode (kode produk) persis dikembalikan sebagai `exact`; nama dicari dengan semua kata yang diketik.
+     */
+    public function searchOpnameProducts(Request $request)
+    {
+        $data = $request->validate([
+            'outlet_id' => 'required|integer|exists:outlets,id',
+            'q' => ['required', 'string', 'min:1', 'max:100', 'regex:/^[^\x00-\x1F\x7F]+$/'],
+        ]);
+        $outletId = (int) OutletAccess::id($request);
+
+        $q = trim($data['q']);
+        $words = array_values(array_filter(preg_split('/\s+/', $q)));
+        $escape = fn (string $v) => addcslashes($v, '\\%_');
+
+        $query = DB::table('owner_stocks as os')
+            ->whereNull('os.deleted_at')
+            ->where('os.owner_id', $outletId)
+            ->join('products as p', function ($join) {
+                $join->on('p.id', '=', 'os.product_id')->whereNull('p.deleted_at');
+            });
+        $this->applySetStockFilter($query, $outletId, 'os.');
+
+        $rows = $query
+            ->where(function ($where) use ($words, $escape, $q) {
+                $where->where('p.code', $q)->orWhere('p.code', 'like', $escape($q) . '%');
+                $where->orWhere(function ($byName) use ($words, $escape) {
+                    foreach ($words as $word) {
+                        $byName->where('p.name', 'like', '%' . $escape($word) . '%');
+                    }
+                });
+            })
+            ->groupBy('p.id', 'p.code', 'p.name', 'p.satuan')
+            ->orderByRaw('CASE WHEN p.code = ? THEN 0 WHEN p.name LIKE ? THEN 1 ELSE 2 END', [$q, $escape($words[0] ?? '') . '%'])
+            ->orderBy('p.name')
+            ->limit(20)
+            ->get(['p.id', 'p.code', 'p.name', 'p.satuan', DB::raw('SUM(os.qty) as qty'), DB::raw('COUNT(*) as batches')]);
+
+        $products = $rows->map(fn ($row) => [
+            'id' => (int) $row->id,
+            'code' => $row->code,
+            'name' => $row->name,
+            'satuan' => $row->satuan ?? 'pcs',
+            'qty' => (int) $row->qty,
+            'batches' => (int) $row->batches,
+        ])->values();
+
+        return response()->json([
+            'products' => $products,
+            'exact' => optional($products->firstWhere('code', $q))['id'] ?? null,
+        ]);
     }
 
     public function saveOpname(Request $request, OutletStockService $stockService)
@@ -558,7 +618,8 @@ class OwnerStockController extends Controller
         }
         $ownerStocks = $ownerStockQuery->get()->keyBy('id');
 
-        DB::transaction(function () use ($request, $ownerStocks, $stockService) {
+        $results = [];
+        DB::transaction(function () use ($request, $ownerStocks, $stockService, &$results) {
             foreach ($request->items as $item) {
                 $ownerStock = $ownerStocks->get((int) $item['owner_stock_id']);
 
@@ -566,17 +627,40 @@ class OwnerStockController extends Controller
 
                 // adjust() mengunci baris, menghitung selisih terhadap qty terbaru,
                 // dan tidak mencatat apa pun kalau selisihnya 0.
-                $stockService->adjust(
+                $adjustment = $stockService->adjust(
                     $ownerStock,
                     (float) $item['physical_qty'],
                     $request->adjustment_date,
                     $item['keterangan'] ?? null,
                     auth()->user()
                 );
+
+                if ($adjustment) {
+                    $results[] = [
+                        'owner_stock_id' => $ownerStock->id,
+                        'product_id' => $ownerStock->product_id,
+                        'batch_number' => $ownerStock->batch_number,
+                        'before' => (float) $adjustment->system_qty,
+                        'after' => (float) $adjustment->physical_qty,
+                        'difference' => (float) $adjustment->quantity,
+                    ];
+                }
             }
         });
 
-        return response()->json(['success' => true, 'message' => 'Stock opname toko berhasil disimpan.']);
+        // Ringkasan hasil (nama produk, sebelum -> sesudah) supaya halaman bisa langsung menampilkannya.
+        $products = Product::whereIn('id', collect($results)->pluck('product_id')->unique()->values())
+            ->get(['id', 'code', 'name'])->keyBy('id');
+        $results = array_map(fn ($r) => $r + [
+            'product_code' => $products[$r['product_id']]->code ?? '-',
+            'product_name' => $products[$r['product_id']]->name ?? '-',
+        ], $results);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Stock opname toko berhasil disimpan.',
+            'results' => $results,
+        ]);
     }
 
     /**
