@@ -84,7 +84,8 @@
                         <label>Akun kasir</label>
                         <select class="form-control" data-param="kasir_id">
                             <option value="">Semua kasir</option>
-                            @foreach ($cashiers as $cashier)
+                            {{-- 'cashier_role' => 'kasir' pada definisi laporan: hanya akun ber-role kasir yang bisa dipilih. --}}
+                            @foreach ((($r['cashier_role'] ?? null) === 'kasir') ? $cashiers->where('role', 'kasir') : $cashiers as $cashier)
                                 <option value="{{ $cashier->id }}">{{ $cashier->name }}</option>
                             @endforeach
                         </select>
