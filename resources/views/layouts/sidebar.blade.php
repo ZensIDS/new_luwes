@@ -300,6 +300,13 @@
         </li>
         @endif
 
+        {{-- Kasir: menu Laporan (hanya laporan Sell Out Brand; halaman Laporan Toko menampilkan laporan itu saja untuk kasir). --}}
+        @if ($role === 'kasir')
+            <li class="{{ request()->is('laporan/outlet*') ? 'active' : '' }}">
+                <a href="{{ route('laporan.outlet.index') }}"><i class="fa fa-file-excel-o"></i><span>Laporan</span></a>
+            </li>
+        @endif
+
         {{-- Laporan (treeview): Gudang = superadmin, admin-gudang, owner | Toko = superadmin, staff-outlet, owner --}}
         @php
             $laporanGudang = in_array($role, ['superadmin', 'admin-gudang', 'owner']);

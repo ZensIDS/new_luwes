@@ -43,12 +43,14 @@
         ],
     ];
 
-    // Sell Out Brand tidak tersedia untuk role kasir (sama dengan route-nya: ditolak 403).
+    // Role kasir hanya mendapat laporan Sell Out Brand; laporan lain disembunyikan.
     if (auth()->user()?->role === 'kasir') {
-        $groups['Penjualan'] = array_values(array_filter(
-            $groups['Penjualan'],
-            fn ($r) => $r['id'] !== 'outlet_sell_out_brand'
-        ));
+        $groups = [
+            'Penjualan' => array_values(array_filter(
+                $groups['Penjualan'],
+                fn ($r) => $r['id'] === 'outlet_sell_out_brand'
+            )),
+        ];
     }
 
     // Laporan Kassa memuat angka kas: hanya superadmin / owner / staff-outlet (sama dengan route-nya).
@@ -61,7 +63,7 @@
 @endphp
 
 <section class="content-header">
-    <h1>Laporan Toko <small>Pilih laporan, atur filter, lalu unduh Excel</small></h1>
+    <h1>{{ auth()->user()?->role === 'kasir' ? 'Sell Out Brand' : 'Laporan Toko' }} <small>{{ auth()->user()?->role === 'kasir' ? 'Pilih brand dan tanggal, lihat preview atau unduh Excel' : 'Pilih laporan, atur filter, lalu unduh Excel' }}</small></h1>
 </section>
 
 <section class="content">
