@@ -168,6 +168,7 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/owner-stock-kartu/search', [App\Http\Controllers\OwnerStockController::class, 'searchKartuProducts'])->middleware('throttle:120,1,search')->name('owner-stocks.kartu.search');
     Route::get('/owner-stock-opname', [App\Http\Controllers\OwnerStockController::class, 'opname'])->name('owner-stock-opname');
     Route::get('/owner-stock-opname/data', [App\Http\Controllers\OwnerStockController::class, 'getOpnameData'])->name('owner-stock-opname.data');
+    Route::get('/owner-stock-opname/search', [App\Http\Controllers\OwnerStockController::class, 'searchOpnameProducts'])->middleware('throttle:120,1,opnamesearch')->name('owner-stock-opname.search');
     Route::post('/owner-stock-opname/save', [App\Http\Controllers\OwnerStockController::class, 'saveOpname'])->name('owner-stock-opname.save');
 
     // Set Stock (isi / koreksi stok toko dengan scan barcode): hanya superadmin + staff-outlet.
