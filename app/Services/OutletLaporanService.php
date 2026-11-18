@@ -363,9 +363,18 @@ class OutletLaporanService
     public function allStock(Request $request): array
     {
         $outletId = $this->outletId($request);
+
+        // Filter brand (opsional): NAMA DEPAN = kata pertama nama barang, sama dengan Stok Toko Harian dan folder
+        // Master Harga Jual. Kosong = semua brand.
+        $brand = self::brandFromRequest($request);
+        $brandProducts = $brand
+            ? Product::withTrashed()->select('products.id')->whereRaw(PriceFolderIndex::keySql().' = ?', [$brand])
+            : null;
+
         $stocks = OwnerStock::query()
             ->with(['owner', 'product.category', 'stock'])
             ->when($outletId, fn ($query) => $query->where('owner_id', $outletId))
+            ->when($brandProducts, fn ($query) => $query->whereIn('product_id', $brandProducts))
             ->orderBy('owner_id')->orderBy('product_id')->orderBy('id')->get();
 
         $prices = OutletPrice::query()
