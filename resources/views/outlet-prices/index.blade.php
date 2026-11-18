@@ -12,6 +12,28 @@
         'Disc Toko' => ['disc_toko_value', 'disc_toko_type'],
         'Margin' => ['margin_value', 'margin_type'],
     ];
+    // Header yang bisa di-sort: label => kunci ?sort= (diproses OutletPriceController::pricePage()).
+    $sortKeys = [
+        'HPP' => 'hpp', 'Pajak' => 'pajak', 'Disc Reg' => 'disc_reg', 'Disc 1' => 'disc1', 'Disc 2' => 'disc2',
+        'Disc Toko' => 'disc_toko', 'Margin' => 'margin', 'Harga Jual' => 'harga_jual', 'Penyesuaian' => 'penyesuaian',
+    ];
+    $sortHeader = function (string $label) use ($sortKeys, $sortKey, $sortDir, $selectedOutletId, $mode) {
+        $key = $sortKeys[$label] ?? null;
+        if ($key === null || $mode !== 'products') {
+            return e($label);
+        }
+        $active = ($sortKey ?? '') === $key;
+        $nextDir = ($active && ($sortDir ?? 'asc') === 'asc') ? 'desc' : 'asc';
+        $url = route('outlet-prices.index', array_merge(
+            request()->except(['page', 'sort', 'dir']),
+            ['outlet_id' => $selectedOutletId, 'sort' => $key, 'dir' => $nextDir]
+        ));
+        $icon = $active ? (($sortDir ?? 'asc') === 'asc' ? 'fa-sort-asc' : 'fa-sort-desc') : 'fa-sort text-muted';
+        $title = 'Urutkan ' . $label . ($active ? '' : ' (kecil ke besar)');
+
+        return '<a class="op-sort' . ($active ? ' active' : '') . '" href="' . e($url) . '" title="' . e($title) . '">'
+            . e($label) . ' <i class="fa ' . $icon . '"></i></a>';
+    };
     $formatComponent = fn (float $value, ?string $type) => $type === 'percentage'
         ? rtrim(rtrim(number_format($value, 2, ',', '.'), '0'), ',') . '%'
         : 'Rp' . number_format($value, 0, ',', '.');
@@ -22,6 +44,9 @@
         /* Catatan boleh turun baris; kolom lain mengikuti text-nowrap seperti halaman product. */
         /* Header tabel product memakai <td> (tidak tebal); di sini tetap <th> karena DataTables, jadi ketebalannya disamakan. */
         #example1 thead th, #outlet-prices-empty-table thead th { font-weight: normal; }
+        /* Header yang bisa di-sort (klik untuk urut naik / turun). */
+        #example1 thead th a.op-sort { color: inherit; text-decoration: none; cursor: pointer; }
+        #example1 thead th a.op-sort:hover, #example1 thead th a.op-sort.active { color: #e0577a; }
         #example1 td.op-note { min-width: 160px; white-space: normal; }
         /* Supplier dibatasi lebarnya: teks panjang dipotong dengan "..." (nama lengkap muncul saat di-hover). */
         /* Edit cepat (klik 2x): barcode, nama, kategori. Simpan = Enter, batal = Esc / klik di luar. */
@@ -118,6 +143,10 @@
                     @if ($mode === 'products' && ($promoFilter ?? '') !== '')
                         <input type="hidden" name="promo" value="{{ $promoFilter }}">
                     @endif
+                    @if ($mode === 'products' && ($sortKey ?? '') !== '')
+                        <input type="hidden" name="sort" value="{{ $sortKey }}">
+                        <input type="hidden" name="dir" value="{{ $sortDir }}">
+                    @endif
                     <button class="btn btn-primary btn-sm">Filter</button>
                 </form>
             </div>
@@ -193,6 +222,10 @@
                             @else
                                 <input type="hidden" name="all" value="1">
                             @endif
+                            @if (($sortKey ?? '') !== '')
+                                <input type="hidden" name="sort" value="{{ $sortKey }}">
+                                <input type="hidden" name="dir" value="{{ $sortDir }}">
+                            @endif
                             <label class="control-label" for="promo-filter" style="font-weight:normal">Diskon:</label>
                             <select id="promo-filter" name="promo" class="form-control input-sm" onchange="this.form.submit()"
                                 @if (($promoFilter ?? '') !== '') style="border-color:#e0577a" @endif>
@@ -211,6 +244,11 @@
                                     ])) }}">Reset</a>
                             @endif
                         </form>
+                        @if (($sortKey ?? '') !== '')
+                            <a class="btn btn-default btn-sm" style="margin-left:6px" title="Kembali ke urutan awal"
+                                href="{{ route('outlet-prices.index', array_merge(request()->except(['page', 'sort', 'dir']), ['outlet_id' => $selectedOutletId])) }}">
+                                <i class="fa fa-times"></i> Reset urutan</a>
+                        @endif
                     </div>
                 @endif
                 <table id="{{ $selectedOutletId ? 'example1' : 'outlet-prices-empty-table' }}" class="table table-bordered table-striped">
@@ -226,12 +264,12 @@
                             <th>Nama Product</th>
                             <th>Kategori</th>
                             <th>Supplier</th>
-                            <th>HPP</th>
+                            <th>{!! $sortHeader('HPP') !!}</th>
                             @foreach ($componentColumns as $label => $columns)
-                                <th class="text-center">{{ $label }}</th>
+                                <th class="text-center">{!! $sortHeader($label) !!}</th>
                             @endforeach
-                            <th class="text-center">Harga Jual</th>
-                            <th class="text-center">Penyesuaian</th>
+                            <th class="text-center">{!! $sortHeader('Harga Jual') !!}</th>
+                            <th class="text-center">{!! $sortHeader('Penyesuaian') !!}</th>
                             <th>Catatan</th>
                             <th>Terakhir Update</th>
                             <th>Stock Outlet</th>

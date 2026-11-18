@@ -52,6 +52,22 @@ class OutletPriceController extends Controller
     ];
 
     /**
+     * Kolom yang bisa di-sort dari header tabel: kunci URL (?sort=) => [kolom nilai, kolom tipe].
+     * Kolom komponen di-sort lewat SQL; 'hpp' dan 'harga_jual' dihitung di PHP (lihat computedSortPage()).
+     */
+    private const SQL_SORTS = [
+        'pajak' => ['pajak_value', 'pajak_type'],
+        'disc_reg' => ['disc_brand_value', 'disc_brand_type'],
+        'disc1' => ['disc_tambahan_value', 'disc_tambahan_type'],
+        'disc2' => ['disc_tambahan_2_value', 'disc_tambahan_2_type'],
+        'disc_toko' => ['disc_toko_value', 'disc_toko_type'],
+        'margin' => ['margin_value', 'margin_type'],
+        'penyesuaian' => ['outlet_adjustment_value', 'outlet_adjustment_type'],
+    ];
+
+    private const COMPUTED_SORTS = ['hpp', 'harga_jual'];
+
+    /**
      * Penyesuaian Harga Outlet (nominal, Rp) yang otomatis terisi di form saat outlet tertentu dipilih.
      * Format: [outlet_id => nominal].
      */
@@ -109,6 +125,12 @@ class OutletPriceController extends Controller
             // Filter diskon yang tadi aktif ikut kembali (berlaku untuk folder, semua, terakhir, dan pencarian).
             if (in_array($view['promo'] ?? '', ['diskon', 'tanpa'], true)) {
                 $params['promo'] = $view['promo'];
+            }
+
+            // Urutan kolom (klik header) yang tadi aktif ikut kembali.
+            if (! empty($view['sort'])) {
+                $params['sort'] = $view['sort'];
+                $params['dir'] = ($view['dir'] ?? 'asc') === 'desc' ? 'desc' : 'asc';
             }
 
             // Halaman (pagination) terakhir yang dibuka; tidak dipakai setelah hapus karena halamannya bisa hilang.
@@ -173,6 +195,10 @@ class OutletPriceController extends Controller
         // Filter diskon: '' = semua, 'diskon' = punya diskon, 'tanpa' = tanpa diskon (nilai lain dianggap semua).
         $promo = (string) $request->query('promo', '');
         $promo = in_array($promo, ['diskon', 'tanpa'], true) ? $promo : '';
+        // Urutan kolom dari klik header: ?sort=<kunci>&dir=asc|desc (kunci di luar daftar diabaikan).
+        $sort = (string) $request->query('sort', '');
+        $sort = (array_key_exists($sort, self::SQL_SORTS) || in_array($sort, self::COMPUTED_SORTS, true)) ? $sort : '';
+        $sortDir = strtolower((string) $request->query('dir', 'asc')) === 'desc' ? 'desc' : 'asc';
         $mode = ! $outletId ? 'none' : (($search !== '' || $activeFolder !== null || $showAll || $showLatest) ? 'products' : 'folders');
 
         if ($outletId) {
@@ -181,6 +207,8 @@ class OutletPriceController extends Controller
                 'all' => $showAll,
                 'latest' => $showLatest,
                 'promo' => $mode === 'products' ? $promo : '',
+                'sort' => $mode === 'products' ? $sort : '',
+                'dir' => $sortDir,
                 'page' => $mode === 'products' ? max(1, (int) $request->query('page', 1)) : 1,
             ]]);
         }
@@ -190,7 +218,7 @@ class OutletPriceController extends Controller
         $totalAll = $folderIndex->totalOf($folders);
 
         $prices = $mode === 'products'
-            ? $this->pricePage($outletId, $search, $activeFolder, $showLatest, $promo)
+            ? $this->pricePage($outletId, $search, $activeFolder, $showLatest, $promo, $sort, $sortDir)
             : new LengthAwarePaginator([], 0, 25);
 
         if ($outletId) {
@@ -241,6 +269,8 @@ class OutletPriceController extends Controller
             'showLatest' => $showLatest,
             'searchTerm' => $search,
             'promoFilter' => $promo,
+            'sortKey' => $sort,
+            'sortDir' => $sortDir,
             'categories' => $mode === 'products' ? Category::orderBy('name')->get(['id', 'name']) : collect(),
         ]);
     }
@@ -317,12 +347,75 @@ class OutletPriceController extends Controller
      * 25 id di halaman ini. Search berbasis AWALAN (LIKE 'kata%') lewat subquery IN.
      * Urutan: lihat komentar di orderBy di bawah (folder & pencarian = terakhir diperbarui, Semua Barang = A-Z).
      */
-    private function pricePage(int $outletId, string $search, ?string $folder = null, bool $latest = false, string $promo = ''): LengthAwarePaginator
+    private function pricePage(int $outletId, string $search, ?string $folder = null, bool $latest = false, string $promo = '', string $sort = '', string $sortDir = 'asc'): LengthAwarePaginator
+    {
+        $sortDir = $sortDir === 'desc' ? 'desc' : 'asc';
+
+        if (in_array($sort, self::COMPUTED_SORTS, true)) {
+            $page = $this->computedSortPage($outletId, $search, $folder, $promo, $sort, $sortDir);
+        } else {
+            $query = $this->filteredPriceQuery($outletId, $search, $folder, $promo)->select('outlet_prices.id');
+
+            if (isset(self::SQL_SORTS[$sort])) {
+                // Urut per kelompok supaya satuan tidak tercampur: kosong (—), lalu persen (%), lalu nominal (Rp);
+                // di dalam kelompok diurutkan menurut angkanya. Kolom di sini dari daftar tetap (aman dari injection).
+                [$valueColumn, $typeColumn] = self::SQL_SORTS[$sort];
+                $value = "COALESCE(outlet_prices.{$valueColumn}, 0)";
+                $query
+                    ->orderByRaw("CASE WHEN {$value} = 0 THEN 0 WHEN LOWER(TRIM(outlet_prices.{$typeColumn})) = 'percentage' THEN 1 ELSE 2 END {$sortDir}")
+                    ->orderByRaw("{$value} {$sortDir}")
+                    ->orderBy('outlet_prices.id');
+            } else {
+                // Urutan:
+                //  - "Terakhir Ditambahkan": yang paling baru dibuat di atas.
+                //  - "Semua Barang (A-Z)" (tanpa folder & tanpa pencarian): abjad nama produk.
+                //  - Folder apa pun & hasil pencarian: aturan harga yang paling baru diperbarui di atas
+                //    (aturan baru / habis diedit langsung ada di urutan pertama).
+                $query->when(
+                    $latest,
+                    fn ($q) => $q->orderByDesc('outlet_prices.created_at')->orderByDesc('outlet_prices.id'),
+                    fn ($q) => ($folder !== null || $search !== '')
+                        ? $q->orderByDesc('outlet_prices.updated_at')->orderByDesc('outlet_prices.id')
+                        : $q->orderBy('products.name')->orderBy('outlet_prices.id')
+                );
+            }
+
+            $page = $query->paginate(25);
+        }
+
+        $page = $page
+            ->withQueryString()
+            ->appends(array_filter([
+                'outlet_id' => $outletId,
+                'search' => $search,
+                'promo' => $promo,
+                'sort' => $sort,
+                'dir' => $sort !== '' ? $sortDir : '',
+            ], fn ($v) => $v !== '' && $v !== null));
+
+        $ids = $page->getCollection()->pluck('id');
+        $order = $ids->flip();
+
+        $page->setCollection(
+            OutletPrice::with(['outlet', 'product.category'])
+                ->whereIn('id', $ids)
+                ->get()
+                ->sortBy(fn (OutletPrice $price) => $order[$price->id])
+                ->values()
+        );
+
+        return $page;
+    }
+
+    /**
+     * Query dasar master harga satu outlet (pencarian awalan, filter diskon, folder) tanpa select/urutan.
+     * Dipakai bersama oleh urutan biasa (SQL) dan urutan hasil hitungan (HPP / Harga Jual).
+     */
+    private function filteredPriceQuery(int $outletId, string $search, ?string $folder, string $promo)
     {
         $prefix = $search !== '' ? addcslashes($search, '\\%_') . '%' : null;
 
-        $page = OutletPrice::query()
-            ->select('outlet_prices.id')
+        return OutletPrice::query()
             ->where('outlet_prices.outlet_id', $outletId)
             ->when($prefix !== null, fn ($query) => $query->whereIn('outlet_prices.product_id', Product::query()
                 ->select('id')
@@ -344,35 +437,52 @@ class OutletPriceController extends Controller
             })
             ->leftJoin('products', 'products.id', '=', 'outlet_prices.product_id')
             // Di dalam folder: kunci folder dihitung dari nama produk (sama dengan hitungan card folder).
-            ->when($folder !== null, fn ($query) => app(PriceFolderIndex::class)->constrain($query, $folder))
-            // Urutan:
-            //  - "Terakhir Ditambahkan": yang paling baru dibuat di atas.
-            //  - "Semua Barang (A-Z)" (tanpa folder & tanpa pencarian): abjad nama produk.
-            //  - Folder apa pun & hasil pencarian: aturan harga yang paling baru diperbarui di atas
-            //    (aturan baru / habis diedit langsung ada di urutan pertama).
-            ->when(
-                $latest,
-                fn ($query) => $query->orderByDesc('outlet_prices.created_at')->orderByDesc('outlet_prices.id'),
-                fn ($query) => ($folder !== null || $prefix !== null)
-                    ? $query->orderByDesc('outlet_prices.updated_at')->orderByDesc('outlet_prices.id')
-                    : $query->orderBy('products.name')->orderBy('outlet_prices.id')
-            )
-            ->paginate(25)
-            ->withQueryString()
-            ->appends(array_filter(['outlet_id' => $outletId, 'search' => $search, 'promo' => $promo], fn ($v) => $v !== '' && $v !== null));
+            ->when($folder !== null, fn ($query) => app(PriceFolderIndex::class)->constrain($query, $folder));
+    }
 
-        $ids = $page->getCollection()->pluck('id');
-        $order = $ids->flip();
+    /**
+     * Urut berdasarkan HPP atau Harga Jual. Dua nilai ini TIDAK ada di database (HPP = batch stok terbaru,
+     * Harga Jual = hasil PriceCalculator), jadi dihitung dengan kode yang sama persis dengan yang dipakai
+     * tabel (LatestHpp + PriceCalculator), lalu diurutkan dan dipotong per halaman. Hanya id + nilai yang
+     * disimpan di memori; baris lengkap tetap dimuat 25 per halaman oleh pricePage().
+     */
+    private function computedSortPage(int $outletId, string $search, ?string $folder, string $promo, string $sort, string $sortDir): LengthAwarePaginator
+    {
+        $calculator = app(PriceCalculator::class);
+        $latestHpp = app(LatestHpp::class);
+        $values = [];
 
-        $page->setCollection(
-            OutletPrice::with(['outlet', 'product.category'])
-                ->whereIn('id', $ids)
-                ->get()
-                ->sortBy(fn (OutletPrice $price) => $order[$price->id])
-                ->values()
+        $this->filteredPriceQuery($outletId, $search, $folder, $promo)
+            ->select('outlet_prices.*')
+            ->orderBy('outlet_prices.id')
+            ->chunk(1000, function ($rules) use (&$values, $outletId, $sort, $calculator, $latestHpp) {
+                $hppMap = $latestHpp->forProducts($outletId, $rules->pluck('product_id'));
+
+                foreach ($rules as $rule) {
+                    $hpp = (float) ($hppMap[$rule->product_id] ?? 0);
+
+                    $values[$rule->id] = $sort === 'hpp'
+                        ? $hpp
+                        : (float) $calculator->calculateItem($hpp, $rule)['price'];
+                }
+            });
+
+        $direction = $sortDir === 'desc' ? -1 : 1;
+        $sortedIds = collect($values)
+            ->map(fn ($value, $id) => [$value, $id])
+            ->values()
+            ->sort(fn ($a, $b) => (($a[0] <=> $b[0]) * $direction) ?: ($a[1] <=> $b[1]))
+            ->pluck(1);
+
+        $currentPage = LengthAwarePaginator::resolveCurrentPage();
+
+        return new LengthAwarePaginator(
+            $sortedIds->forPage($currentPage, 25)->map(fn ($id) => (object) ['id' => $id])->values(),
+            $sortedIds->count(),
+            25,
+            $currentPage,
+            ['path' => LengthAwarePaginator::resolveCurrentPath(), 'pageName' => 'page']
         );
-
-        return $page;
     }
 
     /**
