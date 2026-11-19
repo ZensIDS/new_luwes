@@ -191,7 +191,7 @@
                     } elseif ($digitsLen >= 8) { $priceScale *= .85; } elseif ($digitsLen >= 7) { $priceScale *= .93; }
                     $priceSize = round(12 * $k * $priceScale, 2) . 'mm';
                 } else {
-                    $priceScale = $digitsLen <= 10 ? 1 : .8;
+                    $priceScale = $digitsLen <= 6 ? 1 : ($digitsLen <= 7 ? .82 : ($digitsLen <= 9 ? .7 : .6));
                     $priceSize = round(14 * $k * $priceScale, 2) . 'mm';
                 }
                 // Barcode Code 128 (sama seperti voucher); beri viewBox agar pas selebar area.
@@ -244,7 +244,32 @@
             @endfor
         @endforeach
         </div>
-        <script>window.addEventListener('load', function () { window.print(); });</script>
+        <script>
+            // Pastikan nominal harga tidak pernah melewati garis border box: kecilkan font sampai muat
+            // (berlaku untuk harga ratusan ribu / jutaan di semua ukuran kertas), baru cetak.
+            function fitPrices() {
+                document.querySelectorAll('.lbl .box').forEach(function (box) {
+                    var price = box.querySelector('.price');
+                    if (!price) return;
+                    var rp = price.querySelector('.rp'), num = price.querySelector('.num');
+                    var cs = getComputedStyle(box);
+                    var avail = box.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+                    var gap = parseFloat(getComputedStyle(price).columnGap) || 0;
+                    var size = parseFloat(getComputedStyle(price).fontSize);
+                    for (var i = 0; i < 60; i++) {
+                        var need = rp.getBoundingClientRect().width + num.getBoundingClientRect().width + gap;
+                        if (need <= avail * 0.97 || size <= 4) break;
+                        size *= 0.94;
+                        price.style.fontSize = size + 'px';
+                        gap = parseFloat(getComputedStyle(price).columnGap) || 0;
+                    }
+                });
+            }
+            window.addEventListener('load', function () {
+                fitPrices();
+                window.print();
+            });
+        </script>
     @endif
 </body>
 
