@@ -77,9 +77,10 @@ class LaporanController extends Controller
         $viewer = auth()->user();
 
         return view('laporan.outlet', [
-            // Role kasir hanya melihat akun kasir di outletnya sendiri.
-            'cashiers' => User::whereIn('role', ['staff-outlet', 'kasir'])
-                ->when($viewer?->role === 'kasir', fn ($q) => $q->where('role', 'kasir')->where('outlet_id', $viewer->outlet_id))
+            // Pilihan akun kasir HANYA akun ber-role kasir (tanpa superadmin/owner/staff-outlet).
+            // Role kasir yang melihat hanya mendapat akun kasir di outletnya sendiri.
+            'cashiers' => User::where('role', 'kasir')
+                ->when($viewer?->role === 'kasir', fn ($q) => $q->where('outlet_id', $viewer->outlet_id))
                 ->orderBy('name')->get(),
             'outlets' => OutletAccess::outlets(),
             'rafaksis' => \App\Models\Promotion::query()->orderByDesc('start_at')->orderBy('name')->get(),
