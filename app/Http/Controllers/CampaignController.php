@@ -8,6 +8,7 @@ use App\Models\Promotion;
 use App\Models\Voucher;
 use App\Support\OutletAccess;
 use Carbon\Carbon;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -194,12 +195,12 @@ class CampaignController extends Controller
         [$startAt, $endAt] = $this->parseDateRange($request->input('daterange'));
 
         if ($type === 'voucher') {
-            $this->storeVouchers($data, $startAt, $endAt);
+            $this->withDuplicateCodeGuard($data, fn () => $this->storeVouchers($data, $startAt, $endAt));
 
             return redirect()->route('voucher.index')->with('toast_success', 'Voucher berhasil dibuat.');
         }
 
-        $this->storePromotion($data, $startAt, $endAt);
+        $this->withDuplicateCodeGuard($data, fn () => $this->storePromotion($data, $startAt, $endAt));
 
         return redirect()->route('voucher.index')->with('toast_success', 'Promo berhasil dibuat.');
     }
@@ -476,20 +477,53 @@ class CampaignController extends Controller
         return Str::limit($code, 95, '');
     }
 
+    /**
+     * Kode dianggap terpakai walau baris pemiliknya sudah DIHAPUS (soft delete): kolom code unik di database
+     * tetap memuat baris yang dihapus, jadi pengecekan tanpa withTrashed() lolos lalu INSERT gagal
+     * ("Duplicate entry ... promotions_code_unique").
+     */
     private function codeExists(string $code, ?string $ignoreType = null, ?int $ignoreId = null): bool
     {
-        return Voucher::where('code', $code)
+        return Voucher::withTrashed()->where('code', $code)
             ->when($ignoreType === 'voucher', fn ($query) => $query->where('id', '!=', $ignoreId))
             ->exists()
-            || Promotion::where('code', $code)
+            || Promotion::withTrashed()->where('code', $code)
                 ->when($ignoreType === 'promotion', fn ($query) => $query->where('id', '!=', $ignoreId))
                 ->exists();
     }
 
     private function codesExist(array $codes): bool
     {
-        return Voucher::whereIn('code', $codes)->exists()
-            || Promotion::whereIn('code', $codes)->exists();
+        return Voucher::withTrashed()->whereIn('code', $codes)->exists()
+            || Promotion::withTrashed()->whereIn('code', $codes)->exists();
+    }
+
+    /**
+     * Jaring pengaman terakhir untuk kode ganda yang lolos pengecekan (mis. dua simpan hampir bersamaan / klik ganda):
+     * kode otomatis dicoba lagi dengan akhiran baru (maks 3 kali), kode manual dijawab sebagai pesan validasi
+     * di kolom kode, bukan halaman error 500.
+     */
+    private function withDuplicateCodeGuard(array $data, callable $store): void
+    {
+        $auto = filter_var($data['code_auto'] ?? false, FILTER_VALIDATE_BOOLEAN) || empty($data['code']);
+
+        for ($attempt = 1; ; $attempt++) {
+            try {
+                $store();
+
+                return;
+            } catch (QueryException $e) {
+                $isDuplicateCode = (int) ($e->errorInfo[1] ?? 0) === 1062 && str_contains((string) $e->getMessage(), '_code_unique');
+                if (! $isDuplicateCode) {
+                    throw $e;
+                }
+                if (! $auto || $attempt >= 3) {
+                    throw ValidationException::withMessages([
+                        'code' => 'Kode voucher atau promo sudah digunakan. Ganti kode lalu simpan lagi.',
+                    ]);
+                }
+            }
+        }
     }
 
     private function voucherCodes(string $baseCode, int $quantity): array

@@ -599,6 +599,21 @@ $(function () {
         $('#product-modal').modal('hide');
     });
 
+    // Cegah simpan ganda (klik dua kali / Enter berulang): tombol dikunci sampai halaman berpindah.
+    $('#campaign-form').on('submit', function () {
+        const $button = $(this).find('button[type="submit"]');
+        if ($button.data('busy')) return false;
+        $button.data('busy', true).prop('disabled', true);
+        $('#save-label').data('label', $('#save-label').text()).text('Menyimpan...');
+    });
+    // Tombol Kembali di browser memunculkan halaman dari cache dengan tombol masih terkunci: buka lagi.
+    $(window).on('pageshow', function (event) {
+        if (!event.originalEvent || !event.originalEvent.persisted) return;
+        const $button = $('#campaign-form button[type="submit"]');
+        $button.data('busy', false).prop('disabled', false);
+        if ($('#save-label').data('label')) $('#save-label').text($('#save-label').data('label'));
+    });
+
     updateTypeFields();
     $('#product-picker').trigger('change');
     if (!$('#campaign-code').val()) updateCode();
