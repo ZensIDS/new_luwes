@@ -21,21 +21,22 @@ class OutletPenjualanSheet extends BaseLaporanTokoExport
         return 'Penjualan';
     }
 
+    /** Pola toko (huruf 18, A4 portrait, wrap, tanpa footer): todolist_font_laporan_toko. */
+    protected function tokoLayout(): bool
+    {
+        return true;
+    }
+
     protected function build(SheetWriter $w, Worksheet $sheet, ReportMeta $meta): void
     {
         $w->columns([
             ['h' => 'Tanggal', 'fmt' => Theme::FMT_DATETIME, 'align' => 'center'],
-            ['h' => 'Invoice'],
-            ['h' => 'Outlet'],
-            ['h' => 'Kasir'],
-            ['h' => 'Jenis', 'align' => 'center'],
+            ['h' => 'Invoice', 'wrap' => true],
             ['h' => 'Barcode', 'text' => true],
-            ['h' => 'Produk', 'max' => 45],
+            ['h' => 'Produk', 'max' => 24, 'wrap' => true],
             ['h' => 'Qty', 'fmt' => Theme::FMT_NUMBER],
             ['h' => 'Harga Satuan', 'fmt' => Theme::FMT_RUPIAH],
-            ['h' => 'Rafaksi / Unit', 'fmt' => Theme::FMT_RUPIAH],
             ['h' => 'Subtotal', 'fmt' => Theme::FMT_RUPIAH],
-            ['h' => 'Payment Method'],
         ])->kop()->info()->header();
 
         $rows = $this->mergeSameProduct($this->data['rows'] ?? collect());
@@ -46,8 +47,8 @@ class OutletPenjualanSheet extends BaseLaporanTokoExport
 
         $closeGroup = function () use ($w, &$groupFirst, &$groupLast, &$groupLabel) {
             if ($groupFirst !== null) {
-                $w->totalRow('Subtotal '.$groupLabel, [8 => 'sum', 11 => 'sum'], [
-                    'from' => $groupFirst, 'to' => $groupLast, 'label_col' => 7, 'sub' => true,
+                $w->totalRow('Subtotal '.$groupLabel, [5 => 'sum', 7 => 'sum'], [
+                    'from' => $groupFirst, 'to' => $groupLast, 'label_col' => 4, 'sub' => true,
                 ]);
             }
             $groupFirst = null;
@@ -69,10 +70,11 @@ class OutletPenjualanSheet extends BaseLaporanTokoExport
                 ? ['fill' => Theme::INFO_BG, 'font' => Theme::INFO_FG]
                 : [];
 
+            // Kolom Jenis dibuang: barang pengganti retur ditandai di nama produk (dan warna baris).
+            $product = $row['product'].($row['type'] === 'Pengganti Retur' ? ' (Pengganti Retur)' : '');
+
             $r = $w->row([
-                $date, $row['invoice'], $row['outlet'], $row['kasir'], $row['type'],
-                $row['barcode'], $row['product'], $row['qty'], $row['unit_price'],
-                $row['rafaksi'], $row['subtotal'], $row['payment_method'],
+                $date, $row['invoice'], $row['barcode'], $product, $row['qty'], $row['unit_price'], $row['subtotal'],
             ], $opts);
 
             $groupFirst ??= $r;
@@ -80,7 +82,7 @@ class OutletPenjualanSheet extends BaseLaporanTokoExport
         }
         $closeGroup();
 
-        $w->totalRow('TOTAL', [8 => 'sum', 11 => 'sum'], ['grand' => true, 'label_col' => 7]);
+        $w->totalRow('TOTAL', [5 => 'sum', 7 => 'sum'], ['grand' => true, 'label_col' => 4]);
     }
 
     /**

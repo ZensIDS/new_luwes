@@ -4,6 +4,7 @@ namespace App\Exports\LaporanToko;
 
 use App\Models\Outlet;
 use App\Models\Promotion;
+use App\Services\OutletLaporanService;
 use App\Models\User;
 use App\Support\OutletAccess;
 use Carbon\Carbon;
@@ -138,21 +139,19 @@ final class ReportMeta
      */
     public static function promotionRange(Request $request): ?array
     {
-        if (! $request->filled('promotion_id')) {
+        $ids = OutletLaporanService::promotionIdsFromRequest($request);
+        if ($ids === []) {
             return null;
         }
 
-        $promo = Promotion::find((int) $request->input('promotion_id'));
-        if (! $promo) {
+        $promos = Promotion::whereIn('id', $ids)->get();
+        if ($promos->isEmpty()) {
             return null;
         }
 
         [$start, $end] = self::dateRange($request);
 
-        return [
-            $promo->start_at?->copy()->startOfDay() ?? $start,
-            $promo->end_at?->copy()->endOfDay() ?? $end,
-        ];
+        return OutletLaporanService::promotionPeriod($promos, $start, $end);
     }
 
     /** Default sama dengan OutletLaporanService::dateRange (awal bulan s/d hari ini). */
@@ -190,11 +189,17 @@ final class ReportMeta
 
     private static function promotionLabel(Request $request): string
     {
-        if (! $request->filled('promotion_id')) {
+        $ids = OutletLaporanService::promotionIdsFromRequest($request);
+        if ($ids === []) {
             return 'Semua Rafaksi';
         }
 
-        $promo = Promotion::withTrashed()->find((int) $request->input('promotion_id'));
+        // Banyak rafaksi: nama lengkap sudah tampil sebagai judul tiap tabel, cukup jumlahnya.
+        if (count($ids) > 1) {
+            return count($ids).' rafaksi terpilih';
+        }
+
+        $promo = Promotion::withTrashed()->find($ids[0]);
         if (! $promo) {
             return '-';
         }

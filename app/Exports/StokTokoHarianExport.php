@@ -248,23 +248,28 @@ class StokTokoHarianExport extends BaseLaporanTokoExport
         return 'Stok Harian';
     }
 
+    /** Pola toko (huruf 18, A4 portrait, wrap, tanpa footer): todolist_font_laporan_toko. */
+    protected function tokoLayout(): bool
+    {
+        return true;
+    }
+
     protected function build(SheetWriter $w, Worksheet $sheet, ReportMeta $meta): void
     {
         $data = $this->data();
         $num = Theme::FMT_NUMBER;
         $showNote = $data['check'] && $data['mismatch'] > 0;
 
+        // Pola toko: kolom Catatan dibuang. Kode (barcode produk) dan Nama Barang dipertahankan (K11);
+        // barang yang Sisanya beda dengan stok sistem tetap ditandai baris kuning + pesan di atas tabel.
         $cols = [
-            ['h' => 'Kode', 'max' => 22],
-            ['h' => 'Nama Barang', 'max' => 55],
+            ['h' => 'Kode', 'max' => 18, 'text' => true],
+            ['h' => 'Nama Barang', 'max' => 28, 'wrap' => true],
             ['h' => 'Stok Awal', 'fmt' => $num],
             ['h' => 'S. Masuk', 'fmt' => $num],
             ['h' => 'S. Keluar', 'fmt' => $num],
             ['h' => 'Sisa', 'fmt' => $num],
         ];
-        if ($showNote) {
-            $cols[] = ['h' => 'Catatan', 'wrap' => true, 'w' => 42];
-        }
 
         $w->columns($cols)->kop()->info();
 
@@ -290,9 +295,6 @@ class StokTokoHarianExport extends BaseLaporanTokoExport
 
             foreach ($outlet['rows'] as $row) {
                 $values = [$row['code'], $row['name'], $row['awal'], $row['masuk'], $row['keluar'], $row['sisa']];
-                if ($showNote) {
-                    $values[] = $row['note'] ?? '';
-                }
 
                 $opts = $row['note'] !== null ? ['fill' => Theme::WARN_BG, 'font' => Theme::WARN_FG] : [];
                 if ($row['sisa'] < 0) {

@@ -27,14 +27,17 @@ class OutletSellOutBrandProdukSheet extends BaseLaporanTokoExport
         return 'Rekap Produk';
     }
 
+    /** Pola toko (huruf 18, A4 portrait, wrap, tanpa footer): todolist_font_laporan_toko. */
+    protected function tokoLayout(): bool
+    {
+        return true;
+    }
+
     protected function build(SheetWriter $w, Worksheet $sheet, ReportMeta $meta): void
     {
         $w->columns([
             ['h' => 'Barcode', 'text' => true],
-            ['h' => 'Produk', 'max' => 45],
-            ['h' => 'Qty Nota', 'fmt' => Theme::FMT_NUMBER],
-            ['h' => 'Qty Retur', 'fmt' => Theme::FMT_NUMBER],
-            ['h' => 'Qty Pengganti Retur', 'fmt' => Theme::FMT_NUMBER],
+            ['h' => 'Produk', 'max' => 30, 'wrap' => true],
             ['h' => 'Qty Bersih', 'fmt' => Theme::FMT_NUMBER],
             ['h' => 'Total Bersih (Rp)', 'fmt' => Theme::FMT_RUPIAH],
         ])->kop()->info()->header();
@@ -71,13 +74,10 @@ class OutletSellOutBrandProdukSheet extends BaseLaporanTokoExport
             <=> [$a['gross'] - $a['returned'] + $a['replace'], $b['product']]);
 
         foreach ($products as $p) {
-            $r = $w->currentRow();
-            $w->row([
-                $p['barcode'], $p['product'], $p['gross'], $p['returned'], $p['replace'],
-                SheetWriter::f('C'.$r.'-D'.$r.'+E'.$r), $p['total'],
-            ]);
+            // Qty Bersih = qty nota - qty retur + qty pengganti (kolom rinciannya dibuang).
+            $w->row([$p['barcode'], $p['product'], $p['gross'] - $p['returned'] + $p['replace'], $p['total']]);
         }
 
-        $w->totalRow('TOTAL', [3 => 'sum', 4 => 'sum', 5 => 'sum', 6 => 'sum', 7 => 'sum'], ['grand' => true, 'label_col' => 2]);
+        $w->totalRow('TOTAL', [3 => 'sum', 4 => 'sum'], ['grand' => true, 'label_col' => 2]);
     }
 }

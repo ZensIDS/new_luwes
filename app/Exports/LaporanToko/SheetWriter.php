@@ -50,14 +50,41 @@ final class SheetWriter
     private ?int $lastBodyRow = null;
     private ?int $tableEnd = null;
     private int $dataCount = 0;
+    /** Jumlah baris data pada tabel yang sedang ditulis (dipakai untuk warna selang-seling). */
+    private int $tableRows = 0;
+
+    /** Mode banyak tabel (newTable): rentang tiap tabel [header, baris akhir], judulnya, dan header susulan. */
+    private array $spans = [];
+    private array $titles = [];
+    private array $laterHeaders = [];
+    private bool $multi = false;
 
     /** Style yang harus dipasang setelah format kolom (alignment/format angka khusus). */
     private array $post = [];
 
-    public function __construct(private readonly Worksheet $sheet, private readonly ReportMeta $meta)
-    {
+    /**
+     * @param bool $toko pola toko (todolist_font_laporan_toko). Default false = tampilan lama.
+     *                   Bila true, font default workbook menjadi Theme::TOKO_FONT_SIZE supaya lebar
+     *                   kolom Excel (satuan karakter font default) tetap sesuai rumus lebar.
+     */
+    public function __construct(
+        private readonly Worksheet $sheet,
+        private readonly ReportMeta $meta,
+        private readonly bool $toko = false,
+    ) {
         $this->sheet->getParent()?->getDefaultStyle()->getFont()
-            ->setName(Theme::FONT)->setSize(Theme::FONT_SIZE);
+            ->setName(Theme::FONT)->setSize($this->baseFontSize());
+    }
+
+    public function isToko(): bool
+    {
+        return $this->toko;
+    }
+
+    /** Ukuran huruf dasar: 18 untuk pola toko, 10 untuk tampilan lama. */
+    public function baseFontSize(): int
+    {
+        return $this->toko ? Theme::TOKO_FONT_SIZE : Theme::FONT_SIZE;
     }
 
     /** Tandai nilai sebagai rumus Excel: SheetWriter::f('H12*I12'). */
@@ -107,6 +134,10 @@ final class SheetWriter
 
     public function kop(): static
     {
+        if ($this->toko) {
+            return $this->kopToko();
+        }
+
         $settings = $this->meta->settings;
         $logo = $this->colCount >= 4 && $this->addLogo();
         $from = $logo ? 3 : 1;
@@ -145,6 +176,10 @@ final class SheetWriter
 
     public function info(): static
     {
+        if ($this->toko) {
+            return $this->infoToko();
+        }
+
         $this->str('A'.$this->row, $this->meta->title);
         $this->style('A'.$this->row, ['font' => $this->font(['bold' => true, 'size' => 14, 'color' => Theme::PRIMARY])]);
         $this->sheet->getRowDimension($this->row)->setRowHeight(22);
@@ -187,7 +222,7 @@ final class SheetWriter
             'font' => $this->font(['bold' => true, 'color' => Theme::WARN_FG]),
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_LEFT, 'vertical' => Alignment::VERTICAL_CENTER],
         ]);
-        $this->sheet->getRowDimension($r)->setRowHeight(20);
+        $this->sheet->getRowDimension($r)->setRowHeight($this->toko ? Theme::TOKO_ROW_NOTICE : 20);
 
         return $this;
     }
@@ -214,7 +249,7 @@ final class SheetWriter
             }
         }
 
-        $this->sheet->getRowDimension($r)->setRowHeight(20);
+        $this->sheet->getRowDimension($r)->setRowHeight($this->toko ? Theme::TOKO_ROW_GROUP : 20);
         $this->groupRow = $r;
         $this->row++;
 
@@ -228,6 +263,17 @@ final class SheetWriter
             $this->str($this->col($i).$r, (string) $def['h']);
         }
 
+        $this->applyHeaderStyle($r);
+
+        $this->headerRow = $r;
+        $this->firstData = $r + 1;
+        $this->row++;
+
+        return $this;
+    }
+
+    private function applyHeaderStyle(int $r): void
+    {
         $this->style('A'.$r.':'.$this->col($this->colCount).$r, [
             'fill' => $this->fill(Theme::PRIMARY),
             'font' => $this->font(['bold' => true, 'color' => Theme::ON_PRIMARY]),
@@ -238,13 +284,65 @@ final class SheetWriter
             ],
             'borders' => $this->borders(),
         ]);
-        $this->sheet->getRowDimension($r)->setRowHeight(30);
+        $this->sheet->getRowDimension($r)->setRowHeight($this->toko ? Theme::TOKO_ROW_HEADER : 30);
+    }
 
-        $this->headerRow = $r;
-        $this->firstData = $r + 1;
-        $this->row++;
+    /**
+     * Mulai satu tabel baru: judul tabel (digabung selebar tabel) di atas, lalu header kolom.
+     * Mulai dari tabel kedua, ditambahkan $gap baris kosong sebagai jeda (disarankan 2-4).
+     * Dipakai laporan yang memecah data menjadi beberapa tabel dalam satu sheet (mis. Rafaksi).
+     * Pada mode ini filter, freeze pane, dan pengulangan header cetak dimatikan karena hanya
+     * berlaku untuk satu tabel.
+     */
+    public function newTable(string $title, int $gap = 3): static
+    {
+        $later = $this->headerRow !== null;
+
+        if ($later) {
+            $this->closeSpan();
+            for ($i = 0; $i < $gap; $i++) {
+                $this->sheet->getRowDimension($this->row)->setRowHeight($this->toko ? Theme::TOKO_ROW_TITLE : 15);
+                $this->row++;
+            }
+            $this->multi = true;
+        }
+
+        $t = $this->row++;
+        $this->str($this->col(1).$t, $title);
+        $this->titles[] = [$t, $title];
+
+        $savedHeader = $this->headerRow;
+        $savedFirst = $this->firstData;
+        $this->header();
+        $h = $this->headerRow;
+
+        if ($later) {
+            // Tabel pertama tetap menjadi acuan format kolom; header susulan distyle ulang di finish().
+            $this->headerRow = $savedHeader;
+            $this->firstData = $savedFirst;
+            $this->laterHeaders[] = $h;
+        }
+
+        $this->spans[] = [$h, null];
+        $this->tableRows = 0;
 
         return $this;
+    }
+
+    private function closeSpanAt(int $end): void
+    {
+        $i = count($this->spans) - 1;
+        if ($i >= 0 && $this->spans[$i][1] === null) {
+            $this->spans[$i][1] = max($this->spans[$i][0], $end);
+        }
+    }
+
+    private function closeSpan(): void
+    {
+        $i = count($this->spans) - 1;
+        if ($i >= 0 && $this->spans[$i][1] === null) {
+            $this->spans[$i][1] = max($this->spans[$i][0], $this->row - 1);
+        }
     }
 
     // ── isi tabel ───────────────────────────────────────────────────────────
@@ -258,6 +356,7 @@ final class SheetWriter
     {
         $r = $this->row++;
         $this->dataCount++;
+        $this->tableRows++;
 
         foreach (array_values($values) as $n => $v) {
             $this->put($n + 1, $r, $v);
@@ -266,7 +365,7 @@ final class SheetWriter
         $range = 'A'.$r.':'.$this->col($this->colCount).$r;
         if (isset($opts['fill']) || isset($opts['font']) || ! empty($opts['bold'])) {
             $this->style($range, $this->rowStyle($opts));
-        } elseif ($this->dataCount % 2 === 0) {
+        } elseif ($this->tableRows % 2 === 0) {
             $this->style($range, ['fill' => $this->fill(Theme::ZEBRA)]);
         }
 
@@ -298,8 +397,9 @@ final class SheetWriter
         return $r;
     }
 
-    public function blank(float $height = 6): static
+    public function blank(?float $height = null): static
     {
+        $height ??= $this->toko ? Theme::TOKO_ROW_SPACER : 6;
         $this->sheet->getRowDimension($this->row)->setRowHeight($height);
         $this->row++;
 
@@ -360,6 +460,10 @@ final class SheetWriter
 
         if (! empty($opts['grand'])) {
             $this->tableEnd = $this->lastBodyRow ?? ($r - 1);
+            if ($this->spans !== []) {
+                $this->closeSpanAt($this->tableEnd);
+                $this->spans[] = [$r, $r];
+            }
         } else {
             $this->lastBodyRow = $r;
         }
@@ -388,6 +492,8 @@ final class SheetWriter
         $tableEnd = $this->tableEnd ?? $lastRow;
         $lastL = $this->col($this->colCount);
 
+        $totalWidth = 0;
+
         // Format + perataan per kolom (satu panggilan per kolom, bukan per sel).
         foreach ($this->cols as $i => $def) {
             $L = $this->col($i);
@@ -397,7 +503,8 @@ final class SheetWriter
             $style = ['alignment' => [
                 'horizontal' => $align,
                 'vertical' => Alignment::VERTICAL_CENTER,
-                'wrapText' => ! empty($def['wrap']),
+                // K10: pola toko membungkus semua kolom teks (tanpa format angka/tanggal) ke bawah.
+                'wrapText' => ! empty($def['wrap']) || ($this->toko && ! isset($def['fmt'])),
             ]];
             if (isset($def['fmt'])) {
                 $style['numberFormat'] = ['formatCode' => $def['fmt']];
@@ -409,48 +516,183 @@ final class SheetWriter
                 $this->style("{$L}{$first}:{$L}{$lastRow}", $style);
             }
 
+            $factor = $this->toko ? Theme::TOKO_WIDTH_FACTOR : 1.15;
+            $cap = $this->toko ? min($def['max'] ?? Theme::TOKO_COL_MAX, Theme::TOKO_COL_MAX) : ($def['max'] ?? 40);
             $width = $def['w'] ?? max(
                 $def['min'] ?? 8,
-                min($def['max'] ?? 40, (int) ceil(($this->maxLen[$i] ?? 8) * 1.15) + 2)
+                min($cap, (int) ceil(($this->maxLen[$i] ?? 8) * $factor) + 2)
             );
             $this->sheet->getColumnDimension($L)->setWidth($width);
+            $totalWidth += $width;
         }
 
         foreach ($this->post as [$range, $style]) {
             $this->style($range, $style);
         }
 
-        // Border tipis seluruh tabel.
-        $this->style("A{$h}:{$lastL}{$lastRow}", ['borders' => $this->borders()]);
+        if ($this->multi) {
+            $this->finishMulti($totalWidth, $lastRow, $lastL);
+        } else {
+            // Border tipis seluruh tabel.
+            $this->style("A{$h}:{$lastL}{$lastRow}", ['borders' => $this->borders()]);
 
-        // Filter + freeze pane di bawah header.
-        if ($tableEnd > $h) {
-            $this->sheet->setAutoFilter("A{$h}:{$lastL}{$tableEnd}");
+            if ($this->titles !== []) {
+                $this->styleTitles($totalWidth, $lastL);
+            }
+
+            // Filter + freeze pane di bawah header.
+            if ($tableEnd > $h) {
+                $this->sheet->setAutoFilter("A{$h}:{$lastL}{$tableEnd}");
+            }
+            $this->freeze($h);
         }
-        $this->sheet->freezePane('A'.($h + 1));
 
         // Tampilan.
         $this->sheet->setShowGridlines(false);
-        $this->sheet->getSheetView()->setZoomScale(95);
+        $this->sheet->getSheetView()->setZoomScale($this->toko ? Theme::TOKO_ZOOM : 95);
         $this->sheet->getTabColor()->setRGB(Theme::PRIMARY);
 
-        // Cetak: landscape A4, muat satu halaman lebar, header berulang.
+        // Cetak: landscape A4 (pola toko: portrait A4), muat satu halaman lebar, header berulang.
         $page = $this->sheet->getPageSetup();
-        $page->setOrientation(PageSetup::ORIENTATION_LANDSCAPE)
+        $page->setOrientation($this->toko ? PageSetup::ORIENTATION_PORTRAIT : PageSetup::ORIENTATION_LANDSCAPE)
             ->setPaperSize(PageSetup::PAPERSIZE_A4)
             ->setFitToPage(true)
             ->setFitToWidth(1)
             ->setFitToHeight(0)
             ->setHorizontalCentered(true)
-            ->setPrintArea("A1:{$lastL}{$lastRow}")
-            ->setRowsToRepeatAtTopByStartAndEnd($this->groupRow ?? $h, $h);
+            ->setPrintArea("A1:{$lastL}{$lastRow}");
 
-        $this->sheet->getPageMargins()->setTop(0.5)->setBottom(0.6)->setLeft(0.4)->setRight(0.4);
-        $this->sheet->getHeaderFooter()->setOddFooter(
-            '&L&8'.str_replace('&', '&&', $this->meta->title).'&R&8Halaman &P dari &N'
-        );
+        if (! $this->multi) {
+            $page->setRowsToRepeatAtTopByStartAndEnd($this->groupRow ?? $h, $h);
+        }
+
+        if ($this->toko) {
+            // K1/K5: margin sempit, tanpa footer dan tanpa nomor halaman.
+            $this->sheet->getPageMargins()->setTop(0.4)->setBottom(0.4)->setLeft(0.3)->setRight(0.3);
+        } else {
+            $this->sheet->getPageMargins()->setTop(0.5)->setBottom(0.6)->setLeft(0.4)->setRight(0.4);
+            $this->sheet->getHeaderFooter()->setOddFooter(
+                '&L&8'.str_replace('&', '&&', $this->meta->title).'&R&8Halaman &P dari &N'
+            );
+        }
 
         $this->sheet->setSelectedCell('A1');
+    }
+
+    /** Mode banyak tabel: style ulang header susulan, judul tiap tabel, dan border per tabel (jeda tanpa garis). */
+    private function finishMulti(float $totalWidth, int $lastRow, string $lastL): void
+    {
+        $this->closeSpanAt($lastRow);
+
+        foreach ($this->laterHeaders as $hr) {
+            $this->applyHeaderStyle($hr);
+        }
+
+        $this->styleTitles($totalWidth, $lastL);
+
+        foreach ($this->spans as [$from, $to]) {
+            $this->style("A{$from}:{$lastL}".($to ?? $lastRow), ['borders' => $this->borders()]);
+        }
+    }
+
+    /** Judul tabel: digabung selebar tabel, tebal, wrap; tinggi baris diperkirakan dari panjang teks (sel gabungan tidak auto-fit). */
+    private function styleTitles(float $totalWidth, string $lastL): void
+    {
+        $perLine = max(20, (int) floor($totalWidth * 0.8));
+        $lineHeight = $this->toko ? Theme::TOKO_ROW_TITLE : 18;
+
+        foreach ($this->titles as [$r, $text]) {
+            if ($this->colCount > 1) {
+                $this->sheet->mergeCells("A{$r}:{$lastL}{$r}");
+            }
+            $this->style("A{$r}:{$lastL}{$r}", [
+                'fill' => ['fillType' => Fill::FILL_NONE],
+                'font' => $this->font(['bold' => true, 'color' => Theme::PRIMARY]),
+                'alignment' => [
+                    'horizontal' => Alignment::HORIZONTAL_LEFT,
+                    'vertical' => Alignment::VERTICAL_CENTER,
+                    'wrapText' => true,
+                ],
+                'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_NONE]],
+            ]);
+            $lines = max(1, (int) ceil(mb_strlen($text) / $perLine));
+            $this->sheet->getRowDimension($r)->setRowHeight($lines * $lineHeight + 4);
+        }
+    }
+
+    // ── pola toko (todolist_font_laporan_toko, Tahap C) ─────────────────────
+
+    /** K7/K9: kop ringkas, hanya nama toko/perusahaan (tanpa alamat, kontak, logo). */
+    private function kopToko(): static
+    {
+        $name = (string) ($this->meta->settings['name'] ?? config('app.name'));
+
+        $this->str('A1', $name);
+        $this->style('A1', ['font' => $this->font(['bold' => true, 'color' => Theme::PRIMARY])]);
+        $this->sheet->getRowDimension(1)->setRowHeight(Theme::TOKO_ROW_KOP);
+
+        $this->style('A1:'.$this->col($this->colCount).'1', [
+            'borders' => ['bottom' => ['borderStyle' => Border::BORDER_MEDIUM, 'color' => ['rgb' => Theme::PRIMARY]]],
+        ]);
+
+        $this->sheet->getRowDimension(2)->setRowHeight(Theme::TOKO_ROW_SPACER);
+        $this->row = 3;
+
+        return $this;
+    }
+
+    /** K7: judul laporan, periode, filter, dan waktu cetak; satu kolom, tanpa "Dicetak Oleh". */
+    private function infoToko(): static
+    {
+        $this->str('A'.$this->row, $this->meta->title);
+        $this->style('A'.$this->row, ['font' => $this->font(['bold' => true, 'color' => Theme::PRIMARY])]);
+        $this->sheet->getRowDimension($this->row)->setRowHeight(Theme::TOKO_ROW_TITLE);
+        $this->row++;
+
+        $first = $this->meta->snapshot
+            ? ['Per Tanggal' => (string) $this->meta->snapshotLabel()]
+            : ['Periode' => $this->meta->periodLabel()];
+
+        $items = $first + $this->meta->info + ['Dicetak' => $this->meta->printedAtLabel()];
+
+        foreach ($items as $label => $value) {
+            $this->richInfo('A'.$this->row, (string) $label, (string) $value);
+            $this->sheet->getRowDimension($this->row)->setRowHeight(Theme::TOKO_ROW_TITLE);
+            $this->row++;
+        }
+
+        $this->sheet->getRowDimension($this->row)->setRowHeight(Theme::TOKO_ROW_SPACER);
+        $this->row++;
+
+        return $this;
+    }
+
+    /**
+     * Freeze pane di bawah header. Pola toko (K6): bila kop+info+header terlalu tinggi,
+     * hanya baris header yang dibekukan (layar digulir sampai header di paling atas).
+     */
+    private function freeze(int $h): void
+    {
+        if (! $this->toko) {
+            $this->sheet->freezePane('A'.($h + 1));
+
+            return;
+        }
+
+        $height = 0.0;
+        for ($r = 1; $r <= $h; $r++) {
+            $rh = $this->sheet->getRowDimension($r)->getRowHeight();
+            $height += $rh > 0 ? $rh : 24;
+        }
+
+        if ($height > Theme::TOKO_FREEZE_MAX && method_exists($this->sheet, 'setTopLeftCell')) {
+            $this->sheet->setTopLeftCell('A'.$h);
+            $this->sheet->freezePane('A'.($h + 1), 'A'.($h + 1));
+
+            return;
+        }
+
+        $this->sheet->freezePane('A'.($h + 1));
     }
 
     // ── internal ────────────────────────────────────────────────────────────
@@ -508,10 +750,10 @@ final class SheetWriter
     {
         $rt = new RichText();
         $l = $rt->createTextRun($label.' : ');
-        $l->getFont()->setName(Theme::FONT)->setSize(Theme::FONT_SIZE)->setBold(true)
+        $l->getFont()->setName(Theme::FONT)->setSize($this->baseFontSize())->setBold(true)
             ->setColor(new Color('FF'.Theme::MUTED));
         $v = $rt->createTextRun($value);
-        $v->getFont()->setName(Theme::FONT)->setSize(Theme::FONT_SIZE)
+        $v->getFont()->setName(Theme::FONT)->setSize($this->baseFontSize())
             ->setColor(new Color('FF'.Theme::TEXT));
 
         $this->sheet->getCell($coord)->setValue($rt);
@@ -531,7 +773,7 @@ final class SheetWriter
     {
         return array_filter([
             'name' => Theme::FONT,
-            'size' => $o['size'] ?? Theme::FONT_SIZE,
+            'size' => $o['size'] ?? $this->baseFontSize(),
             'bold' => $o['bold'] ?? false,
             'italic' => $o['italic'] ?? false,
             'color' => ['rgb' => $o['color'] ?? Theme::TEXT],

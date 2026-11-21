@@ -35,6 +35,16 @@ abstract class BaseLaporanTokoExport implements WithTitle, WithProperties, WithE
 
     abstract protected function build(SheetWriter $writer, Worksheet $sheet, ReportMeta $meta): void;
 
+    /**
+     * Saklar pola toko (huruf 18, A4 portrait, wrap, tanpa footer).
+     * Default false = tampilan lama (Laporan Gudang, PR, Retur Toko ke Gudang tidak berubah).
+     * Export toko yang ikut pola baru meng-override menjadi true (Tahap E).
+     */
+    protected function tokoLayout(): bool
+    {
+        return false;
+    }
+
     public function fileName(): string
     {
         return $this->meta()->fileName();
@@ -56,7 +66,7 @@ abstract class BaseLaporanTokoExport implements WithTitle, WithProperties, WithE
         return [
             AfterSheet::class => function (AfterSheet $event) {
                 $sheet = $event->sheet->getDelegate();
-                $writer = new SheetWriter($sheet, $this->meta());
+                $writer = new SheetWriter($sheet, $this->meta(), $this->tokoLayout());
 
                 $this->build($writer, $sheet, $this->meta());
                 $writer->finish();

@@ -83,6 +83,66 @@ $(function () {
         $(this).closest('.modal').find('.js-brand').val(null).trigger('change');
     });
 
+    // ---- Rafaksi: "Semua rafaksi" atau pilih beberapa (Select2 multi) ----
+    function rafaksiCount(modal) {
+        var n = (modal.find('.js-rafaksi-select').val() || []).length;
+        modal.find('.js-rafaksi-count').text(n + ' dipilih');
+    }
+
+    $(document).on('shown.bs.modal', '.rpt-modal', function () {
+        var modal = $(this);
+        modal.find('.js-rafaksi-select').each(function () {
+            var el = $(this);
+            if (el.data('select2')) { return; }
+            el.select2({
+                dropdownParent: modal,
+                width: '100%',
+                closeOnSelect: false,
+                placeholder: el.data('placeholder') || '',
+                language: { noResults: function () { return 'Rafaksi tidak ditemukan'; } }
+            });
+        });
+    });
+
+    $(document).on('change', '.js-rafaksi-mode', function () {
+        var modal = $(this).closest('.modal'), selected = modal.find('.js-rafaksi-mode:checked').val() === 'selected';
+        modal.find('.js-rafaksi-picker').toggle(selected);
+        if (!selected) { modal.find('.js-rafaksi-select').val(null).trigger('change'); }
+        modal.find('.js-rafaksi-error').hide();
+    });
+
+    $(document).on('change', '.js-rafaksi-select', function () {
+        var modal = $(this).closest('.modal');
+        rafaksiCount(modal);
+        if ((modal.find('.js-rafaksi-select').val() || []).length) { modal.find('.js-rafaksi-error').hide(); }
+    });
+
+    $(document).on('click', '.js-rafaksi-all', function (e) {
+        e.preventDefault();
+        var sel = $(this).closest('.modal').find('.js-rafaksi-select');
+        sel.val(sel.find('option').map(function () { return this.value; }).get()).trigger('change');
+    });
+
+    $(document).on('click', '.js-rafaksi-none', function (e) {
+        e.preventDefault();
+        $(this).closest('.modal').find('.js-rafaksi-select').val(null).trigger('change');
+    });
+
+    // Kumpulkan semua input ber-data-param; nilai kosong (termasuk array kosong) tidak dikirim.
+    function collectParams(modal) {
+        var params = {};
+        modal.find('[data-param]').each(function () {
+            var v = $(this).val();
+            if (v && (!$.isArray(v) || v.length)) { params[$(this).data('param')] = v; }
+        });
+        return params;
+    }
+
+    // true bila mode "Pilih rafaksi tertentu" aktif tetapi belum ada yang dipilih.
+    function rafaksiMissing(modal, params) {
+        return modal.find('.js-rafaksi-mode:checked').val() === 'selected' && !params.promotion_ids;
+    }
+
     // ---- Preview laporan (tanpa unduh) ----
     var $pv = $(
         '<div id="rptPreviewModal" class="modal fade" tabindex="-1" role="dialog"><div class="modal-dialog"><div class="modal-content">' +
@@ -119,14 +179,10 @@ $(function () {
     });
 
     $(document).on('click', '.js-preview', function () {
-        var modal = $(this).closest('.modal'), params = {};
-
-        modal.find('[data-param]').each(function () {
-            var v = $(this).val();
-            if (v) params[$(this).data('param')] = v;
-        });
+        var modal = $(this).closest('.modal'), params = collectParams(modal);
 
         modal.find('.rpt-error').hide();
+        if (rafaksiMissing(modal, params)) { modal.find('.js-rafaksi-error').show(); return; }
         if (modal.find('.js-brand[data-required]').length && !params.brand) { modal.find('.js-brand-error').show(); return; }
         if (params.tanggal_mulai && params.tanggal_selesai && params.tanggal_mulai > params.tanggal_selesai) { modal.find('.js-date-error').show(); return; }
 
@@ -147,14 +203,14 @@ $(function () {
     // ---- Unduh Excel ----
     $(document).on('click', '.js-export', function (event) {
         event.preventDefault();
-        var modal = $(this).closest('.modal'), params = {};
-
-        modal.find('[data-param]').each(function () {
-            var v = $(this).val();
-            if (v) params[$(this).data('param')] = v;
-        });
+        var modal = $(this).closest('.modal'), params = collectParams(modal);
 
         modal.find('.rpt-error').hide();
+
+        if (rafaksiMissing(modal, params)) {
+            modal.find('.js-rafaksi-error').show();
+            return;
+        }
 
         if (modal.find('.js-brand[data-required]').length && !params.brand) {
             modal.find('.js-brand-error').show();

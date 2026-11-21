@@ -10,9 +10,12 @@ use App\Services\OutletLaporanService;
 use Illuminate\Http\Request;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
-/** B2: Rafaksi Outlet, dikelompokkan per rafaksi dengan persentase diskon dan rekap berumus. */
+/** B2: Rafaksi Outlet, satu tabel per rafaksi (judul nama rafaksi di atas tabel), rekap berumus bila lebih dari satu. */
 class OutletRafaksiExport extends BaseLaporanTokoExport
 {
+    /** Jeda baris kosong antar tabel rafaksi (2-4). */
+    private const TABLE_GAP = 3;
+
     public function __construct(private readonly Request $request) {}
 
     protected function makeMeta(): ReportMeta
@@ -28,6 +31,12 @@ class OutletRafaksiExport extends BaseLaporanTokoExport
         return 'Rafaksi';
     }
 
+    /** Pola toko (huruf 18, A4 portrait, wrap, tanpa footer): todolist_font_laporan_toko. */
+    protected function tokoLayout(): bool
+    {
+        return true;
+    }
+
     protected function build(SheetWriter $w, Worksheet $sheet, ReportMeta $meta): void
     {
         $data = app(OutletLaporanService::class)->rafaksi($this->request);
@@ -35,57 +44,63 @@ class OutletRafaksiExport extends BaseLaporanTokoExport
 
         $w->columns([
             ['h' => 'Barcode', 'text' => true],
-            ['h' => 'Nama Produk', 'max' => 45],
+            ['h' => 'Nama Produk', 'max' => 24, 'wrap' => true],
             ['h' => 'Qty Produk Terjual', 'fmt' => Theme::FMT_NUMBER],
             ['h' => 'Harga Akhir / Unit', 'fmt' => Theme::FMT_RUPIAH, 'min' => 14],
             ['h' => 'Diskon Rafaksi / Unit', 'fmt' => Theme::FMT_RUPIAH, 'min' => 14],
             ['h' => '% Diskon', 'fmt' => Theme::FMT_PERCENT],
             ['h' => 'Total Diskon', 'fmt' => Theme::FMT_RUPIAH, 'min' => 16],
             ['h' => 'Total Penjualan', 'fmt' => Theme::FMT_RUPIAH, 'min' => 16],
-            ['h' => 'Keterangan Rafaksi', 'max' => 40],
-        ])->kop()->info()->header();
+        ])->kop()->info();
 
-        $rows = collect($data['rows'] ?? [])->sortBy([['keterangan', 'asc'], ['product', 'asc']])->values();
+        $groups = collect($data['rows'] ?? [])
+            ->sortBy([['keterangan', 'asc'], ['product', 'asc']])
+            ->groupBy('keterangan');
 
-        $key = null;
-        $first = null;
-        $label = '';
+        if ($groups->isEmpty()) {
+            $w->header(); // pesan "Tidak ada data" ditulis oleh finish()
+
+            return;
+        }
+
         $percent = fn (int $r) => SheetWriter::f("IF(H{$r}>0,G{$r}/H{$r},0)");
+        $multi = $groups->count() > 1;
+        $firstOfAll = null;
 
-        $close = function () use ($w, &$first, &$label, $percent) {
-            if ($first !== null) {
-                $r = $w->currentRow();
-                $w->totalRow('Subtotal '.$label, [3 => 'sum', 6 => $percent($r), 7 => 'sum', 8 => 'sum'], [
-                    'from' => $first, 'to' => $r - 1, 'label_col' => 2, 'sub' => true,
-                ]);
-            }
+        // Tiap rafaksi = satu tabel sendiri: judul nama rafaksi di atas, kolom langsung berisi barang.
+        // Antar tabel diberi jeda self::TABLE_GAP baris kosong.
+        foreach ($groups as $name => $items) {
+            $w->newTable($this->groupLabel((string) $name, $promotions), self::TABLE_GAP);
+
             $first = null;
-        };
-
-        foreach ($rows as $row) {
-            if ($row['keterangan'] !== $key) {
-                $close();
-                $key = $row['keterangan'];
-                $label = (string) $key;
-                $w->section('Rafaksi: '.$this->groupLabel($label, $promotions));
+            foreach ($items as $row) {
+                $r = $w->currentRow();
+                $w->row([
+                    $row['barcode'], $row['product'], (float) $row['qty'],
+                    (float) $row['unit_price'], (float) $row['discount_per_unit'],
+                    $percent($r),
+                    (float) $row['discount_total'], (float) $row['subtotal'],
+                ]);
+                $first ??= $r;
             }
+            $firstOfAll ??= $first;
 
             $r = $w->currentRow();
-            $w->row([
-                $row['barcode'], $row['product'], (float) $row['qty'],
-                (float) $row['unit_price'], (float) $row['discount_per_unit'],
-                $percent($r),
-                (float) $row['discount_total'], (float) $row['subtotal'],
-                $row['keterangan'],
+            $w->totalRow($multi ? 'Total' : 'TOTAL', [3 => 'sum', 6 => $percent($r), 7 => 'sum', 8 => 'sum'], [
+                'from' => $first, 'to' => $r - 1, 'label_col' => 2, 'grand' => ! $multi,
             ]);
-            $first ??= $r;
         }
-        $close();
 
-        $r = $w->currentRow();
-        $w->totalRow('REKAP', [3 => 'sum', 6 => $percent($r), 7 => 'sum', 8 => 'sum'], [
-            'grand' => true, 'label_col' => 2,
-        ]);
+        // REKAP semua rafaksi hanya bila ada lebih dari satu tabel.
+        if ($multi) {
+            for ($i = 0; $i < self::TABLE_GAP; $i++) {
+                $w->blank(30);
+            }
+            $r = $w->currentRow();
+            $w->totalRow('REKAP SEMUA RAFAKSI', [3 => 'sum', 6 => $percent($r), 7 => 'sum', 8 => 'sum'], [
+                'from' => $firstOfAll, 'to' => $r - 1, 'grand' => true, 'label_col' => 2,
+            ]);
+        }
     }
 
     /** Tambahkan periode bila nama rafaksi cocok tepat dengan satu data rafaksi. */

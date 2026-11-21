@@ -25,19 +25,21 @@ class OutletSellOutBrandInvoiceSheet extends BaseLaporanTokoExport
         return 'Per Invoice';
     }
 
+    /** Pola toko (huruf 18, A4 portrait, wrap, tanpa footer): todolist_font_laporan_toko. */
+    protected function tokoLayout(): bool
+    {
+        return true;
+    }
+
     protected function build(SheetWriter $w, Worksheet $sheet, ReportMeta $meta): void
     {
         $w->columns([
             ['h' => 'Tanggal', 'fmt' => Theme::FMT_DATETIME, 'align' => 'center'],
-            ['h' => 'Invoice'],
-            ['h' => 'Outlet'],
-            ['h' => 'Kasir'],
-            ['h' => 'Jenis', 'align' => 'center'],
+            ['h' => 'Invoice', 'wrap' => true],
             ['h' => 'Barcode', 'text' => true],
-            ['h' => 'Produk', 'max' => 45],
+            ['h' => 'Produk', 'max' => 24, 'wrap' => true],
             ['h' => 'Qty', 'fmt' => Theme::FMT_NUMBER],
             ['h' => 'Harga Satuan', 'fmt' => Theme::FMT_RUPIAH],
-            ['h' => 'Rafaksi / Unit', 'fmt' => Theme::FMT_RUPIAH],
             ['h' => 'Subtotal', 'fmt' => Theme::FMT_RUPIAH],
         ])->kop()->info()->header();
 
@@ -58,16 +60,16 @@ class OutletSellOutBrandInvoiceSheet extends BaseLaporanTokoExport
 
         $closeInvoice = function () use ($w, &$invoiceFirst, &$invoiceLast, &$invoiceLabel) {
             if ($invoiceFirst !== null) {
-                $w->totalRow('Subtotal '.$invoiceLabel, [8 => 'sum', 11 => 'sum'], [
-                    'from' => $invoiceFirst, 'to' => $invoiceLast, 'label_col' => 7, 'sub' => true,
+                $w->totalRow('Subtotal '.$invoiceLabel, [5 => 'sum', 7 => 'sum'], [
+                    'from' => $invoiceFirst, 'to' => $invoiceLast, 'label_col' => 4, 'sub' => true,
                 ]);
             }
             $invoiceFirst = null;
         };
         $closeDay = function () use ($w, &$day, &$dayFirst, &$dayLast) {
             if ($dayFirst !== null) {
-                $w->totalRow('Total '.Carbon::parse($day)->format('d/m/Y'), [8 => 'sum', 11 => 'sum'], [
-                    'from' => $dayFirst, 'to' => $dayLast, 'label_col' => 7, 'sub' => true,
+                $w->totalRow('Total '.Carbon::parse($day)->format('d/m/Y'), [5 => 'sum', 7 => 'sum'], [
+                    'from' => $dayFirst, 'to' => $dayLast, 'label_col' => 4, 'sub' => true,
                 ]);
             }
             $dayFirst = null;
@@ -94,10 +96,11 @@ class OutletSellOutBrandInvoiceSheet extends BaseLaporanTokoExport
                 ? ['fill' => Theme::INFO_BG, 'font' => Theme::INFO_FG]
                 : [];
 
+            // Kolom Jenis dibuang: barang pengganti retur ditandai di nama produk (dan warna baris).
+            $product = $row['product'].($row['type'] === 'Pengganti Retur' ? ' (Pengganti Retur)' : '');
+
             $r = $w->row([
-                $row['date'], $row['invoice'], $row['outlet'], $row['kasir'], $row['type'],
-                $row['barcode'], $row['product'], $row['qty'], $row['unit_price'],
-                $row['rafaksi'], $row['subtotal'],
+                $row['date'], $row['invoice'], $row['barcode'], $product, $row['qty'], $row['unit_price'], $row['subtotal'],
             ], $opts);
 
             $invoiceFirst ??= $r;
@@ -108,7 +111,7 @@ class OutletSellOutBrandInvoiceSheet extends BaseLaporanTokoExport
         $closeInvoice();
         $closeDay();
 
-        $w->totalRow('TOTAL', [8 => 'sum', 11 => 'sum'], ['grand' => true, 'label_col' => 7]);
+        $w->totalRow('TOTAL', [5 => 'sum', 7 => 'sum'], ['grand' => true, 'label_col' => 4]);
     }
 
     /**

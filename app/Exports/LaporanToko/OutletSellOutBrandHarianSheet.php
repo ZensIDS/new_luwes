@@ -25,13 +25,17 @@ class OutletSellOutBrandHarianSheet extends BaseLaporanTokoExport
         return 'Rekap Harian';
     }
 
+    /** Pola toko (huruf 18, A4 portrait, wrap, tanpa footer): todolist_font_laporan_toko. */
+    protected function tokoLayout(): bool
+    {
+        return true;
+    }
+
     protected function build(SheetWriter $w, Worksheet $sheet, ReportMeta $meta): void
     {
         $w->columns([
             ['h' => 'Tanggal', 'fmt' => Theme::FMT_DATE, 'align' => 'center'],
             ['h' => 'Jumlah Invoice', 'fmt' => Theme::FMT_NUMBER],
-            ['h' => 'Qty Penjualan', 'fmt' => Theme::FMT_NUMBER],
-            ['h' => 'Qty Pengganti Retur', 'fmt' => Theme::FMT_NUMBER],
             ['h' => 'Qty Total', 'fmt' => Theme::FMT_NUMBER],
             ['h' => 'Total (Rp)', 'fmt' => Theme::FMT_RUPIAH],
         ])->kop()->info()->header();
@@ -57,13 +61,12 @@ class OutletSellOutBrandHarianSheet extends BaseLaporanTokoExport
         }
 
         foreach ($days as $d) {
-            $r = $w->currentRow();
+            // Qty Total = qty penjualan + qty pengganti retur (kolom rinciannya dibuang).
             $w->row([
-                $d['date'], count($d['invoices']), $d['sale'], $d['replace'],
-                SheetWriter::f('C'.$r.'+D'.$r), $d['total'],
+                $d['date'], count($d['invoices']), $d['sale'] + $d['replace'], $d['total'],
             ]);
         }
 
-        $w->totalRow('TOTAL', [3 => 'sum', 4 => 'sum', 5 => 'sum', 6 => 'sum'], ['grand' => true]);
+        $w->totalRow('TOTAL', [3 => 'sum', 4 => 'sum'], ['grand' => true]);
     }
 }

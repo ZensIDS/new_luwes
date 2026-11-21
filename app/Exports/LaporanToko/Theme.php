@@ -35,6 +35,21 @@ final class Theme
     public const FONT      = 'Calibri';
     public const FONT_SIZE = 10;
 
+    // ── Pola toko (todolist_font_laporan_toko, B1) ─────────────────────────
+    // Hanya dipakai bila export mengaktifkan tokoLayout(); nilai di atas tidak diubah.
+    public const TOKO_FONT_SIZE     = 18;   // K2/K9: semua bagian sama, termasuk kop dan judul
+    public const TOKO_ZOOM          = 85;   // K6
+    public const TOKO_WIDTH_FACTOR  = 1.15; // faktor lebar kolom (kunci setelah uji Excel, A3/A4)
+    public const TOKO_COL_MAX       = 30;   // batas lebar kolom otomatis (teks lebih panjang di-wrap, K10)
+    // Tinggi baris tetap (pt) untuk baris non-data; baris data dibiarkan menyesuaikan isi.
+    public const TOKO_ROW_KOP       = 30;
+    public const TOKO_ROW_TITLE     = 30;
+    public const TOKO_ROW_GROUP     = 30;
+    public const TOKO_ROW_HEADER    = 46;
+    public const TOKO_ROW_NOTICE    = 30;
+    public const TOKO_ROW_SPACER    = 8;
+    public const TOKO_FREEZE_MAX    = 200;  // K6: bila area beku (kop+info+header) lebih tinggi dari ini (pt), bekukan hanya baris header
+
     // Format angka (A4). Tampilan titik/koma mengikuti pengaturan region Excel pemakai.
     public const FMT_RUPIAH   = '"Rp" #,##0;[Red]-"Rp" #,##0';
     public const FMT_NUMBER   = '#,##0';

@@ -92,17 +92,34 @@
                 @endif
 
                 @if (!empty($r['rafaksi']))
-                    <div class="form-group">
-                        <label>Periode rafaksi</label>
-                        <select class="form-control" data-param="promotion_id">
-                            <option value="">Semua rafaksi</option>
-                            @foreach ($rafaksis as $rafaksi)
-                                <option value="{{ $rafaksi->id }}">
-                                    {{ $rafaksi->name }}
-                                    ({{ optional($rafaksi->start_at)->format('d/m/Y') ?? '-' }} - {{ optional($rafaksi->end_at)->format('d/m/Y') ?? '-' }})
-                                </option>
-                            @endforeach
-                        </select>
+                    {{-- Kosong = semua rafaksi; "Pilih rafaksi" mengirim promotion_ids[] (boleh lebih dari satu). --}}
+                    <div class="form-group js-rafaksi-box">
+                        <label>Rafaksi</label>
+                        <div class="rpt-choice">
+                            <label class="radio-inline">
+                                <input type="radio" class="js-rafaksi-mode" name="rafaksi_mode_{{ $r['id'] }}" value="all" checked> Semua rafaksi
+                            </label>
+                            <label class="radio-inline">
+                                <input type="radio" class="js-rafaksi-mode" name="rafaksi_mode_{{ $r['id'] }}" value="selected"> Pilih rafaksi tertentu
+                            </label>
+                        </div>
+                        <div class="js-rafaksi-picker" style="display:none; margin-top:8px;">
+                            <select class="form-control js-rafaksi-select" data-param="promotion_ids" multiple style="width:100%;"
+                                data-placeholder="Klik / ketik nama rafaksi, boleh lebih dari satu">
+                                @foreach ($rafaksis as $rafaksi)
+                                    <option value="{{ $rafaksi->id }}">
+                                        {{ $rafaksi->name }}
+                                        ({{ optional($rafaksi->start_at)->format('d/m/Y') ?? '-' }} - {{ optional($rafaksi->end_at)->format('d/m/Y') ?? '-' }})
+                                    </option>
+                                @endforeach
+                            </select>
+                            <span class="help-block" style="margin-bottom:0;">
+                                <a href="#" class="js-rafaksi-all">Pilih semua</a> &middot; <a href="#" class="js-rafaksi-none">Kosongkan</a>
+                                &middot; <span class="js-rafaksi-count">0 dipilih</span>.
+                                Periode laporan mengikuti tanggal rafaksi yang dipilih; tiap rafaksi tampil sebagai tabel sendiri.
+                            </span>
+                            <p class="rpt-error js-rafaksi-error"><i class="fa fa-exclamation-circle"></i> Pilih minimal satu rafaksi, atau pilih "Semua rafaksi".</p>
+                        </div>
                     </div>
                 @endif
 
