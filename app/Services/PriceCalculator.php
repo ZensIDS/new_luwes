@@ -179,6 +179,17 @@ class PriceCalculator
     /** Harga jual per produk selalu dibulatkan ke ATAS kelipatan ini (mis. 19.870 -> 19.900). */
     public const PRICE_ROUNDING_STEP = 100;
 
+    /**
+     * Harga jual <= batas ini dianggap belum diatur aturan harganya (kasir tidak boleh menjual).
+     */
+    public const MIN_VALID_SELLING_PRICE = 100;
+
+    /** True bila harga jual akhir per unit masih <= batas, artinya harga belum diatur. */
+    public function isPriceUnset(float|int|null $price): bool
+    {
+        return $this->money($price) <= self::MIN_VALID_SELLING_PRICE;
+    }
+
     /** @deprecated Pembulatan total transaksi sudah dihapus; dipertahankan agar kode lama tidak error. */
     public const TOTAL_ROUNDING_STEP = self::PRICE_ROUNDING_STEP;
 

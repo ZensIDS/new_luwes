@@ -175,7 +175,7 @@ class CartController extends Controller
         return response($cart);
     }
 
-    public function store(Request $request)
+    public function store(Request $request, PriceCalculator $calculator)
     {
         try {
             $request->validate([
@@ -186,11 +186,18 @@ class CartController extends Controller
             $product = Product::where('code', $request->barcode)->firstOrFail();
 
             // Harga harus sudah diatur (aturan aktif) di Master Harga Jual outlet ini.
-            $priceSet = OutletPrice::where('outlet_id', $outletId)
+            $priceRule = OutletPrice::where('outlet_id', $outletId)
                 ->where('product_id', $product->id)
                 ->currentlyActive()
-                ->exists();
-            if (! $priceSet) {
+                ->first();
+            if (! $priceRule) {
+                return response(['message' => $product->name . ' (harga belum diatur)'], 422);
+            }
+
+            // Harga jual akhir <= Rp 100 dianggap belum diatur aturan harganya.
+            $latestHpp = (float) app(\App\Services\LatestHpp::class)->forProduct((int) $outletId, (int) $product->id);
+            $finalPrice = $calculator->calculateItem($latestHpp, $priceRule, $product)['price'];
+            if ($calculator->isPriceUnset($finalPrice)) {
                 return response(['message' => $product->name . ' (harga belum diatur)'], 422);
             }
 

@@ -55,7 +55,16 @@ class CashierSaleService
                 ->currentlyActive()
                 ->get()
                 ->keyBy('product_id');
-            $unpriced = $cart->reject(fn ($item) => $rules->has($item->id))->pluck('name');
+            // Tanpa aturan aktif, atau harga jual akhir <= Rp 100, dianggap harga belum diatur.
+            $unpriced = $cart->reject(function ($item) use ($rules, $outletId) {
+                $rule = $rules->get($item->id);
+                if (! $rule) {
+                    return false;
+                }
+                $hpp = (float) app(\App\Services\LatestHpp::class)->forProduct((int) $outletId, (int) $item->id);
+
+                return ! $this->calculator->isPriceUnset($this->calculator->calculateItem($hpp, $rule, $item)['price']);
+            })->pluck('name');
             if ($unpriced->isNotEmpty()) {
                 throw new RuntimeException('Harga belum diatur untuk: ' . $unpriced->implode(', ') . '. Hapus dari keranjang atau atur harganya di Master Harga Jual.');
             }
