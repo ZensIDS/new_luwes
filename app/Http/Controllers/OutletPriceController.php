@@ -52,6 +52,17 @@ class OutletPriceController extends Controller
     ];
 
     /**
+     * Pilihan filter Diskon (?promo=) => kolom yang salah satunya harus > 0.
+     * Pilihan lain: '' (semua, tanpa filter) dan 'tanpa' (semua kolom diskon kosong).
+     */
+    private const PROMO_COLUMNS = [
+        'diskon' => self::DISCOUNT_COLUMNS,
+        'disc_reg' => ['disc_brand_value'],
+        'disc_12' => ['disc_tambahan_value', 'disc_tambahan_2_value'],
+        'disc_toko' => ['disc_toko_value'],
+    ];
+
+    /**
      * Kolom yang bisa di-sort dari header tabel: kunci URL (?sort=) => [kolom nilai, kolom tipe].
      * Kolom komponen di-sort lewat SQL; 'hpp' dan 'harga_jual' dihitung di PHP (lihat computedSortPage()).
      */
@@ -123,7 +134,7 @@ class OutletPriceController extends Controller
             }
 
             // Filter diskon yang tadi aktif ikut kembali (berlaku untuk folder, semua, terakhir, dan pencarian).
-            if (in_array($view['promo'] ?? '', ['diskon', 'tanpa'], true)) {
+            if (self::isPromoFilter($view['promo'] ?? '')) {
                 $params['promo'] = $view['promo'];
             }
 
@@ -163,6 +174,12 @@ class OutletPriceController extends Controller
             : $this->latestParams($outletId);
     }
 
+    /** Nilai ?promo= yang sah (selain kosong = semua). */
+    private static function isPromoFilter(mixed $value): bool
+    {
+        return $value === 'tanpa' || (is_string($value) && isset(self::PROMO_COLUMNS[$value]));
+    }
+
     private function lastOutletId(): ?int
     {
         $lastId = (int) session(self::LAST_OUTLET_SESSION, 0);
@@ -194,7 +211,7 @@ class OutletPriceController extends Controller
         $showLatest = $search === '' && $activeFolder === null && ! $showAll && $request->boolean('latest');
         // Filter diskon: '' = semua, 'diskon' = punya diskon, 'tanpa' = tanpa diskon (nilai lain dianggap semua).
         $promo = (string) $request->query('promo', '');
-        $promo = in_array($promo, ['diskon', 'tanpa'], true) ? $promo : '';
+        $promo = self::isPromoFilter($promo) ? $promo : '';
         // Urutan kolom dari klik header: ?sort=<kunci>&dir=asc|desc (kunci di luar daftar diabaikan).
         $sort = (string) $request->query('sort', '');
         $sort = (array_key_exists($sort, self::SQL_SORTS) || in_array($sort, self::COMPUTED_SORTS, true)) ? $sort : '';
@@ -345,7 +362,7 @@ class OutletPriceController extends Controller
      * "Deferred join": query pengurutan HANYA mengambil kolom id (sort kecil, tidak membebani memori
      * walau satu outlet punya puluhan ribu aturan harga); baris lengkap + relasi baru dimuat untuk
      * 25 id di halaman ini. Search berbasis AWALAN (LIKE 'kata%') lewat subquery IN.
-     * Urutan: lihat komentar di orderBy di bawah (folder & pencarian = terakhir diperbarui, Semua Barang = A-Z).
+     * Urutan: lihat komentar di orderBy di bawah (default A-Z nama produk, termasuk saat folder / pencarian).
      */
     private function pricePage(int $outletId, string $search, ?string $folder = null, bool $latest = false, string $promo = '', string $sort = '', string $sortDir = 'asc'): LengthAwarePaginator
     {
@@ -368,15 +385,12 @@ class OutletPriceController extends Controller
             } else {
                 // Urutan:
                 //  - "Terakhir Ditambahkan": yang paling baru dibuat di atas.
-                //  - "Semua Barang (A-Z)" (tanpa folder & tanpa pencarian): abjad nama produk.
-                //  - Folder apa pun & hasil pencarian: aturan harga yang paling baru diperbarui di atas
-                //    (aturan baru / habis diedit langsung ada di urutan pertama).
+                //  - Selain itu (Semua Barang, folder apa pun, hasil pencarian, filter diskon): abjad nama produk (A-Z).
+                //    Tidak lagi menurut waktu diperbarui, supaya urutan tetap stabil setelah barang diedit.
                 $query->when(
                     $latest,
                     fn ($q) => $q->orderByDesc('outlet_prices.created_at')->orderByDesc('outlet_prices.id'),
-                    fn ($q) => ($folder !== null || $search !== '')
-                        ? $q->orderByDesc('outlet_prices.updated_at')->orderByDesc('outlet_prices.id')
-                        : $q->orderBy('products.name')->orderBy('outlet_prices.id')
+                    fn ($q) => $q->orderBy('products.name')->orderBy('outlet_prices.id')
                 );
             }
 
@@ -423,9 +437,9 @@ class OutletPriceController extends Controller
                     ->where('name', 'like', $prefix)
                     ->orWhere('code', 'like', $prefix))))
             // Filter diskon langsung dari kolom outlet_prices (tanpa hitung per baris).
-            ->when($promo === 'diskon', function ($query) {
-                $query->where(function ($q) {
-                    foreach (self::DISCOUNT_COLUMNS as $column) {
+            ->when(isset(self::PROMO_COLUMNS[$promo]), function ($query) use ($promo) {
+                $query->where(function ($q) use ($promo) {
+                    foreach (self::PROMO_COLUMNS[$promo] as $column) {
                         $q->orWhereRaw("COALESCE(outlet_prices.{$column}, 0) > 0");
                     }
                 });

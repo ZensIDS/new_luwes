@@ -231,6 +231,9 @@
                                 @if (($promoFilter ?? '') !== '') style="border-color:#e0577a" @endif>
                                 <option value="" {{ ($promoFilter ?? '') === '' ? 'selected' : '' }}>Semua</option>
                                 <option value="diskon" {{ ($promoFilter ?? '') === 'diskon' ? 'selected' : '' }}>Dengan diskon</option>
+                                <option value="disc_reg" {{ ($promoFilter ?? '') === 'disc_reg' ? 'selected' : '' }}>Dengan Disc Reg</option>
+                                <option value="disc_12" {{ ($promoFilter ?? '') === 'disc_12' ? 'selected' : '' }}>Dengan Disc 1 / Disc 2</option>
+                                <option value="disc_toko" {{ ($promoFilter ?? '') === 'disc_toko' ? 'selected' : '' }}>Dengan Disc Toko</option>
                                 <option value="tanpa" {{ ($promoFilter ?? '') === 'tanpa' ? 'selected' : '' }}>Tanpa diskon</option>
                             </select>
                             @if (($promoFilter ?? '') !== '')
@@ -529,8 +532,8 @@
                 if ($.fn.DataTable.isDataTable('#example1')) {
                     $('#example1').DataTable().destroy();
                 }
-                // The query is already ordered by updated_at DESC. Keep that
-                // order instead of letting DataTables sort by outlet name.
+                // Urutan sudah ditentukan server (A-Z nama produk, atau pilihan sort kolom).
+                // Biarkan seperti itu, jangan diurut ulang oleh DataTables.
                 labelTable = $('#example1').DataTable({
                     dom: 'lrtip', // search bawaan (cocokkan di tengah kata, hanya 25 baris) dimatikan; pakai search server di atas
                     ordering: false,
