@@ -128,7 +128,7 @@
         <div class="modal fade" id="bonModal" tabindex="-1" role="dialog" aria-labelledby="bonModalLabel">
             <div class="modal-dialog modal-sm" role="document">
                 <div class="modal-content">
-                    <form action="{{ route('cashier.drawer-entry', $cashierSession) }}" method="POST">
+                    <form action="{{ route('cashier.drawer-entry', $cashierSession) }}" method="POST" id="bonForm" data-swal-confirm="bon">
                         @csrf
                         <input type="hidden" name="type" value="bon">
                         <div class="modal-header">
@@ -214,7 +214,7 @@
         <div class="modal fade" id="closeCashierModal" tabindex="-1" role="dialog" aria-labelledby="closeCashierModalLabel">
             <div class="modal-dialog" role="document">
                 <div class="modal-content">
-                    <form action="{{ route('cashier.close', $cashierSession) }}" method="POST">
+                    <form action="{{ route('cashier.close', $cashierSession) }}" method="POST" id="closeCashierForm" data-swal-confirm="close">
                         @csrf
                         <div class="modal-header">
                             <button type="button" class="close" data-dismiss="modal">&times;</button>
@@ -282,7 +282,7 @@
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-default" data-dismiss="modal">Batal</button>
-                            <button type="submit" class="btn btn-danger" onclick="return confirm('Tutup sesi kasir dan kembali ke daftar penjualan?')"><i class="fa fa-lock"></i> Tutup kasir</button>
+                            <button type="submit" class="btn btn-danger"><i class="fa fa-lock"></i> Tutup kasir</button>
                         </div>
                     </form>
                 </div>
@@ -292,6 +292,7 @@
 @endsection
 
 @section('page-script')
+    <script>if (typeof Swal === 'undefined') { document.write('<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"><\/script>'); }</script>
     <script>
         window.outlet = @json($outlet);
         window.POS_OUTLET_ID = @json($outlet->id);
@@ -397,6 +398,74 @@
             closing.addEventListener('input', render);
             carry.addEventListener('input', render);
             render();
+        })();
+
+        // Konfirmasi SweetAlert sebelum Simpan BON dan Tutup kasir (form ber-atribut data-swal-confirm).
+        (function () {
+            const toNumber = (value) => Number(String(value || '').replace(/[^\d]/g, '')) || 0;
+            const rp = (value) => 'Rp ' + Math.abs(value).toLocaleString('id-ID');
+            const esc = (value) => String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+            const buildDialog = (kind) => {
+                if (kind === 'bon') {
+                    const amount = toNumber(document.getElementById('bon_amount')?.value);
+                    return {
+                        icon: 'question',
+                        title: 'Simpan BON?',
+                        html: '<p>Uang keluar sebesar <b>' + rp(amount) + '</b> akan dicatat dan mengurangi kas laci.</p>',
+                        confirmButtonText: 'Ya, simpan BON',
+                        confirmButtonColor: '#f0ad4e',
+                    };
+                }
+
+                const closing = toNumber(document.getElementById('closing_cash')?.value);
+                const carry = toNumber(document.getElementById('carry_over_cash')?.value);
+                const diffText = document.getElementById('closeDifferenceText')?.textContent?.trim();
+                const diffRow = diffText && !/^isi uang fisik$/i.test(diffText)
+                    ? '<tr><td>Selisih</td><td class="text-right"><b>' + esc(diffText) + '</b></td></tr>'
+                    : '';
+
+                return {
+                    icon: 'warning',
+                    title: 'Tutup kasir sekarang?',
+                    html: '<table class="table table-condensed" style="margin:0 auto;text-align:left;max-width:360px;">'
+                        + '<tr><td>Uang fisik</td><td class="text-right"><b>' + rp(closing) + '</b></td></tr>'
+                        + '<tr><td>Saldo disisakan besok</td><td class="text-right"><b>' + rp(carry) + '</b></td></tr>'
+                        + '<tr><td>Total uang di laci</td><td class="text-right"><b>' + rp(closing + carry) + '</b></td></tr>'
+                        + diffRow
+                        + '</table>'
+                        + '<p style="margin-top:10px;font-size:12px;color:#777">Sesi kasir akan ditutup dan Anda kembali ke daftar penjualan.</p>',
+                    confirmButtonText: 'Ya, tutup kasir',
+                    confirmButtonColor: '#d9534f',
+                };
+            };
+
+            document.querySelectorAll('form[data-swal-confirm]').forEach((form) => {
+                let submitting = false;
+
+                form.addEventListener('submit', (event) => {
+                    // Setelah dikonfirmasi, form dikirim lewat form.submit() (tidak memicu event ini lagi).
+                    event.preventDefault();
+                    if (submitting) return;
+
+                    const dialog = buildDialog(form.dataset.swalConfirm);
+
+                    if (typeof Swal === 'undefined') {
+                        // Cadangan bila CDN SweetAlert gagal dimuat.
+                        if (window.confirm(dialog.title)) { submitting = true; form.submit(); }
+                        return;
+                    }
+
+                    Swal.fire(Object.assign({
+                        showCancelButton: true,
+                        cancelButtonText: 'Batal',
+                        reverseButtons: true,
+                        allowOutsideClick: false,
+                    }, dialog)).then((result) => {
+                        if (result.isConfirmed) { submitting = true; form.submit(); }
+                    });
+                });
+            });
         })();
 
         // Modal BON & Tutup kasir: kursor langsung di kolom isian utama begitu modal terbuka.

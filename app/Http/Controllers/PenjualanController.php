@@ -78,7 +78,8 @@ class PenjualanController extends Controller
             'cashiers' => $cashiers,
             'selectedCashierId' => $selectedCashierId ? (int) $selectedCashierId : null,
             'isCashier' => $isCashier,
-            'canManageSales' => ! $isStaffOutlet,
+            // Tombol "Buat Penjualan Baru" disembunyikan untuk staff-outlet dan superadmin.
+            'canManageSales' => ! $isStaffOutlet && $user->role !== 'superadmin',
             // Hapus penjualan: hanya superadmin.
             'canDeleteSales' => $user->role === 'superadmin',
         ]);
