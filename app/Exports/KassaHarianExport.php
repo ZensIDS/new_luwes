@@ -201,32 +201,30 @@ class KassaHarianExport extends BaseLaporanTokoExport
         return 'Kassa Harian';
     }
 
+    /** Pola toko (huruf 18, A4 portrait, wrap, tanpa footer): todolist_font_laporan_toko. */
+    protected function tokoLayout(): bool
+    {
+        return true;
+    }
+
     protected function build(SheetWriter $w, Worksheet $sheet, ReportMeta $meta): void
     {
         $data = $this->data();
-        $methods = $data['methods'];
         $rp = Theme::FMT_RUPIAH;
 
+        // Pola toko: 6 kolom inti. Nama Kassa, Saldo Awal, kolom per metode bayar, dan Setoran dibuang
+        // (non tunai diwakili Total Non Tunai, Setoran diwakili Setoran Total).
         $cols = [
-            ['h' => 'Nama Kassa', 'max' => 30],
-            ['h' => 'Nama Kasir', 'wrap' => true, 'w' => 30],
-            ['h' => 'Saldo Awal', 'fmt' => $rp],
+            ['h' => 'Nama Kasir', 'wrap' => true],
             ['h' => 'Penjualan Tunai', 'fmt' => $rp],
-        ];
-        foreach ($methods as $method) {
-            $cols[] = ['h' => $method, 'fmt' => $rp];
-        }
-        $cols = array_merge($cols, [
             ['h' => 'Total Non Tunai', 'fmt' => $rp],
             ['h' => 'Total Pendapatan', 'fmt' => $rp],
             ['h' => 'Bon', 'fmt' => $rp],
-            ['h' => 'Setoran', 'fmt' => $rp],
             ['h' => 'Setoran Total', 'fmt' => $rp],
-        ]);
+        ];
 
         $w->columns($cols)->kop()->info()->header();
 
-        $lastCol = count($cols);
         $outletNow = null;
         $perOutlet = ! $this->outletId;
 
@@ -236,26 +234,18 @@ class KassaHarianExport extends BaseLaporanTokoExport
                 $w->section($outletNow);
             }
 
-            $values = [
-                $row['kassa'].($row['closed'] ? '' : ' (BELUM TUTUP)'),
-                $row['kasir'],
-                $row['opening'],
+            $w->row([
+                $row['kasir'].($row['closed'] ? '' : "\n(BELUM TUTUP)"),
                 $row['tunai'],
-            ];
-            foreach ($methods as $method) {
-                $values[] = (float) ($row['non_cash'][$method] ?? 0.0);
-            }
-            array_push($values, $row['total_non_cash'], $row['total_income'], $row['bon'], $row['setoran'] ?? '-', $row['total_setoran']);
-
-            $w->row($values, $row['closed'] ? [] : ['fill' => Theme::WARN_BG, 'font' => Theme::WARN_FG]);
+                $row['total_non_cash'],
+                $row['total_income'],
+                $row['bon'],
+                $row['total_setoran'],
+            ], $row['closed'] ? [] : ['fill' => Theme::WARN_BG, 'font' => Theme::WARN_FG]);
         }
 
         if ($data['rows']) {
-            $calc = [];
-            for ($c = 3; $c <= $lastCol; $c++) {
-                $calc[$c] = 'sum';
-            }
-            $w->totalRow('TOTAL', $calc, ['grand' => true]);
+            $w->totalRow('TOTAL', [2 => 'sum', 3 => 'sum', 4 => 'sum', 5 => 'sum', 6 => 'sum'], ['grand' => true]);
         }
     }
 }

@@ -25,22 +25,26 @@ class OutletAllStockExport extends BaseLaporanTokoExport
         return 'All Stock';
     }
 
+    /** Pola toko (huruf 18, A4 portrait, wrap, tanpa footer): todolist_font_laporan_toko. */
+    protected function tokoLayout(): bool
+    {
+        return true;
+    }
+
     protected function build(SheetWriter $w, Worksheet $sheet, ReportMeta $meta): void
     {
         $data = app(OutletLaporanService::class)->allStock($this->request);
 
         $w->columns([
-            ['h' => 'Outlet'],
             ['h' => 'Barcode', 'text' => true],
-            ['h' => 'Produk', 'max' => 45],
-            ['h' => 'Kategori'],
+            ['h' => 'Produk', 'max' => 24, 'wrap' => true],
+            ['h' => 'Kategori', 'wrap' => true],
             ['h' => 'Qty', 'fmt' => Theme::FMT_NUMBER],
             ['h' => 'Satuan', 'align' => 'center'],
-            ['h' => 'HPP', 'fmt' => Theme::FMT_RUPIAH, 'min' => 14],
-            ['h' => 'Pajak', 'fmt' => Theme::FMT_RUPIAH, 'min' => 14],
-            ['h' => 'HPP + Pajak', 'fmt' => Theme::FMT_RUPIAH, 'min' => 14],
-            ['h' => 'Persediaan Sebelum Pajak', 'fmt' => Theme::FMT_RUPIAH, 'min' => 18],
-            ['h' => 'Persediaan Setelah Pajak', 'fmt' => Theme::FMT_RUPIAH, 'min' => 18],
+            ['h' => 'HPP', 'fmt' => Theme::FMT_RUPIAH],
+            ['h' => 'HPP + Pajak', 'fmt' => Theme::FMT_RUPIAH],
+            ['h' => 'Persediaan Sebelum Pajak', 'fmt' => Theme::FMT_RUPIAH],
+            ['h' => 'Persediaan Setelah Pajak', 'fmt' => Theme::FMT_RUPIAH],
         ])->kop()->info()->header();
 
         if (collect($data['rows'] ?? [])->isEmpty()) {
@@ -58,8 +62,8 @@ class OutletAllStockExport extends BaseLaporanTokoExport
 
         $close = function () use ($w, &$first, &$label) {
             if ($first !== null) {
-                $w->totalRow('Subtotal '.$label, [5 => 'sum', 10 => 'sum', 11 => 'sum'], [
-                    'from' => $first, 'to' => $w->currentRow() - 1, 'label_col' => 3, 'sub' => true,
+                $w->totalRow('Subtotal '.$label, [4 => 'sum', 8 => 'sum', 9 => 'sum'], [
+                    'from' => $first, 'to' => $w->currentRow() - 1, 'label_col' => 2, 'sub' => true,
                 ]);
             }
             $first = null;
@@ -74,20 +78,21 @@ class OutletAllStockExport extends BaseLaporanTokoExport
             }
 
             $r = $w->currentRow();
+            // Kolom Outlet (ada di baris pemisah) dan Pajak dibuang; HPP + Pajak kini nilai (HPP + pajak).
             $w->row([
-                $row['outlet'], $row['barcode'], $row['product'], $row['category'],
+                $row['barcode'], $row['product'], $row['category'],
                 (float) $row['qty'], $row['satuan'],
-                (float) $row['hpp'], (float) $row['tax'],
-                SheetWriter::f("G{$r}+H{$r}"),   // HPP + Pajak
-                SheetWriter::f("E{$r}*G{$r}"),   // Persediaan sebelum pajak
-                SheetWriter::f("E{$r}*I{$r}"),   // Persediaan setelah pajak
+                (float) $row['hpp'],
+                (float) $row['hpp'] + (float) $row['tax'],   // HPP + Pajak
+                SheetWriter::f("D{$r}*F{$r}"),               // Persediaan sebelum pajak
+                SheetWriter::f("D{$r}*G{$r}"),               // Persediaan setelah pajak
             ]);
             $first ??= $r;
         }
         $close();
 
-        $w->totalRow('TOTAL PERSEDIAAN', [5 => 'sum', 10 => 'sum', 11 => 'sum'], [
-            'grand' => true, 'label_col' => 3,
+        $w->totalRow('TOTAL PERSEDIAAN', [4 => 'sum', 8 => 'sum', 9 => 'sum'], [
+            'grand' => true, 'label_col' => 2,
         ]);
     }
 }

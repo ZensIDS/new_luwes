@@ -20,13 +20,19 @@ class OutletPenjualanRekapSheet extends BaseLaporanTokoExport
         return 'Rekap';
     }
 
+    /** Pola toko (huruf 18, A4 portrait, wrap, tanpa footer): todolist_font_laporan_toko. */
+    protected function tokoLayout(): bool
+    {
+        return true;
+    }
+
     protected function build(SheetWriter $w, Worksheet $sheet, ReportMeta $meta): void
     {
         $summary = $this->data['summary'] ?? [];
 
         $w->columns([
-            ['h' => 'Keterangan', 'w' => 36],
-            ['h' => 'Nilai', 'fmt' => Theme::FMT_RUPIAH, 'w' => 24],
+            ['h' => 'Keterangan', 'min' => 24, 'max' => 30, 'wrap' => true],
+            ['h' => 'Nilai', 'fmt' => Theme::FMT_RUPIAH, 'min' => 17],
         ])->kop()->info()->header();
 
         $w->section('Penjualan per Metode Pembayaran');

@@ -25,13 +25,57 @@ class OutletLaporanService
     public function filters(Request $request): array
     {
         [$start, $end] = $this->dateRange($request);
+        $promotionIds = self::promotionIdsFromRequest($request);
 
         return [
             'outlet_id' => $this->outletId($request),
             'kasir_id' => $request->filled('kasir_id') ? (int) $request->input('kasir_id') : null,
-            'promotion_id' => $request->filled('promotion_id') ? (int) $request->input('promotion_id') : null,
+            'promotion_id' => count($promotionIds) === 1 ? $promotionIds[0] : null,
+            'promotion_ids' => $promotionIds,
             'mulai' => $start->toDateString(),
             'selesai' => $end->toDateString(),
+        ];
+    }
+
+    /**
+     * Rafaksi terpilih dari request: `promotion_ids[]` (boleh lebih dari satu) atau `promotion_id` lama (satu).
+     * Kosong = semua rafaksi.
+     *
+     * @return int[]
+     */
+    public static function promotionIdsFromRequest(Request $request): array
+    {
+        $raw = array_merge(
+            (array) $request->input('promotion_ids', []),
+            $request->filled('promotion_id') ? [$request->input('promotion_id')] : []
+        );
+
+        return array_values(array_unique(array_filter(
+            array_map('intval', array_filter($raw, 'is_scalar')),
+            fn ($id) => $id > 0
+        )));
+    }
+
+    /**
+     * Periode laporan rafaksi. Tanpa rafaksi terpilih = tanggal dari filter. Bila ada yang dipilih,
+     * periodenya dari tanggal rafaksi itu (beberapa rafaksi: paling awal s/d paling akhir); sisi yang
+     * rafaksinya tidak punya tanggal tetap memakai tanggal dari filter.
+     *
+     * @param  \Illuminate\Support\Collection  $promotions  rafaksi terpilih
+     * @return array{0: Carbon, 1: Carbon}
+     */
+    public static function promotionPeriod($promotions, Carbon $start, Carbon $end): array
+    {
+        if ($promotions->isEmpty()) {
+            return [$start, $end];
+        }
+
+        $starts = $promotions->map(fn ($p) => $p->start_at);
+        $ends = $promotions->map(fn ($p) => $p->end_at);
+
+        return [
+            $starts->contains(fn ($d) => $d === null) ? $start : $starts->min()->copy()->startOfDay(),
+            $ends->contains(fn ($d) => $d === null) ? $end : $ends->max()->copy()->endOfDay(),
         ];
     }
 
@@ -218,16 +262,13 @@ class OutletLaporanService
     {
         [$start, $end] = $this->dateRange($request);
         $outletId = $this->outletId($request);
-        $promotionId = $request->filled('promotion_id') ? (int) $request->input('promotion_id') : null;
-        $selectedPromotion = $promotionId ? Promotion::find($promotionId) : null;
-        if ($selectedPromotion) {
-            $start = $selectedPromotion->start_at?->copy()->startOfDay() ?? $start;
-            $end = $selectedPromotion->end_at?->copy()->endOfDay() ?? $end;
-        }
+        $promotionIds = self::promotionIdsFromRequest($request);
+        $selectedPromotions = $promotionIds ? Promotion::whereIn('id', $promotionIds)->get() : collect();
+        [$start, $end] = self::promotionPeriod($selectedPromotions, $start, $end);
 
         $sales = $this->saleQuery($start, $end, $outletId)
-            ->whereHas('promotionApplications', function ($query) use ($promotionId) {
-                $query->when($promotionId, fn ($q) => $q->where('promotion_id', $promotionId));
+            ->whereHas('promotionApplications', function ($query) use ($promotionIds) {
+                $query->when($promotionIds, fn ($q) => $q->whereIn('promotion_id', $promotionIds));
             })
             ->with('items.product')
             ->orderBy('created_at')->orderBy('id')->get();
@@ -237,8 +278,8 @@ class OutletLaporanService
         foreach ($sales as $sale) {
             foreach ($sale->items as $item) {
                 $details = collect(is_array($item->promotion_details) ? $item->promotion_details : []);
-                if ($promotionId) {
-                    $details = $details->filter(fn ($detail) => (int) ($detail['promotion_id'] ?? 0) === $promotionId);
+                if ($promotionIds) {
+                    $details = $details->filter(fn ($detail) => in_array((int) ($detail['promotion_id'] ?? 0), $promotionIds, true));
                 }
                 if ($details->isEmpty()) {
                     continue;
@@ -296,7 +337,7 @@ class OutletLaporanService
         })->sortBy('product')->values();
 
         $promotions = Promotion::query()
-            ->when($promotionId, fn ($query) => $query->whereKey($promotionId))
+            ->when($promotionIds, fn ($query) => $query->whereKey($promotionIds))
             ->get();
 
         return [
