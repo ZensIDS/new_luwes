@@ -266,10 +266,10 @@ class OutletPriceController extends Controller
                 );
 
                 $price->setAttribute('print_price_hpp_after_tax', $calculated['hpp_setelah_pajak']);
-                $price->setAttribute('print_price_margin', $calculated['margin_amount']);
-                $price->setAttribute('print_price_strike', $calculator->money(
-                    $calculated['hpp_setelah_pajak'] + $calculated['margin_amount']
-                ));
+                $plain = $calculator->calculateWithoutDiscount((float) ($latestHpp[$price->product_id] ?? 0), $price, $product);
+                $price->setAttribute('print_price_margin', max(0, $plain['price'] - $plain['hpp_setelah_pajak']));
+                // Harga coret = harga jual tanpa diskon (sama dengan yang dipakai label harga).
+                $price->setAttribute('print_price_strike', $plain['price']);
                 $price->setAttribute('print_price_net', $calculated['price']);
             });
         }

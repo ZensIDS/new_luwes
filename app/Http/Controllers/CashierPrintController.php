@@ -81,27 +81,19 @@ class CashierPrintController extends Controller
 
         $products->each(function (Product $product) use ($calculator, $request) {
             $rule = $product->relationLoaded('outletPrices') ? $product->outletPrices->first() : null;
-            $price = $calculator->calculateItem(
-                app(\App\Services\LatestHpp::class)->fromLoaded(
-                    $product->relationLoaded('ownerStocks') ? $product->ownerStocks : null,
-                    $product->harga_beli
-                ),
-                $rule,
-                $product
+            $hpp = app(\App\Services\LatestHpp::class)->fromLoaded(
+                $product->relationLoaded('ownerStocks') ? $product->ownerStocks : null,
+                $product->harga_beli
             );
-            // Harga coret khusus label: HPP asli (tanpa pajak/diskon apa pun) + margin yang dihitung
-            // dari HPP asli tersebut. Beda dengan master harga jual (margin dari harga dasar setelah diskon).
-            $hppAsli = $calculator->money($price['hpp']);
-            if ($rule) {
-                $marginLabel = strtolower(trim((string) $rule->margin_type)) === 'percentage'
-                    ? $calculator->money($hppAsli * ((float) $rule->margin_value / 100))
-                    : $calculator->money($rule->margin_value);
-            } else {
-                $marginLabel = $price['margin_amount'];
-            }
-            $priceStrike = $calculator->money($hppAsli + $marginLabel);
-            $product->setAttribute('print_price_hpp', $hppAsli);
-            $product->setAttribute('print_price_margin', $marginLabel);
+            $price = $calculator->calculateItem($hpp, $rule, $product);
+
+            // Harga coret khusus label = harga jual versi tanpa diskon apa pun (HPP setelah pajak + margin + pembulatan
+            // yang sama dengan harga jual). Karena diskon hanya menurunkan harga, harga coret tidak pernah lebih murah
+            // dari harga jual.
+            $plain = $calculator->calculateWithoutDiscount($hpp, $rule, $product);
+            $priceStrike = $plain['price'];
+            $product->setAttribute('print_price_hpp', $plain['hpp_setelah_pajak']);
+            $product->setAttribute('print_price_margin', max(0, $priceStrike - $plain['hpp_setelah_pajak']));
             $product->setAttribute('print_price_strike', $priceStrike);
             $product->setAttribute('print_price_net', $price['price']);
             // Persen diskon label = diskon yang diatur di Master Harga Jual (outlet-prices):
@@ -109,7 +101,9 @@ class CashierPrintController extends Controller
             // karena harga jual sudah terkena margin & pembulatan sehingga persennya bisa meleset.
             $discountPercent = $rule ? $this->labelDiscountPercent($price) : 0;
             $discountPercent = max(0, min(99, $discountPercent));
-            $hasDiscount = $discountPercent >= 1;
+            // Pengaman: tanpa penghematan nyata (coret <= harga jual, mis. diskon kecil habis oleh pembulatan),
+            // label dicetak biasa tanpa harga coret dan tanpa badge diskon.
+            $hasDiscount = $discountPercent >= 1 && $priceStrike > $price['price'];
             $product->setAttribute('print_has_discount', $hasDiscount);
             $product->setAttribute('print_discount_percent', $hasDiscount ? $discountPercent : 0);
             $product->setAttribute('print_qty', max(1, min(100, (int) $this->quantityFor($product->id, $request))));
