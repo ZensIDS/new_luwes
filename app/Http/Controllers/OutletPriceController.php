@@ -210,7 +210,13 @@ class OutletPriceController extends Controller
         // Folder khusus "Terakhir Ditambahkan": semua barang, urut dari aturan harga yang paling baru dibuat.
         $showLatest = $search === '' && $activeFolder === null && ! $showAll && $request->boolean('latest');
         // Filter diskon: '' = semua, 'diskon' = punya diskon, 'tanpa' = tanpa diskon (nilai lain dianggap semua).
-        $promo = (string) $request->query('promo', '');
+        // Pencarian baru yang dikirim tanpa parameter promo (mis. dari kotak cari di atas) tidak boleh mereset filter diskon:
+        // pakai filter terakhir di outlet yang sama. "Semua" yang dipilih eksplisit mengirim promo kosong, jadi tetap bisa mereset.
+        $lastView = (array) session(self::LAST_VIEW_SESSION, []);
+        $promo = $request->query('promo');
+        if ($promo === null && $search !== '' && (int) ($lastView['outlet_id'] ?? 0) === (int) $outletId) {
+            $promo = $lastView['promo'] ?? '';
+        }
         $promo = self::isPromoFilter($promo) ? $promo : '';
         // Urutan kolom dari klik header: ?sort=<kunci>&dir=asc|desc (kunci di luar daftar diabaikan).
         $sort = (string) $request->query('sort', '');
@@ -220,6 +226,7 @@ class OutletPriceController extends Controller
 
         if ($outletId) {
             session([self::LAST_VIEW_SESSION => [
+                'outlet_id' => $outletId,
                 'folder' => $activeFolder ?? '',
                 'all' => $showAll,
                 'latest' => $showLatest,
