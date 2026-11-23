@@ -138,6 +138,10 @@ Route::middleware(['role:admin-gudang|staff-outlet|kasir|owner|superadmin'])->gr
     Route::get('/product/check-barcode', [ProductController::class, 'checkBarcode'])
         ->middleware('throttle:120,1')
         ->name('product.check-barcode');
+    // Saran barcode buatan sendiri (awalan huruf + nomor urut)
+    Route::get('/product/suggest-barcode', [ProductController::class, 'suggestBarcode'])
+        ->middleware('throttle:120,1')
+        ->name('product.suggest-barcode');
     Route::resource('/product', ProductController::class);
 
     // Stok Gudang: staff-outlet hanya boleh melihat (index), tidak boleh aksi lain (show/destroy/dll)

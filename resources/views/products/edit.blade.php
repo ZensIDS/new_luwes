@@ -323,4 +323,5 @@
     </script>
     @include('products._harga-beli-script')
     @include('products._barcode-check', ['input' => '#product-code-input', 'url' => route('product.check-barcode'), 'ignoreId' => $product->id])
+    @include('products._barcode-suggest', ['input' => '#product-code-input', 'url' => route('product.suggest-barcode')])
 @endsection

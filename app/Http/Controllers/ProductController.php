@@ -502,6 +502,88 @@ class ProductController extends Controller
         ]);
     }
 
+    /**
+     * Saran barcode buatan sendiri (awalan huruf + nomor urut, mis. K00001 / I00001 / LO00001).
+     * User cukup mengetik awalannya; dikembalikan: jumlah terpakai, nomor berikutnya, kode terakhir, dan nomor kosong.
+     *
+     * - Nomor berikutnya = nomor terbesar + 1, termasuk barang yang sudah dihapus (nomor lama tidak dipakai ulang).
+     * - Nomor kosong hanya dari nomor yang tidak pernah dipakai (barang terhapus dianggap terpakai).
+     * - Hanya kode berpola "huruf + angka saja" yang dihitung, jadi awalan K tidak ikut menghitung KL00001
+     *   dan barcode pabrik (angka semua) tidak tersentuh.
+     */
+    public function suggestBarcode(Request $request)
+    {
+        $typed = strtoupper(trim((string) $request->query('q', '')));
+
+        if (! preg_match('/^([A-Z]{1,10})(\d{0,12})$/', $typed, $m)) {
+            return response()->json(['valid' => false]);
+        }
+
+        [, $prefix, $digits] = $m;
+
+        $rows = Product::withTrashed()
+            ->where('code', 'like', $prefix.'%')
+            ->get(['id', 'code', 'name', 'deleted_at']);
+
+        $items = [];
+        $widths = [];
+        foreach ($rows as $row) {
+            if (! preg_match('/^'.$prefix.'(\d+)$/i', (string) $row->code, $mm)) {
+                continue;
+            }
+            $number = (int) $mm[1];
+            $items[] = ['n' => $number, 'code' => (string) $row->code, 'name' => (string) $row->name, 'trashed' => $row->trashed()];
+            $widths[strlen($mm[1])] = ($widths[strlen($mm[1])] ?? 0) + 1;
+        }
+
+        // Panjang angka mengikuti yang paling banyak dipakai (K00001 = 5 digit); awalan baru = 5 digit.
+        $width = 5;
+        if ($widths) {
+            arsort($widths);
+            $width = (int) array_key_first($widths);
+        }
+        $format = fn (int $n) => $prefix.str_pad((string) $n, $width, '0', STR_PAD_LEFT);
+
+        $used = collect($items)->pluck('n')->unique()->sort()->values();
+        $max = (int) ($used->last() ?? 0);
+        $active = collect($items)->where('trashed', false);
+
+        // Nomor kosong: rentang angka 1..max yang belum pernah dipakai.
+        $gaps = [];
+        $gapTotal = 0;
+        $expected = 1;
+        foreach ($used as $n) {
+            if ($n > $expected) {
+                $gapTotal += $n - $expected;
+                if (count($gaps) < 10) {
+                    $gaps[] = ['from' => $format($expected), 'to' => $format($n - 1), 'count' => $n - $expected];
+                }
+            }
+            $expected = $n + 1;
+        }
+
+        // Kode terakhir (nomor terbesar, barang aktif); bila user sudah mengetik sebagian angka, hanya yang cocok.
+        $recent = $active
+            ->when($digits !== '', fn ($c) => $c->filter(fn ($i) => str_starts_with(strtoupper($i['code']), $prefix.$digits)))
+            ->sortByDesc('n')
+            ->take(5)
+            ->map(fn ($i) => ['code' => $i['code'], 'name' => $i['name']])
+            ->values();
+
+        return response()->json([
+            'valid' => true,
+            'prefix' => $prefix,
+            'digits' => $digits,
+            'width' => $width,
+            'count' => $active->count(),
+            'deleted_count' => count($items) - $active->count(),
+            'next' => $format($max + 1),
+            'recent' => $recent,
+            'gaps' => $gaps,
+            'gap_total' => $gapTotal,
+        ]);
+    }
+
     public function priceHistory(Product $product)
     {
         $activities = Activity::forSubject($product)
