@@ -726,6 +726,7 @@
     @if (isset($categories))
     {{-- Dipasang sebelum script panel supaya submit duplikat ditahan lebih dulu --}}
     @include('products._barcode-check', ['input' => '#new-product-form #product-code-input', 'url' => route('product.check-barcode'), 'ignoreId' => null])
+    @include('products._barcode-suggest', ['input' => '#new-product-form #product-code-input', 'url' => route('product.suggest-barcode')])
     <script>
         $(function () {
             var $panel = $('#new-product-panel');
