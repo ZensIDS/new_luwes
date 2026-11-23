@@ -133,6 +133,28 @@ class PriceCalculator
         ];
     }
 
+    /**
+     * Harga jual versi TANPA diskon (Disc Reg, Disc 1-4, Disc Toko dianggap 0); pajak, margin, penyesuaian outlet
+     * dan pembulatan tetap sama dengan harga jual. Dipakai sebagai harga coret di label.
+     * Diskon hanya bisa menurunkan harga, jadi hasil ini selalu >= calculateItem()['price'] untuk aturan yang sama.
+     */
+    public function calculateWithoutDiscount(float $hpp, ?OutletPrice $rule, ?Product $product = null): array
+    {
+        if (! $rule) {
+            return $this->calculateItem($hpp, null, $product);
+        }
+
+        $plain = $rule->replicate(); // salinan di memori, tidak disimpan
+        foreach ([
+            'disc_brand_value', 'disc_tambahan_value', 'disc_tambahan_2_value',
+            'disc_tambahan_3_value', 'disc_tambahan_4_value', 'disc_toko_value',
+        ] as $field) {
+            $plain->setAttribute($field, 0);
+        }
+
+        return $this->calculateItem($hpp, $plain, $product);
+    }
+
     public function voucherAmount(Voucher $voucher, float $base): float
     {
         $base = $this->money($base);
