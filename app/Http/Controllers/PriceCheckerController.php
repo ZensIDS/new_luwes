@@ -6,7 +6,6 @@ use App\Models\Outlet;
 use App\Models\OutletPrice;
 use App\Models\Product;
 use App\Models\Promotion;
-use App\Models\Voucher;
 use App\Services\LatestHpp;
 use App\Services\PriceCalculator;
 use Illuminate\Http\Request;
@@ -16,7 +15,7 @@ use Illuminate\Support\Str;
 class PriceCheckerController extends Controller
 {
     /**
-     * Hasil lookup (produk, harga, promo, voucher) disimpan sebentar per kombinasi
+     * Hasil lookup (produk, harga, promo) disimpan sebentar per kombinasi
      * (outlet, barcode). Keputusan #4: selisih di bawah 5 menit masih dapat diterima,
      * jadi 60 detik dipilih agar perubahan harga/promo cepat terlihat.
      * Barcode yang tidak ditemukan juga disimpan supaya bot yang menebak barcode
@@ -84,17 +83,31 @@ class PriceCheckerController extends Controller
                 ->first()
             : null;
         // HPP terbaru dipakai untuk semua batch, sama seperti master harga dan POS.
-        $price = $calculator->calculateItem(
-            app(LatestHpp::class)->forProduct((int) $outletId, (int) $product->id),
-            $priceRule,
-            $product
-        );
+        $hpp = app(LatestHpp::class)->forProduct((int) $outletId, (int) $product->id);
+        $price = $calculator->calculateItem($hpp, $priceRule, $product);
 
-        $promotions = $this->activePromotionsForProduct($product, $outletId)
+        // Harga coret HARUS sama dengan label harga (CashierPrintController): harga jual versi
+        // tanpa diskon apa pun, lengkap dengan pajak, margin, penyesuaian outlet dan pembulatan
+        // ke atas kelipatan 100. Tanpa diskon nyata (coret <= harga jual) tidak ada harga coret,
+        // sama seperti label yang dicetak biasa.
+        $priceStrike = (int) $calculator->calculateWithoutDiscount($hpp, $priceRule, $product)['price'];
+        if ($priceStrike <= (int) $price['price']) {
+            $priceStrike = (int) $price['price'];
+        }
+        // Persen diskon sama dengan badge di label (diskon bertingkat Reg + Disc 1-4 + Toko).
+        $discountPercent = $priceRule && $priceStrike > (int) $price['price']
+            ? max(0, min(99, $this->labelDiscountPercent($price)))
+            : 0;
+        if ($discountPercent < 1) {
+            $priceStrike = (int) $price['price'];
+            $discountPercent = 0;
+        }
+
+        // Hanya promo rafaksi (flash_sale) dan bundling (bundle). Voucher sengaja tidak
+        // ditampilkan maupun dihitung karena penempatannya acak.
+        $offers = $this->activePromotionsForProduct($product, $outletId)
             ->map(fn (Promotion $promotion) => $this->formatPromotion($promotion, (int) $price['price'], $calculator))
-            ->values();
-        $vouchers = $this->activeVouchersForProduct($product, $outletId)
-            ->map(fn (Voucher $voucher) => $this->formatVoucher($voucher, (int) $price['price'], $calculator))
+            ->sortBy(fn (array $offer) => $offer['price'] ?? PHP_INT_MAX)
             ->values();
 
         return [
@@ -106,15 +119,47 @@ class PriceCheckerController extends Controller
                     'barcode' => $product->code,
                     'unit' => $product->satuan,
                 ],
-                // Sama seperti halaman master harga barang:
-                // Harga Coret = HPP setelah pajak + margin, Harga Jual POS = harga akhir.
-                'price_strike' => (int) $calculator->money(
-                    $price['hpp_setelah_pajak'] + $price['margin_amount']
-                ),
+                // Sama seperti label harga: Harga Coret = harga jual tanpa diskon,
+                // Harga Jual POS = harga akhir (sudah dibulatkan).
+                'price_strike' => $priceStrike,
+                'discount_percent' => $discountPercent,
                 'price' => (int) $price['price'],
-                'promotions' => $promotions->concat($vouchers)->values()->all(),
+                'promotions' => $offers->all(),
             ],
         ];
+    }
+
+    /**
+     * Persen diskon bertingkat dari aturan harga outlet (Disc Reg + Disc 1-4 + Disc Toko),
+     * identik dengan CashierPrintController::labelDiscountPercent() agar sama dengan label.
+     */
+    private function labelDiscountPercent(array $price): int
+    {
+        $bases = [
+            'disc_brand' => (float) $price['hpp_setelah_pajak'],
+            'disc_tambahan' => (float) $price['harga_akhir'],
+        ];
+        $running = max(0, (float) $price['harga_akhir'] - (float) $price['disc_tambahan_amount']);
+        foreach ([2, 3, 4] as $n) {
+            $bases["disc_tambahan_{$n}"] = $running;
+            $running = max(0, $running - (float) $price["disc_tambahan_{$n}_amount"]);
+        }
+        $bases['disc_toko'] = (float) $price['harga_aktif'];
+
+        $remaining = 1.0;
+        foreach ($bases as $key => $base) {
+            $value = (float) ($price["{$key}_value"] ?? 0);
+            if ($value <= 0) {
+                continue;
+            }
+            $type = strtolower(trim((string) ($price["{$key}_type"] ?? '')));
+            $fraction = $type === 'percentage'
+                ? min(100, $value) / 100
+                : ($base > 0 ? min(1, (float) ($price["{$key}_amount"] ?? 0) / $base) : 0);
+            $remaining *= (1 - $fraction);
+        }
+
+        return (int) round((1 - $remaining) * 100);
     }
 
     /**
@@ -201,7 +246,13 @@ class PriceCheckerController extends Controller
         $promotions = $query
             ->orderBy('priority')
             ->orderBy('id')
-            ->get();
+            ->get()
+            ->filter(fn (Promotion $promotion) => in_array(
+                strtolower(trim((string) $promotion->type)),
+                ['flash_sale', 'bundle'],
+                true
+            ))
+            ->values();
 
         // Daftar syarat paket ("2× produk A + 1× produk B") hanya ditampilkan untuk promo bundle.
         $promotions
@@ -209,38 +260,6 @@ class PriceCheckerController extends Controller
             ->load('promotionProducts.product');
 
         return $promotions;
-    }
-
-    private function activeVouchersForProduct(Product $product, ?int $outletId)
-    {
-        return Voucher::query()
-            ->with(['products', 'outlets'])
-            ->withCount('redemptions')
-            ->where(function ($productQuery) use ($product) {
-                $productQuery
-                    ->where('product_id', $product->id)
-                    ->orWhereHas('products', fn ($productsQuery) => $productsQuery->whereKey($product->id))
-                    ->orWhere(function ($globalQuery) {
-                        $globalQuery->whereNull('product_id')->whereDoesntHave('products');
-                    });
-            })
-            ->where(function ($dateQuery) {
-                $dateQuery->whereNull('start_at')->orWhere('start_at', '<=', now());
-            })
-            ->where(function ($dateQuery) {
-                $dateQuery->whereNull('end_at')->orWhere('end_at', '>=', now());
-            })
-            ->orderBy('id')
-            ->get()
-            ->filter(function (Voucher $voucher) use ($outletId, $product) {
-                $limitAvailable = $voucher->limit === null
-                    || ((int) $voucher->limit > 0 && (int) $voucher->redemptions_count < (int) $voucher->limit);
-
-                return $limitAvailable
-                    && $voucher->appliesToOutlet($outletId)
-                    && $voucher->appliesToProduct($product->id);
-            })
-            ->values();
     }
 
     private function formatPromotion(Promotion $promotion, int $basePrice, PriceCalculator $calculator): array
@@ -330,45 +349,7 @@ class PriceCheckerController extends Controller
             'price' => $promoPrice,
             'discount' => $discount,
             'type' => $type,
-        ];
-    }
-
-    private function formatVoucher(Voucher $voucher, int $basePrice, PriceCalculator $calculator): array
-    {
-        $discount = (int) $calculator->voucherAmount($voucher, $basePrice);
-        $discountType = strtolower(trim((string) $voucher->type));
-        $summary = $discountType === 'percentage'
-            ? 'Voucher diskon '.$this->number($voucher->value).'%'
-            : 'Voucher hemat '.$this->rupiah($voucher->value);
-        $terms = [];
-        $limits = [];
-
-        if ($voucher->min_purchase && (float) $voucher->min_purchase > 0) {
-            $terms[] = 'Min. belanja '.$this->rupiah($voucher->min_purchase);
-        }
-
-        if ($voucher->desc && trim($voucher->desc) !== '') {
-            $terms[] = trim($voucher->desc);
-        }
-
-        if ($voucher->max_discount_amount !== null) {
-            $limits[] = 'Maks. potongan '.$this->rupiah($voucher->max_discount_amount);
-        }
-
-        if ($voucher->limit !== null) {
-            $remaining = max(0, (int) $voucher->limit - (int) $voucher->redemptions_count);
-            $limits[] = 'Sisa pemakaian '.$this->number($remaining).' dari '.$this->number($voucher->limit);
-        }
-
-        return [
-            'name' => $voucher->name ?: 'Voucher',
-            'summary' => $summary,
-            'terms' => $terms,
-            'period' => $this->period($voucher->start_at, $voucher->end_at),
-            'limits' => $limits,
-            'price' => $discount > 0 ? max(0, $basePrice - $discount) : null,
-            'discount' => $discount,
-            'type' => 'voucher',
+            'label' => $type === 'bundle' ? 'Bundling' : 'Promo',
         ];
     }
 
