@@ -5,7 +5,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Cek Harga &amp; Promo — {{ config('app.name', 'LUWES') }}</title>
+    <title>Cek Harga &amp; Promo — {{ config('app.name', 'LUWES PACITAN') }}</title>
     <style>
         :root {
             --ink: #27253d;
@@ -253,12 +253,27 @@
         .promo-name { color: var(--purple); font-size: 12px; font-weight: 800; }
         .promo-summary { color: #5d5a70; font-size: 12px; line-height: 1.45; }
         .no-promo { color: #aaa8b7; }
+        .promo-tag { display: inline-block; margin-right: 6px; padding: 1px 8px; border-radius: 6px; font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #fff; }
+        .promo-tag.is-rafaksi { background: #e5383b; }
+        .promo-tag.is-bundle { background: #6251d8; }
+        .promo-count { display: inline-block; margin-left: 4px; padding: 1px 7px; border-radius: 999px; background: #efeaff; color: var(--purple); font-size: 11px; font-weight: 800; }
+        .promo-item + .promo-item { padding-top: 8px; border-top: 1px dashed var(--line); }
+        .promo-more summary { cursor: pointer; color: var(--purple); font-size: 12px; font-weight: 800; }
+        .promo-more[open] summary { margin-bottom: 8px; }
         .promo-meta { display: grid; gap: 6px; margin-top: 4px; }
         .promo-meta-title { display: block; color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
         .promo-meta ul { margin: 2px 0 0; padding-left: 16px; color: #5d5a70; font-size: 12px; line-height: 1.45; }
         .promo-period { color: #5d5a70; font-size: 12px; line-height: 1.45; }
         .promo-price { color: var(--success); font-size: 16px; font-weight: 800; white-space: nowrap; }
         .promo-price small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; font-weight: 500; text-decoration: line-through; }
+        tr.has-deal td { background: linear-gradient(90deg, #fff7ef, #ffffff 70%); }
+        tr.has-deal td:first-child { box-shadow: inset 4px 0 0 #ff7a2f; }
+        .price-stack { display: grid; gap: 6px; justify-items: start; }
+        .price-normal { color: var(--muted); font-size: 14px; font-weight: 600; text-decoration: line-through; white-space: nowrap; }
+        .disc-badge { padding: 3px 10px; border-radius: 999px; background: #e5383b; color: #fff; font-size: 12px; font-weight: 800; letter-spacing: .02em; }
+        .final-price { color: #d6341f; font-size: 24px; font-weight: 900; line-height: 1.1; white-space: nowrap; }
+        .save-pill { padding: 3px 10px; border-radius: 999px; background: #e6f6ee; color: var(--success); font-size: 12px; font-weight: 800; white-space: nowrap; }
+        .deal-note { color: var(--muted); font-size: 11px; }
         .pos-price { color: var(--success); font-size: 16px; font-weight: 800; white-space: nowrap; }
         .pos-price.is-struck { color: var(--muted); font-size: 13px; font-weight: 500; text-decoration: line-through; }
         .qty { color: var(--ink); font-weight: 750; text-align: center; }
@@ -422,11 +437,11 @@
                 tableWrap.hidden = items.length === 0;
 
                 resultsBody.innerHTML = items.map((item) => {
-                    const promoHtml = item.promotions.length
-                        ? `<div class="promo-list">${item.promotions.map((promo) => `
+                    const MAX_VISIBLE_PROMOS = 3;
+                    const promoCard = (promo) => `
                             <div class="promo-item">
-                                <span class="promo-name">${escapeHtml(promo.name)}</span>
-                                <span class="promo-summary">${escapeHtml(promo.summary)}</span>
+                                <span class="promo-name"><span class="promo-tag ${promo.type === 'bundle' ? 'is-bundle' : 'is-rafaksi'}">${escapeHtml(promo.label || 'Promo')}</span>${escapeHtml(promo.name)}${promo.count > 1 ? ` <span class="promo-count">×${promo.count}</span>` : ''}</span>
+                                <span class="promo-summary">${escapeHtml(promo.summary)}${promo.price !== null && promo.price !== undefined ? ` → <strong>${rupiah(promo.price)}</strong>` : ''}</span>
                                 <div class="promo-meta">
                                     ${section('Syarat', promo.terms)}
                                     <div>
@@ -435,22 +450,38 @@
                                     </div>
                                     ${section('Batasan', promo.limits)}
                                 </div>
-                            </div>`).join('')}</div>`
+                            </div>`;
+                    const visiblePromos = item.promotions.slice(0, MAX_VISIBLE_PROMOS);
+                    const hiddenPromos = item.promotions.slice(MAX_VISIBLE_PROMOS);
+                    const promoHtml = item.promotions.length
+                        ? `<div class="promo-list">${visiblePromos.map(promoCard).join('')}${hiddenPromos.length ? `<details class="promo-more"><summary>Lihat ${hiddenPromos.length} promo lainnya</summary><div class="promo-list">${hiddenPromos.map(promoCard).join('')}</div></details>` : ''}</div>`
                         : '<span class="no-promo">Tidak ada promo</span>';
-                    const promoPrice = item.promotions.find((promo) => promo.price !== null && promo.price !== undefined);
-                    // Harga Coret ditampilkan sebagai harga biasa (tanpa coret).
-                    const strikePrice = item.price_strike ?? item.price;
-                    // Tanpa promo aktif: tampilkan Harga Jual POS.
-                    // Ada promo aktif: Harga Jual POS dicoret, lalu harga setelah promo.
-                    const promoPriceHtml = promoPrice
-                        ? `<span class="promo-price"><span class="pos-price is-struck">${rupiah(item.price)}</span><br>${rupiah(promoPrice.price)}</span>`
-                        : `<span class="pos-price">${rupiah(item.price)}</span>`;
+                    // Harga promo = harga akhir paling murah di antara semua promo.
+                    const promoPrice = item.promotions
+                        .filter((promo) => promo.price !== null && promo.price !== undefined)
+                        .reduce((best, promo) => (!best || promo.price < best.price ? promo : best), null);
+                    // Harga normal = harga coret (tanpa diskon). Harga akhir = harga termurah setelah
+                    // diskon reguler dan promo. Penghematan dihitung dari harga normal.
+                    const normalPrice = Math.max(item.price_strike ?? item.price, item.price);
+                    const finalPrice = promoPrice ? Math.min(promoPrice.price, item.price) : item.price;
+                    const saving = Math.max(0, normalPrice - finalPrice);
+                    const percent = promoPrice && promoPrice.price < item.price
+                        ? Math.round((saving / normalPrice) * 100)
+                        : (item.discount_percent || 0);
+                    const hasDeal = saving > 0;
 
-                    return `<tr>
+                    const normalPriceHtml = hasDeal
+                        ? `<span class="price-normal">${rupiah(normalPrice)}</span>${percent >= 1 ? `<span class="disc-badge">-${percent}%</span>` : ''}`
+                        : `<span class="price">${rupiah(normalPrice)}</span>`;
+                    const finalPriceHtml = hasDeal
+                        ? `<span class="final-price">${rupiah(finalPrice)}</span><span class="save-pill">Hemat ${rupiah(saving)}</span>${promoPrice && promoPrice.price < item.price ? '' : ''}`
+                        : `<span class="pos-price">${rupiah(finalPrice)}</span>`;
+
+                    return `<tr class="${hasDeal ? 'has-deal' : ''}">
                         <td><div class="product-name">${escapeHtml(item.product.name)}</div><div class="product-code">${escapeHtml(item.product.barcode)}</div></td>
-                        <td><span class="price">${rupiah(strikePrice)}</span></td>
+                        <td><div class="price-stack">${normalPriceHtml}</div></td>
                         <td>${promoHtml}</td>
-                        <td>${promoPriceHtml}</td>
+                        <td><div class="price-stack">${finalPriceHtml}</div></td>
                         <td class="qty">${item.quantity}</td>
                     </tr>`;
                 }).join('');
