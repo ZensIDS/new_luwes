@@ -16,6 +16,9 @@ class OutletRafaksiExport extends BaseLaporanTokoExport
     /** Jeda baris kosong antar tabel rafaksi (2-4). */
     private const TABLE_GAP = 3;
 
+    /** Ukuran huruf per bagian (permintaan user): judul rafaksi 28, header kolom 24, isi 28, baris total 30. */
+    private const FONT_SIZES = ['title' => 28, 'header' => 24, 'body' => 28, 'total' => 30];
+
     public function __construct(private readonly Request $request) {}
 
     protected function makeMeta(): ReportMeta
@@ -31,7 +34,7 @@ class OutletRafaksiExport extends BaseLaporanTokoExport
         return 'Rafaksi';
     }
 
-    /** Pola toko (huruf 18, A4 portrait, wrap, tanpa footer): todolist_font_laporan_toko. */
+    /** Pola toko (A4 portrait, wrap, tanpa footer): todolist_font_laporan_toko. Ukuran huruf per bagian: FONT_SIZES. */
     protected function tokoLayout(): bool
     {
         return true;
@@ -42,7 +45,7 @@ class OutletRafaksiExport extends BaseLaporanTokoExport
         $data = app(OutletLaporanService::class)->rafaksi($this->request);
         $promotions = $data['promotions'] ?? collect();
 
-        $w->columns([
+        $w->fontSizes(self::FONT_SIZES)->columns([
             ['h' => 'Barcode', 'text' => true],
             ['h' => 'Nama Produk', 'max' => 24, 'wrap' => true],
             ['h' => 'Qty Produk Terjual', 'fmt' => Theme::FMT_NUMBER],
