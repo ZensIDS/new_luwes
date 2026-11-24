@@ -59,6 +59,13 @@ final class SheetWriter
     private array $laterHeaders = [];
     private bool $multi = false;
 
+    /**
+     * Ukuran huruf per bagian tabel (opsional): title, header, body, total.
+     * Bagian yang tidak diisi memakai baseFontSize(). Dipakai laporan yang meminta ukuran berbeda
+     * per bagian (mis. Rafaksi Toko); laporan lain tidak terpengaruh.
+     */
+    private array $sizes = [];
+
     /** Style yang harus dipasang setelah format kolom (alignment/format angka khusus). */
     private array $post = [];
 
@@ -85,6 +92,29 @@ final class SheetWriter
     public function baseFontSize(): int
     {
         return $this->toko ? Theme::TOKO_FONT_SIZE : Theme::FONT_SIZE;
+    }
+
+    /** Atur ukuran huruf per bagian tabel: ['title' => 28, 'header' => 24, 'body' => 28, 'total' => 30]. */
+    public function fontSizes(array $sizes): static
+    {
+        $this->sizes = array_filter($sizes, fn ($v) => is_numeric($v) && $v > 0);
+
+        return $this;
+    }
+
+    private function size(string $part): int
+    {
+        return (int) ($this->sizes[$part] ?? $this->baseFontSize());
+    }
+
+    /** Pengali lebar kolom: satuan lebar Excel = huruf dasar, jadi huruf yang lebih besar butuh kolom lebih lebar. */
+    private function widthScale(): float
+    {
+        if ($this->sizes === []) {
+            return 1.0;
+        }
+
+        return max(1.0, max($this->sizes) / $this->baseFontSize());
     }
 
     /** Tandai nilai sebagai rumus Excel: SheetWriter::f('H12*I12'). */
@@ -276,7 +306,7 @@ final class SheetWriter
     {
         $this->style('A'.$r.':'.$this->col($this->colCount).$r, [
             'fill' => $this->fill(Theme::PRIMARY),
-            'font' => $this->font(['bold' => true, 'color' => Theme::ON_PRIMARY]),
+            'font' => $this->font(['bold' => true, 'color' => Theme::ON_PRIMARY, 'size' => $this->size('header')]),
             'alignment' => [
                 'horizontal' => Alignment::HORIZONTAL_CENTER,
                 'vertical' => Alignment::VERTICAL_CENTER,
@@ -363,6 +393,9 @@ final class SheetWriter
         }
 
         $range = 'A'.$r.':'.$this->col($this->colCount).$r;
+        if (isset($this->sizes['body'])) {
+            $this->style($range, ['font' => ['size' => $this->size('body')]]);
+        }
         if (isset($opts['fill']) || isset($opts['font']) || ! empty($opts['bold'])) {
             $this->style($range, $this->rowStyle($opts));
         } elseif ($this->tableRows % 2 === 0) {
@@ -454,7 +487,7 @@ final class SheetWriter
         $sub = ! empty($opts['sub']);
         $this->style('A'.$r.':'.$this->col($this->colCount).$r, [
             'fill' => $this->fill($sub ? Theme::SECONDARY : Theme::TOTAL_BG),
-            'font' => $this->font(['bold' => true, 'color' => Theme::PRIMARY]),
+            'font' => $this->font(['bold' => true, 'color' => Theme::PRIMARY, 'size' => $this->size('total')]),
             'borders' => $sub ? [] : ['top' => ['borderStyle' => Border::BORDER_MEDIUM, 'color' => ['rgb' => Theme::PRIMARY]]],
         ]);
 
@@ -522,6 +555,7 @@ final class SheetWriter
                 $def['min'] ?? 8,
                 min($cap, (int) ceil(($this->maxLen[$i] ?? 8) * $factor) + 2)
             );
+            $width = (int) ceil($width * $this->widthScale());
             $this->sheet->getColumnDimension($L)->setWidth($width);
             $totalWidth += $width;
         }
@@ -599,7 +633,7 @@ final class SheetWriter
     private function styleTitles(float $totalWidth, string $lastL): void
     {
         $perLine = max(20, (int) floor($totalWidth * 0.8));
-        $lineHeight = $this->toko ? Theme::TOKO_ROW_TITLE : 18;
+        $lineHeight = $this->toko ? Theme::TOKO_ROW_TITLE * ($this->size('title') / $this->baseFontSize()) : 18;
 
         foreach ($this->titles as [$r, $text]) {
             if ($this->colCount > 1) {
@@ -607,7 +641,7 @@ final class SheetWriter
             }
             $this->style("A{$r}:{$lastL}{$r}", [
                 'fill' => ['fillType' => Fill::FILL_NONE],
-                'font' => $this->font(['bold' => true, 'color' => Theme::PRIMARY]),
+                'font' => $this->font(['bold' => true, 'color' => Theme::PRIMARY, 'size' => $this->size('title')]),
                 'alignment' => [
                     'horizontal' => Alignment::HORIZONTAL_LEFT,
                     'vertical' => Alignment::VERTICAL_CENTER,
