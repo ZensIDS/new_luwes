@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Outlet;
 use App\Models\OutletPrice;
+use App\Models\OwnerStock;
 use App\Models\Product;
 use App\Models\Promotion;
 use App\Services\LatestHpp;
@@ -55,7 +56,37 @@ class PriceCheckerController extends Controller
             fn () => $this->buildLookup($barcode, $outletId, $calculator)
         );
 
-        return response()->json($result['body'], $result['status']);
+        $body = $result['body'];
+
+        // Stock toko sengaja TIDAK ikut di-cache 60 detik: angkanya berubah tiap ada penjualan,
+        // jadi dihitung segar (1 query SUM) hanya untuk produk yang ditemukan.
+        if ($result['status'] === 200) {
+            $body['stock'] = $this->availableStock($outletId, (int) $body['product']['id']);
+        }
+
+        return response()->json($body, $result['status']);
+    }
+
+    /**
+     * Stock toko tersedia untuk satu produk di satu outlet. Definisi sama dengan POS
+     * (CartController::availableStock): hanya batch qty > 0 yang belum kedaluwarsa.
+     * Batch MINUS tidak dihitung, jadi hasilnya tidak pernah negatif.
+     * Null bila outlet tidak diketahui.
+     */
+    private function availableStock(?int $outletId, int $productId): ?int
+    {
+        if (! $outletId) {
+            return null;
+        }
+
+        return (int) OwnerStock::query()
+            ->where('owner_id', $outletId)
+            ->where('product_id', $productId)
+            ->where('qty', '>', 0)
+            ->where(function ($expiryQuery) {
+                $expiryQuery->whereNull('expired_at')->orWhere('expired_at', '>=', today()->toDateString());
+            })
+            ->sum('qty');
     }
 
     /**

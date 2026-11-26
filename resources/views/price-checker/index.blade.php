@@ -276,7 +276,8 @@
         .deal-note { color: var(--muted); font-size: 11px; }
         .pos-price { color: var(--success); font-size: 16px; font-weight: 800; white-space: nowrap; }
         .pos-price.is-struck { color: var(--muted); font-size: 13px; font-weight: 500; text-decoration: line-through; }
-        .qty { color: var(--ink); font-weight: 750; text-align: center; }
+        .stock-qty { color: var(--ink); font-size: 16px; font-weight: 800; text-align: center; white-space: nowrap; }
+        .stock-qty.is-empty { color: var(--danger); }
 
         .footer-note {
             margin-top: 20px;
@@ -336,7 +337,7 @@
             </form>
             <div class="scan-help">
                 <span>Gunakan scanner barcode. Pencarian berjalan otomatis setelah scan.</span>
-                <span>Hasil dikosongkan setelah 30 detik tanpa scan baru.</span>
+                <span>Hasil dikosongkan setelah 5 detik tanpa scan baru.</span>
             </div>
         </section>
 
@@ -367,7 +368,7 @@
                             <th>Harga</th>
                             <th>Promo aktif</th>
                             <th>Harga Promo</th>
-                            <th>Qty</th>
+                            <th>Stock</th>
                         </tr>
                     </thead>
                     <tbody id="results-body"></tbody>
@@ -393,6 +394,10 @@
             let lookupTimer = null;
             let inactivityTimer = null;
             let lookupInProgress = null;
+            let reloadTimer = null;
+
+            const CLEAR_RESULTS_AFTER_MS = 5000;        // hasil dibersihkan 5 detik setelah scan
+            const AUTO_RELOAD_AFTER_MS = 5 * 60 * 1000; // reload otomatis setelah 5 menit tanpa aktivitas
 
             const rupiah = (value) => 'Rp ' + new Intl.NumberFormat('id-ID').format(Number(value || 0));
             const escapeHtml = (value) => String(value ?? '')
@@ -422,7 +427,27 @@
 
             const resetInactivityTimer = () => {
                 clearTimeout(inactivityTimer);
-                inactivityTimer = setTimeout(clearResults, 30000);
+                inactivityTimer = setTimeout(clearResults, CLEAR_RESULTS_AFTER_MS);
+            };
+
+            // Fokus selalu kembali ke input scan agar barang berikutnya langsung bisa di-scan.
+            const focusInput = () => {
+                if (document.activeElement !== input) {
+                    input.focus({ preventScroll: true });
+                }
+            };
+
+            // Auto reload bila 5 menit tidak ada aktivitas (scan, ketik, klik, sentuh).
+            // Reload sekaligus mengambil data harga/promo terbaru.
+            const resetReloadTimer = () => {
+                clearTimeout(reloadTimer);
+                reloadTimer = setTimeout(function tryReload() {
+                    if (lookupInProgress) {
+                        reloadTimer = setTimeout(tryReload, 5000);
+                        return;
+                    }
+                    window.location.reload();
+                }, AUTO_RELOAD_AFTER_MS);
             };
 
             const section = (title, entries) => (entries && entries.length)
@@ -431,8 +456,7 @@
 
             const render = () => {
                 const items = Array.from(results.values());
-                const totalQty = items.reduce((total, item) => total + item.quantity, 0);
-                resultCount.textContent = `${items.length} ${items.length === 1 ? 'produk' : 'produk'}${totalQty > items.length ? ` · ${totalQty} item` : ''}`;
+                resultCount.textContent = `${items.length} produk`;
                 emptyState.hidden = items.length > 0;
                 tableWrap.hidden = items.length === 0;
 
@@ -477,12 +501,17 @@
                         ? `<span class="final-price">${rupiah(finalPrice)}</span><span class="save-pill">Hemat ${rupiah(saving)}</span>${promoPrice && promoPrice.price < item.price ? '' : ''}`
                         : `<span class="pos-price">${rupiah(finalPrice)}</span>`;
 
+                    // Stock toko tersedia (dari server). Null = outlet tidak diketahui.
+                    const stockValue = item.stock === null || item.stock === undefined ? null : Number(item.stock);
+                    const stockText = stockValue === null ? '-' : new Intl.NumberFormat('id-ID').format(stockValue);
+                    const stockEmpty = stockValue !== null && stockValue <= 0;
+
                     return `<tr class="${hasDeal ? 'has-deal' : ''}">
                         <td><div class="product-name">${escapeHtml(item.product.name)}</div><div class="product-code">${escapeHtml(item.product.barcode)}</div></td>
                         <td><div class="price-stack">${normalPriceHtml}</div></td>
                         <td>${promoHtml}</td>
                         <td><div class="price-stack">${finalPriceHtml}</div></td>
-                        <td class="qty">${item.quantity}</td>
+                        <td class="stock-qty ${stockEmpty ? 'is-empty' : ''}">${stockText}</td>
                     </tr>`;
                 }).join('');
             };
@@ -491,6 +520,7 @@
                 if (lookupInProgress === barcode) return;
 
                 lookupInProgress = barcode;
+                resetReloadTimer();
                 const params = new URLSearchParams({ barcode });
                 if (outletId) params.set('outlet_id', outletId);
 
@@ -507,16 +537,14 @@
                     }
 
                     const key = String(payload.product.barcode);
-                    const existing = results.get(key);
-                    results.set(key, {
-                        ...payload,
-                        quantity: existing ? existing.quantity + 1 : 1,
-                    });
+                    results.set(key, payload);
                     render();
                     input.value = '';
                     resetInactivityTimer();
                 } catch (error) {
                     showNotice(error.message || 'Terjadi kendala saat mengecek produk.');
+                    input.value = '';
+                    resetInactivityTimer();
                 } finally {
                     lookupInProgress = null;
                     input.focus();
@@ -525,6 +553,7 @@
 
             input.addEventListener('input', () => {
                 resetInactivityTimer();
+                resetReloadTimer();
                 clearTimeout(lookupTimer);
                 const barcode = input.value.trim();
                 if (!barcode || lookupInProgress) return;
@@ -541,8 +570,25 @@
                 if (barcode) lookup(barcode);
             });
 
+            // Autofocus: saat load, refresh, kembali ke tab/halaman, klik di mana saja, atau blur.
+            input.addEventListener('blur', () => setTimeout(focusInput, 0));
+            document.addEventListener('click', () => setTimeout(focusInput, 0));
+            document.addEventListener('keydown', focusInput);
+            window.addEventListener('focus', focusInput);
+            window.addEventListener('pageshow', focusInput);
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) focusInput();
+            });
+            setInterval(focusInput, 1000); // pengaman bila fokus hilang karena sebab lain
+
+            // Aktivitas apa pun mereset hitungan auto reload.
+            ['keydown', 'pointerdown', 'touchstart'].forEach((eventName) => {
+                document.addEventListener(eventName, resetReloadTimer, { passive: true });
+            });
+
             render();
-            input.focus();
+            focusInput();
+            resetReloadTimer();
         })();
     </script>
 </body>
