@@ -70,6 +70,15 @@ final class SheetWriter
     private array $post = [];
 
     /**
+     * Mode siap cetak hitam-putih (plainPrint): header tabel dan baris total berlatar putih bertulisan hitam,
+     * garis tabel hitam tipis, judul tabel hitam. Default false = tema biru (laporan lain tidak berubah).
+     */
+    private bool $plain = false;
+
+    /** Zoom layar khusus (persen); null = Theme::TOKO_ZOOM. */
+    private ?int $zoom = null;
+
+    /**
      * @param bool $toko pola toko (todolist_font_laporan_toko). Default false = tampilan lama.
      *                   Bila true, font default workbook menjadi Theme::TOKO_FONT_SIZE supaya lebar
      *                   kolom Excel (satuan karakter font default) tetap sesuai rumus lebar.
@@ -94,7 +103,23 @@ final class SheetWriter
         return $this->toko ? Theme::TOKO_FONT_SIZE : Theme::FONT_SIZE;
     }
 
-    /** Atur ukuran huruf per bagian tabel: ['title' => 28, 'header' => 24, 'body' => 28, 'total' => 30]. */
+    /** Mode siap cetak hitam-putih (lihat properti $plain). */
+    public function plainPrint(bool $on = true): static
+    {
+        $this->plain = $on;
+
+        return $this;
+    }
+
+    /** Zoom layar sheet (persen), mis. 50 untuk huruf besar. */
+    public function zoom(int $percent): static
+    {
+        $this->zoom = $percent;
+
+        return $this;
+    }
+
+    /** Atur ukuran huruf per bagian: kop, info, title, header, body, total (bagian yang tidak diisi memakai ukuran dasar). */
     public function fontSizes(array $sizes): static
     {
         $this->sizes = array_filter($sizes, fn ($v) => is_numeric($v) && $v > 0);
@@ -305,8 +330,8 @@ final class SheetWriter
     private function applyHeaderStyle(int $r): void
     {
         $this->style('A'.$r.':'.$this->col($this->colCount).$r, [
-            'fill' => $this->fill(Theme::PRIMARY),
-            'font' => $this->font(['bold' => true, 'color' => Theme::ON_PRIMARY, 'size' => $this->size('header')]),
+            'fill' => $this->fill($this->plain ? 'FFFFFF' : Theme::PRIMARY),
+            'font' => $this->font(['bold' => true, 'color' => $this->plain ? '000000' : Theme::ON_PRIMARY, 'size' => $this->size('header')]),
             'alignment' => [
                 'horizontal' => Alignment::HORIZONTAL_CENTER,
                 'vertical' => Alignment::VERTICAL_CENTER,
@@ -398,7 +423,7 @@ final class SheetWriter
         }
         if (isset($opts['fill']) || isset($opts['font']) || ! empty($opts['bold'])) {
             $this->style($range, $this->rowStyle($opts));
-        } elseif ($this->tableRows % 2 === 0) {
+        } elseif (! $this->plain && $this->tableRows % 2 === 0) { // mode plainPrint: semua baris putih, tanpa selang-seling
             $this->style($range, ['fill' => $this->fill(Theme::ZEBRA)]);
         }
 
@@ -486,9 +511,9 @@ final class SheetWriter
 
         $sub = ! empty($opts['sub']);
         $this->style('A'.$r.':'.$this->col($this->colCount).$r, [
-            'fill' => $this->fill($sub ? Theme::SECONDARY : Theme::TOTAL_BG),
-            'font' => $this->font(['bold' => true, 'color' => Theme::PRIMARY, 'size' => $this->size('total')]),
-            'borders' => $sub ? [] : ['top' => ['borderStyle' => Border::BORDER_MEDIUM, 'color' => ['rgb' => Theme::PRIMARY]]],
+            'fill' => $this->fill($this->plain ? 'FFFFFF' : ($sub ? Theme::SECONDARY : Theme::TOTAL_BG)),
+            'font' => $this->font(['bold' => true, 'color' => $this->plain ? '000000' : Theme::PRIMARY, 'size' => $this->size('total')]),
+            'borders' => ($sub || $this->plain) ? [] : ['top' => ['borderStyle' => Border::BORDER_MEDIUM, 'color' => ['rgb' => Theme::PRIMARY]]],
         ]);
 
         if (! empty($opts['grand'])) {
@@ -555,7 +580,8 @@ final class SheetWriter
                 $def['min'] ?? 8,
                 min($cap, (int) ceil(($this->maxLen[$i] ?? 8) * $factor) + 2)
             );
-            $width = (int) ceil($width * $this->widthScale());
+            // 'exact' => true: lebar dipakai apa adanya (tanpa pengali huruf besar), mis. mengikuti contoh Excel pengguna.
+            $width = ! empty($def['exact']) && isset($def['w']) ? (float) $def['w'] : (int) ceil($width * $this->widthScale());
             $this->sheet->getColumnDimension($L)->setWidth($width);
             $totalWidth += $width;
         }
@@ -583,7 +609,7 @@ final class SheetWriter
 
         // Tampilan.
         $this->sheet->setShowGridlines(false);
-        $this->sheet->getSheetView()->setZoomScale($this->toko ? Theme::TOKO_ZOOM : 95);
+        $this->sheet->getSheetView()->setZoomScale($this->toko ? ($this->zoom ?? Theme::TOKO_ZOOM) : 95);
         $this->sheet->getTabColor()->setRGB(Theme::PRIMARY);
 
         // Cetak: landscape A4 (pola toko: portrait A4), muat satu halaman lebar, header berulang.
@@ -632,8 +658,14 @@ final class SheetWriter
     /** Judul tabel: digabung selebar tabel, tebal, wrap; tinggi baris diperkirakan dari panjang teks (sel gabungan tidak auto-fit). */
     private function styleTitles(float $totalWidth, string $lastL): void
     {
-        $perLine = max(20, (int) floor($totalWidth * 0.8));
-        $lineHeight = $this->toko ? Theme::TOKO_ROW_TITLE * ($this->size('title') / $this->baseFontSize()) : 18;
+        $custom = $this->toko && isset($this->sizes['title']);
+        // Ukuran judul khusus: 1 satuan lebar kolom = lebar angka huruf dasar (~0,507 em); huruf tebal ~0,58 em per karakter.
+        $perLine = $custom
+            ? max(20, (int) floor($totalWidth * 0.507 * $this->baseFontSize() / ($this->size('title') * 0.58)))
+            : max(20, (int) floor($totalWidth * 0.8));
+        $lineHeight = $custom
+            ? $this->size('title') * 1.269 // 40 pt => 50,75 pt (tinggi satu baris Calibri)
+            : ($this->toko ? Theme::TOKO_ROW_TITLE * ($this->size('title') / $this->baseFontSize()) : 18);
 
         foreach ($this->titles as [$r, $text]) {
             if ($this->colCount > 1) {
@@ -641,7 +673,7 @@ final class SheetWriter
             }
             $this->style("A{$r}:{$lastL}{$r}", [
                 'fill' => ['fillType' => Fill::FILL_NONE],
-                'font' => $this->font(['bold' => true, 'color' => Theme::PRIMARY, 'size' => $this->size('title')]),
+                'font' => $this->font(['bold' => true, 'color' => $this->plain ? '000000' : Theme::PRIMARY, 'size' => $this->size('title')]),
                 'alignment' => [
                     'horizontal' => Alignment::HORIZONTAL_LEFT,
                     'vertical' => Alignment::VERTICAL_CENTER,
@@ -650,7 +682,7 @@ final class SheetWriter
                 'borders' => ['allBorders' => ['borderStyle' => Border::BORDER_NONE]],
             ]);
             $lines = max(1, (int) ceil(mb_strlen($text) / $perLine));
-            $this->sheet->getRowDimension($r)->setRowHeight($lines * $lineHeight + 4);
+            $this->sheet->getRowDimension($r)->setRowHeight($lines * $lineHeight + ($custom ? 0 : 4));
         }
     }
 
@@ -662,7 +694,7 @@ final class SheetWriter
         $name = (string) ($this->meta->settings['name'] ?? config('app.name'));
 
         $this->str('A1', $name);
-        $this->style('A1', ['font' => $this->font(['bold' => true, 'color' => Theme::PRIMARY])]);
+        $this->style('A1', ['font' => $this->font(['bold' => true, 'color' => Theme::PRIMARY, 'size' => $this->size('kop')])]);
         $this->sheet->getRowDimension(1)->setRowHeight(Theme::TOKO_ROW_KOP);
 
         $this->style('A1:'.$this->col($this->colCount).'1', [
@@ -679,7 +711,7 @@ final class SheetWriter
     private function infoToko(): static
     {
         $this->str('A'.$this->row, $this->meta->title);
-        $this->style('A'.$this->row, ['font' => $this->font(['bold' => true, 'color' => Theme::PRIMARY])]);
+        $this->style('A'.$this->row, ['font' => $this->font(['bold' => true, 'color' => Theme::PRIMARY, 'size' => $this->size('info')])]);
         $this->sheet->getRowDimension($this->row)->setRowHeight(Theme::TOKO_ROW_TITLE);
         $this->row++;
 
@@ -784,10 +816,10 @@ final class SheetWriter
     {
         $rt = new RichText();
         $l = $rt->createTextRun($label.' : ');
-        $l->getFont()->setName(Theme::FONT)->setSize($this->baseFontSize())->setBold(true)
+        $l->getFont()->setName(Theme::FONT)->setSize($this->size('info'))->setBold(true)
             ->setColor(new Color('FF'.Theme::MUTED));
         $v = $rt->createTextRun($value);
-        $v->getFont()->setName(Theme::FONT)->setSize($this->baseFontSize())
+        $v->getFont()->setName(Theme::FONT)->setSize($this->size('info'))
             ->setColor(new Color('FF'.Theme::TEXT));
 
         $this->sheet->getCell($coord)->setValue($rt);
@@ -816,7 +848,7 @@ final class SheetWriter
 
     private function borders(): array
     {
-        return ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => Theme::BORDER]]];
+        return ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => $this->plain ? '000000' : Theme::BORDER]]];
     }
 
     private function rowStyle(array $o): array
