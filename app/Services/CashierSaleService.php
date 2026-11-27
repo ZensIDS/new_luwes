@@ -194,7 +194,10 @@ class CashierSaleService
             // total belanja, dicatat terpisah (tidak ikut grand_total / omzet), dan ditagihkan ke pelanggan.
             $paymentMethod = ! empty($data['payment_method_id']) ? PaymentMethod::find($data['payment_method_id']) : null;
             $feePercent = $paymentMethod ? max(0.0, min(100.0, (float) $paymentMethod->charge_percent)) : 0.0;
-            $feeAmount = $feePercent > 0 ? (float) round($grandTotal * $feePercent / 100) : 0.0;
+            // Bilangan bulat (persen x 10.000) supaya hasilnya identik dengan perhitungan di PaymentModal.jsx
+            // dan tidak terpengaruh error floating point (42500 * 0.7 / 100 = 297.49999...).
+            $feeScaled = (int) round($feePercent * 10000);
+            $feeAmount = $feePercent > 0 ? (float) round(($grandTotal * $feeScaled) / 1000000, 0, PHP_ROUND_HALF_UP) : 0.0;
             $amountDue = $grandTotal + $feeAmount;
             // Nominal fix: uang diterima otomatis pas, nilai dari client diabaikan.
             $paidAmount = $paymentMethod?->is_fixed_amount ? $amountDue : (float) ($data['paid_amount'] ?? 0);
