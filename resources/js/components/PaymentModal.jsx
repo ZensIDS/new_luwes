@@ -44,7 +44,10 @@ const PaymentModal = ({ open, grandTotal, paymentMethods, initialMethodId, initi
     const isCash = !method.id || /tunai|cash/i.test(method.name || "");
     const feePercent = Number(method.charge_percent || 0);
     // Pembulatan biaya ke rupiah penuh; server menghitung ulang dengan cara yang sama.
-    const fee = feePercent > 0 ? Math.round(grandTotal * feePercent / 100) : 0;
+    // Hitung dengan bilangan bulat (persen x 10.000) agar tidak kena error floating point
+    // (42500 * 0.7 / 100 = 297.49999 -> terbulat 297, padahal server menghitung 298).
+    const feeScaled = Math.round(feePercent * 10000);
+    const fee = feePercent > 0 ? Math.round((grandTotal * feeScaled) / 1000000) : 0;
     const amountDue = grandTotal + fee;
     const fixed = Boolean(method.id) && Boolean(method.is_fixed_amount);
 
